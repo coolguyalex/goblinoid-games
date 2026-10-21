@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Pong 3D</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0b1020; color: #e8ecf8; overflow: hidden;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  canvas { display: block; touch-action: none; }
+  #hud { position: fixed; top: max(14px, env(safe-area-inset-top)); left: 0; right: 0; text-align: center;
+    pointer-events: none; font-variant-numeric: tabular-nums; }
+  #score { font-size: 34px; font-weight: 700; letter-spacing: 0.08em; }
+  #score .you { color: #5ad1ff; } #score .cpu { color: #ff7a7a; }
+  #labels { font-size: 12px; opacity: 0.65; letter-spacing: 0.12em; text-transform: uppercase; }
+  #overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: rgba(5, 8, 18, 0.62); cursor: pointer; }
+  #overlay .box { text-align: center; padding: 24px; max-width: 26em; }
+  #overlay h1 { margin: 0 0 6px; font-size: 40px; }
+  #overlay p { margin: 6px 0; opacity: 0.85; line-height: 1.45; }
+  #overlay .go { margin-top: 16px; display: inline-block; padding: 10px 22px; border-radius: 999px;
+    background: #5ad1ff; color: #0b1020; font-weight: 700; }
+  #status { position: fixed; bottom: max(10px, env(safe-area-inset-bottom)); left: 0; right: 0; text-align: center;
+    font-size: 11px; opacity: 0.5; pointer-events: none; }
+  #error { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; padding: 24px;
+    text-align: center; background: #0b1020; }
+</style>
+</head>
+<body>
+<div id="hud">
+  <div id="score"><span class="you" id="youScore">0</span> : <span class="cpu" id="cpuScore">0</span></div>
+  <div id="labels">you &nbsp;·&nbsp; cpu</div>
+</div>
+<div id="overlay">
+  <div class="box">
+    <h1 id="title">Pong 3D</h1>
+    <p id="msg">Move your paddle with the mouse, arrow keys / A·D, or by dragging on a touch screen. First to 7 wins.</p>
+    <span class="go" id="goBtn">Click or tap to play</span>
+  </div>
+</div>
+<div id="status">Three.js r<span id="ver">?</span> · hosting test page</div>
+<div id="error"><p>Something went wrong loading the game.<br><small id="errText"></small></p></div>
+
+<script>
+  // If the module below fails to load (blocked file, very old browser), say so instead of showing a blank page.
+  window.addEventListener("error", function (e) {
+    var el = document.getElementById("error");
+    document.getElementById("errText").textContent = e.message || "A script failed to load.";
+    el.style.display = "flex";
+  }, true);
+</script>
+<script type="importmap">{ "imports": { "three": "./vendor/three.module.min.js" } }</script>
+<script type="module" src="./game.js"></script>
+</body>
+</html>
