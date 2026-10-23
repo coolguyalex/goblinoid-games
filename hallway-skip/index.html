@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#1d2230">
+<title>Hallway Skip</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #1d2230; color: #fff;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; touch-action: none; }
+  canvas { display: block; touch-action: none; }
+
+  /* HUD */
+  #hud { position: fixed; inset: 0; pointer-events: none; }
+  #phase { position: absolute; top: max(10px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%);
+    text-align: center; text-shadow: 0 2px 4px rgba(0,0,0,.6); }
+  #phase .label { font-size: 13px; letter-spacing: .14em; font-weight: 700; opacity: .9; }
+  #phase .timer { font-size: 30px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.1; }
+  #phase.passing .label { color: #9fe0ff; } #phase.skipping .label { color: #ffd36b; }
+  #score { position: absolute; top: max(10px, env(safe-area-inset-top)); right: max(14px, env(safe-area-inset-right));
+    font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; text-shadow: 0 2px 4px rgba(0,0,0,.6); }
+  #fps { position: absolute; bottom: 6px; right: 8px; font: 11px ui-monospace, monospace; opacity: .7; }
+  #banner { position: absolute; top: 28%; left: 0; right: 0; text-align: center; font-size: 30px; font-weight: 900;
+    letter-spacing: .04em; text-shadow: 0 3px 8px rgba(0,0,0,.7); opacity: 0; transition: opacity .25s; padding: 0 16px; }
+  #banner small { display: block; font-size: 15px; font-weight: 600; opacity: .9; margin-top: 4px; }
+  #banner.show { opacity: 1; }
+
+  /* staff markers: "?" / "!" above heads, arrows at screen edge when offscreen */
+  .alert { position: absolute; transform: translate(-50%, -100%); font-size: 26px; font-weight: 900;
+    text-shadow: 0 2px 4px rgba(0,0,0,.7); }
+  .edge { position: absolute; width: 0; height: 0; border-left: 13px solid transparent; border-right: 13px solid transparent;
+    border-bottom: 24px solid #ffe066; transform-origin: 50% 60%; filter: drop-shadow(0 2px 3px rgba(0,0,0,.6)); }
+
+  /* virtual joystick */
+  #stickBase, #stickKnob { position: fixed; border-radius: 50%; pointer-events: none; display: none; }
+  #stickBase { width: 120px; height: 120px; margin: -60px 0 0 -60px; background: rgba(255,255,255,.08);
+    border: 2px solid rgba(255,255,255,.28); }
+  #stickKnob { width: 54px; height: 54px; margin: -27px 0 0 -27px; background: rgba(255,255,255,.4); }
+
+  /* overlays */
+  .overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: rgba(12, 14, 22, .72); padding: 16px; text-align: center; cursor: pointer; }
+  .overlay[hidden] { display: none; }
+  .overlay h1 { margin: 0 0 4px; font-size: clamp(34px, 7vw, 58px); letter-spacing: .03em; }
+  .overlay p { margin: 6px auto; max-width: 30em; line-height: 1.45; opacity: .9; }
+  .overlay .tag { display: inline-block; font-size: 12px; letter-spacing: .14em; text-transform: uppercase;
+    opacity: .65; margin-bottom: 10px; }
+  .overlay .go { display: inline-block; margin-top: 14px; padding: 12px 26px; border-radius: 999px;
+    background: #ffd36b; color: #1d2230; font-weight: 800; }
+  .overlay .keys { font-size: 13px; opacity: .7; }
+  #caught h1 { color: #ff6b6b; }
+  #rotate { position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
+    background: #1d2230; text-align: center; padding: 24px; font-size: 20px; font-weight: 700; z-index: 5; }
+  @media (orientation: portrait) and (pointer: coarse) { #rotate { display: flex; } }
+  #error { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; padding: 24px;
+    text-align: center; background: #1d2230; z-index: 10; }
+</style>
+</head>
+<body>
+<div id="hud">
+  <div id="phase"><div class="label" id="phaseLabel">DAY 1 · PERIOD 1 · PASSING</div><div class="timer" id="timer">0:25</div></div>
+  <div id="score">0</div>
+  <div id="banner"></div>
+  <div id="markers"></div>
+  <div id="fps" hidden></div>
+</div>
+<div id="stickBase"></div><div id="stickKnob"></div>
+
+<div class="overlay" id="title">
+  <div>
+    <span class="tag">prototype · build step 1</span>
+    <h1>Hallway Skip</h1>
+    <p>Slip out with the crowd, then stay out of class until the next bell. Keep out of the hall monitor's cone. If you're spotted, break line of sight.</p>
+    <p class="keys">Phone: left thumb moves, drag on the right side to look around.<br>Desktop: WASD or arrow keys move, drag the mouse to look.</p>
+    <span class="go">Tap to start</span>
+  </div>
+</div>
+<div class="overlay" id="caught" hidden>
+  <div>
+    <h1>Busted!</h1>
+    <p id="caughtText"></p>
+    <span class="go">Tap to try again</span>
+  </div>
+</div>
+<div class="overlay" id="paused" hidden>
+  <div><h1>Paused</h1><span class="go">Tap to resume</span></div>
+</div>
+<div id="rotate">Turn your phone sideways to play</div>
+<div id="error"><p>Something went wrong loading the game.<br><small id="errText"></small></p></div>
+
+<script>
+  window.addEventListener("error", function (e) {
+    document.getElementById("errText").textContent = e.message || "A script failed to load.";
+    document.getElementById("error").style.display = "flex";
+  }, true);
+</script>
+<script type="importmap">{ "imports": { "three": "./vendor/three.module.min.js" } }</script>
+<script type="module" src="./game.js"></script>
+</body>
+</html>
