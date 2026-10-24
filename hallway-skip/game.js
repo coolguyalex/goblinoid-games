@@ -1,9 +1,10 @@
-// Hallway Skip — build step 5 prototype.
+// Hallway Skip — build step 6 prototype.
 // Step 1: hallway, joystick, a hall monitor that chases, a crowd that thins, and the bell.
 // Step 2: tap-to-interact and hiding spots: lockers, restrooms, classrooms (teacher and sub boot timers).
 // Step 3: security guard, the three-strike ladder, and the PA announcer.
 // Step 4: the six-period day, escalating days, hall teachers, save at the bell. Figure-8 floor plan.
 // Step 5: four-slot hotbar, tap-then-flick throwing with an arc preview, and the first seven items.
+// Step 6: rooms as shops (loot tables by room type, grabbing costs boot time, teachers can call security) and despawn timers.
 import * as THREE from "three";
 
 // =====================================================================================
@@ -99,6 +100,11 @@ const CFG = {
     blinkSec: 5,                  // recoverable items blink for this long before they vanish
   },
 
+  rooms: {
+    grabSec: 1.5,                 // grabbing an item off a desk eats this much of your hiding time (subs: see TEACHER_TYPES)
+    hallItemLifeSec: 45,          // items lying in the halls vanish after this long (blinking at the end)
+  },
+
   footsteps: { hearRange: 20, patrolInterval: 0.55, chaseInterval: 0.3, volume: 0.55 },
 
   strikes: {
@@ -174,11 +180,24 @@ const SPOT_TYPES = {
                stayLine: "Nobody questions a long bathroom break.", timeoutLine: "Someone's pounding on the stall door. Time to go." },
   classroom: { label: "Room", halfW: 0.6 },   // stay time comes from who's teaching
 };
+// Who's in the room. backfire = chance per grab that they pick up the phone and call security.
 const TEACHER_TYPES = {
-  teacher: { label: "Teacher", bootSec: 4, silhouette: 0x2b2f3a,
+  teacher: { label: "Teacher", bootSec: 4, silhouette: 0x2b2f3a, backfire: 0.3,
              stayLine: "\"Can I help you?\"", bootLine: "\"Nice try. Out.\"" },
-  sub:     { label: "Sub", bootSec: 14, silhouette: 0x3a7d44,
+  sub:     { label: "Sub", bootSec: 14, silhouette: 0x3a7d44, backfire: 0.05, grabSec: 0.75,
              stayLine: "The sub is reading a magazine. You're under a desk.", bootLine: "The sub finally looks up: \"Are you even in this class?\"" },
+  office:  { label: "Secretary", bootSec: 3, silhouette: 0x7a4b8c, backfire: 0.5,
+             stayLine: "The secretary is on hold with the district. You duck behind the counter.", bootLine: "\"Do you have an appointment? No? Out.\"" },
+};
+// Rooms as shops: what's lying on the desks, by room type. A new room type is one line.
+const ROOM_TYPES = {
+  classroom: { label: "", loot: [["spitball", 4], ["paperAirplane", 4], ["gum", 3], ["bananaPeel", 1]], count: [1, 2] },
+  science:   { label: "Science lab", plaque: 0x2ecc71, loot: [["bananaPeel", 3], ["whoopee", 2], ["spitball", 2]], count: [1, 2] },
+  art:       { label: "Art room", plaque: 0xe67e22, loot: [["wheelieChair", 3], ["paperAirplane", 3], ["gum", 2]], count: [1, 2] },
+  gym:       { label: "Gym", plaque: 0xe74c3c, loot: [["basketball", 6], ["whoopee", 1]], count: [1, 2] },
+  office:    { label: "Main office", plaque: 0x34495e, door: 0x4a3426, staff: "office", count: [2, 3],
+               loot: [["wheelieChair", 2], ["whoopee", 2], ["basketball", 2], ["bananaPeel", 2]],
+               rarePrize: { points: 300, label: "Raid the confiscated-stuff drawer" } },   // once per day
 };
 
 // Items are data. kind: "throw" (flick it), "ride" (flick to launch yourself), "instant" (tap to use).
@@ -226,11 +245,11 @@ const LAYOUT = {
   entrance: { h: 3, t: 19.5 },
   // classroom doors: hall index, distance along it, room number. Side defaults to the classroom wall.
   doors: [
-    { h: 0, t: 9.75, room: 101 }, { h: 0, t: 19.5, room: 102 }, { h: 0, t: 29.25, room: 103 },
-    { h: 1, t: 8.5, room: 104 }, { h: 6, t: 29, side: -1, room: 105 }, { h: 6, t: 10, side: -1, room: 106 },
+    { h: 0, t: 9.75, room: 101 }, { h: 0, t: 19.5, room: 102, type: "science" }, { h: 0, t: 29.25, room: 103 },
+    { h: 1, t: 8.5, room: 104, type: "art" }, { h: 6, t: 29, side: -1, room: 105, type: "office" }, { h: 6, t: 10, side: -1, room: 106 },
     { h: 5, t: 8.5, room: 107 },
-    { h: 6, t: 14, side: 1, room: 201 }, { h: 6, t: 25, side: 1, room: 202 }, { h: 2, t: 8.5, room: 203 },
-    { h: 3, t: 9.75, room: 204 }, { h: 3, t: 19.5, room: 205 }, { h: 3, t: 29.25, room: 206 }, { h: 4, t: 8.5, room: 207 },
+    { h: 6, t: 14, side: 1, room: 201, type: "gym" }, { h: 6, t: 25, side: 1, room: 202 }, { h: 2, t: 8.5, room: 203, type: "science" },
+    { h: 3, t: 9.75, room: 204 }, { h: 3, t: 19.5, room: 205, type: "art" }, { h: 3, t: 29.25, room: 206 }, { h: 4, t: 8.5, room: 207 },
   ],
   hideLockers: [ { h: 0, t: 4 }, { h: 0, t: 14.5 }, { h: 0, t: 25 }, { h: 0, t: 35 }, { h: 1, t: 4 }, { h: 1, t: 13 },
                  { h: 2, t: 4 }, { h: 3, t: 5 }, { h: 3, t: 27 }, { h: 3, t: 34 }, { h: 4, t: 4 }, { h: 4, t: 13 }, { h: 5, t: 4 } ],
@@ -506,20 +525,22 @@ for (const { h, t } of LAYOUT.restrooms) {
 }
 for (const d of LAYOUT.doors) {
   const H = HALLS[d.h], side = d.side ?? (H.sideType[1] === "block" ? 1 : -1), wl = wallLat(d.h, side);
-  const door = wallBox(d.h, d.t, wl - side * 0.03, 1.2, 2.2, 0.08, 0x8b5a2b, 1.1);
+  const R = ROOM_TYPES[d.type ?? "classroom"];
+  const door = wallBox(d.h, d.t, wl - side * 0.03, 1.2, 2.2, 0.08, R.door ?? 0x8b5a2b, 1.1);
+  if (R.plaque) wallBox(d.h, d.t, wl - side * 0.03, 1.0, 0.24, 0.05, R.plaque, 2.42);   // colored sign over special rooms
   wallBox(d.h, d.t, wl - side * 0.08, 0.5, 0.6, 0.04, 0xa8d8ff, 1.55);
   // the tell: who's visible through the window, plus a sticky note on a sub's door
   const sil = wallBox(d.h, d.t, wl - side * 0.105, 0.2, 0.3, 0.01, 0x2b2f3a, 1.5);
   const note = wallBox(d.h, d.t + 0.32, wl - side * 0.09, 0.2, 0.2, 0.02, 0xf7e463, 1.15);
-  const sp = addSpot("classroom", d.h, d.t, side, { room: d.room, teacher: "teacher", sil, note });
+  const sp = addSpot("classroom", d.h, d.t, side, { room: d.room, roomType: d.type ?? "classroom", R, teacher: R.staff ?? "teacher", sil, note, loot: [], prizeTaken: false });
   sp.glow.push(door.material);
 }
 function rollSubs() {
   const rooms = SPOTS.filter((sp) => sp.kind === "classroom");
   const [lo, hi] = CFG.hiding.subsPerDay;
   let n = lo + Math.floor(Math.random() * (hi - lo + 1));
-  for (const sp of rooms) sp.teacher = "teacher";
-  while (n > 0) { const sp = pick(rooms); if (sp.teacher !== "sub") { sp.teacher = "sub"; n--; } }
+  for (const sp of rooms) { sp.teacher = sp.R.staff ?? "teacher"; sp.prizeTaken = false; }
+  while (n > 0) { const sp = pick(rooms); if (sp.teacher === "teacher") { sp.teacher = "sub"; n--; } }
   for (const sp of rooms) { sp.sil.material.color.setHex(TEACHER_TYPES[sp.teacher].silhouette); sp.note.visible = sp.teacher === "sub"; }
 }
 
@@ -620,7 +641,7 @@ function pickStaffPlace(typeKey) {
   const T = STAFF_TYPES[typeKey];
   if (T.stationary) {   // a teacher at a classroom door that has nobody posted yet
     const taken = new Set(staff.filter((s) => s.post).map((s) => s.post));
-    const doors = DOOR_SPOTS().filter((sp) => !taken.has(sp));
+    const doors = DOOR_SPOTS().filter((sp) => !taken.has(sp) && !sp.R.staff);
     doors.sort((a, b) => spotDist(b) - spotDist(a));
     const sp = pick(doors.slice(0, Math.max(1, Math.ceil(doors.length / 2))));
     const p = hallPos(sp.h, sp.t + 0.95, sp.wallLat - sp.side * 0.55);
@@ -836,9 +857,9 @@ function morningSetup() {
   if (player.ride) { scene.remove(player.ride.chair); player.ride = null; }
   player.slipT = player.dazeT = 0; player.mesh.rotation.z = 0;
   game.hotbar = Array(CFG.items.slots).fill(null); renderHotbar();
+  rollSubs();             // first, so sub rooms get their extra desk loot
   resetSpotsForPeriod();
   for (const sp of SPOTS) if (sp.kind === "restroom") sp.nextSweep = game.time + rand(12, CFG.hiding.restroomSweepEverySec);
-  rollSubs();
   startPassing(true);
 }
 
@@ -851,7 +872,14 @@ function resetGame(save = null) {
 }
 function resetSpotsForPeriod() {
   game.lockerUses = CFG.hiding.lockerUsesPerPeriod;
-  for (const sp of SPOTS) sp.used = false;
+  for (const sp of SPOTS) {
+    sp.used = false;
+    if (sp.kind === "classroom") {   // restock the desks
+      const [lo, hi] = sp.R.count, n = lo + Math.floor(Math.random() * (hi - lo + 1)) + (sp.teacher === "sub" ? 1 : 0);
+      sp.loot = Array.from({ length: n }, () => pickWeighted(sp.R.loot));
+      sp.lootVer = (sp.lootVer ?? 0) + 1;
+    }
+  }
 }
 
 function startPassing(first) {
@@ -1567,7 +1595,8 @@ function updateHiding(dt) {
 function updateHidePanel() {
   const sp = player.hidden; if (!sp) return;
   const limit = hideLimit(sp), left = Math.max(0, limit - player.hideT);
-  const title = sp.kind === "classroom" ? `Room ${sp.room} · ${TEACHER_TYPES[sp.teacher].label}` : `In the ${sp.T.label.toLowerCase()}`;
+  const title = sp.kind === "classroom" ? `Room ${sp.room}${sp.R.label ? " · " + sp.R.label : ""} · ${TEACHER_TYPES[sp.teacher].label}` : `In the ${sp.T.label.toLowerCase()}`;
+  renderLoot(sp);
   const line = sp.kind === "classroom" ? TEACHER_TYPES[sp.teacher].stayLine : sp.T.stayLine;
   let warn = "";
   if (sp.kind === "restroom") {
@@ -1580,6 +1609,58 @@ function updateHidePanel() {
   ui.hpFill.style.transform = `scaleX(${left / limit})`;
   ui.hpFill.classList.toggle("low", left < 3);
 }
+
+// Rooms as shops: tap an item on the desk to grab it. It costs hiding time, and the teacher might call security.
+const lootEl = $("hpLoot");
+function renderLoot(sp) {
+  const key = sp.kind === "classroom" ? `${sp.room}:${sp.lootVer}:${sp.loot.length}:${sp.prizeTaken}` : "";
+  if (lootEl.dataset.key === key) return;
+  lootEl.dataset.key = key; lootEl.innerHTML = "";
+  if (sp.kind !== "classroom") return;
+  const grab = TEACHER_TYPES[sp.teacher].grabSec ?? CFG.rooms.grabSec;
+  sp.loot.forEach((k, i) => {
+    const b = document.createElement("button"); b.type = "button";
+    b.innerHTML = `${ITEM_TYPES[k].icon} ${ITEM_TYPES[k].label}<small>-${grab}s</small>`;
+    b.addEventListener("click", () => grabLoot(i));
+    lootEl.appendChild(b);
+  });
+  if (sp.R.rarePrize && !sp.prizeTaken) {
+    const b = document.createElement("button"); b.type = "button"; b.className = "prize";
+    b.innerHTML = `🗄️ ${sp.R.rarePrize.label}<small>+${sp.R.rarePrize.points} · -${grab}s</small>`;
+    b.addEventListener("click", () => grabLoot("prize"));
+    lootEl.appendChild(b);
+  }
+  if (!lootEl.children.length) lootEl.innerHTML = `<span class="none">Nothing left on the desks.</span>`;
+}
+function grabLoot(i) {
+  const sp = player.hidden;
+  if (!sp || sp.kind !== "classroom" || game.state !== "playing") return;
+  const TT = TEACHER_TYPES[sp.teacher];
+  if (i === "prize") {
+    if (sp.prizeTaken) return;
+    sp.prizeTaken = true;
+    havoc("rarePrize", sp.R.rarePrize.points, "Confiscated stash!", { x: player.x, z: player.z });
+  } else {
+    if (!addItem(sp.loot[i])) return;   // inventory full: nothing happens
+    sp.loot.splice(i, 1);
+  }
+  player.hideT += TT.grabSec ?? CFG.rooms.grabSec;
+  if (Math.random() < TT.backfire) roomBackfire(sp);
+  updateHidePanel();
+}
+// The teacher spots you rummaging and calls security: the nearest guard (or anyone free) heads for the door.
+function roomBackfire(sp) {
+  toast(`${TT_NAME(sp)} picks up the phone: "Security to room ${sp.room}."`, 2.6);
+  playBlip([880, 0, 880], 0.12, "sine", 0.05);
+  const f = spotFront(sp, {});
+  const free = staff.filter((s) => !s.type.stationary && s.state !== "chase" && s.state !== "bust")
+    .sort((a, b) => (b.key === "securityGuard") - (a.key === "securityGuard") || Math.hypot(a.x - f.x, a.z - f.z) - Math.hypot(b.x - f.x, b.z - f.z));
+  const st = free[0];
+  if (st) { const d = Math.hypot(st.x - f.x, st.z - f.z); st.state = "search"; st.searchT = -Math.min(16, d / (st.type.chaseSpeed * 0.8)); st.lastX = st.tx = f.x; st.lastZ = st.tz = f.z; }
+  onRoomBackfire(sp);
+}
+const TT_NAME = (sp) => (sp.teacher === "office" ? "The secretary" : sp.teacher === "sub" ? "The sub" : "The teacher");
+function onRoomBackfire(sp) { /* build step 7: raises short-term heat (not the security level) */ }
 
 function updateRestrooms() {
   for (const sp of SPOTS) {
@@ -1645,7 +1726,7 @@ function updateSpotsUI() {
     let text, cls = "itag";
     if (sp.kind === "locker") text = blocked ? "Locker · none left" : "Locker";
     else if (sp.kind === "restroom") text = blocked ? "Restroom · used" : `Restroom · sweep in ${Math.max(0, Math.ceil(sp.nextSweep - game.time))}s`;
-    else { text = `Room ${sp.room} · ${TEACHER_TYPES[sp.teacher].label}${blocked ? (sp.used ? " · used" : " · guarded") : ""}`; if (sp.teacher === "sub") cls += " sub"; }
+    else { text = `Room ${sp.room}${sp.R.label ? " · " + sp.R.label : ""} · ${TEACHER_TYPES[sp.teacher].label}${blocked ? (sp.used ? " · used" : " · guarded") : ""}`; if (sp.teacher === "sub") cls += " sub"; }
     if (blocked) cls += " off"; else if (reach) cls += " near";
     if (text !== sp.tagText) { sp.tag.textContent = text; sp.tagText = text; }
     if (cls !== sp.tagClass) { sp.tag.className = cls; sp.tagClass = cls; }
@@ -1714,7 +1795,7 @@ function spawnHallItems() {
       const p = hallPos(h, t, rand(lo, hi));
       if (Math.hypot(p.x - player.x, p.z - player.z) < 8) continue;
       const key = pickWeighted(table);
-      spawnObject(key, "pickup", p.x, REST_Y[key] ?? 0.04, p.z);
+      spawnObject(key, "pickup", p.x, REST_Y[key] ?? 0.04, p.z, { life: CFG.rooms.hallItemLifeSec });
       break;
     }
   }
@@ -2083,7 +2164,7 @@ window.__hallwaySkip = { get state() { return { ...game,
   pa: $("pa").classList.contains("show") ? $("paText").textContent : null,
   crowdLeft: crowd.filter((c) => c.mode !== "gone").length,
   player: { x: player.x, z: player.z, hidden: player.hidden ? `${player.hidden.kind}${player.hidden.room ? " " + player.hidden.room : ""}` : null, graceT: player.graceT },
-  spots: SPOTS.map((sp) => ({ kind: sp.kind, h: sp.h, t: sp.t, room: sp.room, teacher: sp.teacher, blocked: spotBlocked(sp) })) }; }, CFG, STAFF_TYPES };
+  spots: SPOTS.map((sp) => ({ kind: sp.kind, h: sp.h, t: sp.t, room: sp.room, teacher: sp.teacher, blocked: spotBlocked(sp) })) }; }, CFG, STAFF_TYPES, TEACHER_TYPES, ROOM_TYPES, ITEM_TYPES };
 if (debug) {   // test-only helpers (only with ?debug in the URL)
   Object.assign(window.__hallwaySkip, {
     place(h, t, lat) { const p = hallPos(h, t, lat); player.x = p.x; player.z = p.z; },
@@ -2098,6 +2179,8 @@ if (debug) {   // test-only helpers (only with ?debug in the URL)
     catchNow(k = 0) { caught(staff[k]); },
     sweepNow(i) { SPOTS[i].nextSweep = game.time; },
     give(key, uses) { return addItem(key, uses); },
+    roomInfo() { return SPOTS.filter((sp) => sp.kind === "classroom").map((sp) => ({ room: sp.room, type: sp.roomType, teacher: sp.teacher, loot: [...sp.loot], i: SPOTS.indexOf(sp) })); },
+    hideT() { return player.hideT; },
     objects() { return objects.map((o) => ({ key: o.key, state: o.state, x: o.x, y: o.y, z: o.z, bounces: o.bounces, life: o.life })); },
     dropItem(key, dx, dz) { const o = spawnObject(key, "pickup", player.x + dx, REST_Y[key] ?? 0.04, player.z + dz); return o.id; },
     hotbar() { return game.hotbar.map((s) => s && `${s.key}${s.uses > 1 ? "x" + s.uses : ""}`); },

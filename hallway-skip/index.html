@@ -64,6 +64,12 @@
   #hpWarn { font-size: 13px; font-weight: 800; color: #ffb36b; min-height: 0; }
   #hpLeave { pointer-events: auto; margin-top: 8px; padding: 8px 22px; border: 0; border-radius: 999px; background: #ffd36b;
     color: #1d2230; font: 800 14px system-ui, sans-serif; }
+  #hpLoot { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin-top: 7px; }
+  #hpLoot button { pointer-events: auto; border: 0; border-radius: 10px; padding: 6px 10px; background: rgba(255,255,255,.14); color: #fff;
+    font: 700 13px system-ui, sans-serif; cursor: pointer; }
+  #hpLoot button small { margin-left: 6px; opacity: .7; font-weight: 600; }
+  #hpLoot button.prize { background: rgba(255,211,107,.25); }
+  #hpLoot .none { font-size: 12px; opacity: .6; }
   #hidePanel .hint { font-size: 11px; opacity: .6; margin-top: 5px; }
 
   /* staff markers: "?" / "!" above heads, arrows at screen edge when offscreen */
@@ -156,6 +162,7 @@
     <div class="hpBar"><div id="hpFill"></div></div>
     <div id="hpLine"></div>
     <div id="hpWarn"></div>
+    <div id="hpLoot"></div>
     <button id="hpLeave" type="button">Sneak out</button>
     <div class="hint">or push the stick (E on desktop)</div>
   </div>
@@ -171,7 +178,7 @@
 
 <div class="overlay" id="title">
   <div>
-    <span class="tag">prototype · build step 5</span>
+    <span class="tag">prototype · build step 6</span>
     <h1>Hallway Skip</h1>
     <p>Skip class. Don't get caught.</p>
     <div class="buttons">
@@ -186,7 +193,7 @@
   <div class="aboutBox">
     <h2>How to play</h2>
     <p>Slip out with the crowd, then stay out of class until the next bell. Keep out of the staff's vision cones. If you're spotted, break line of sight, then hide.</p>
-    <p>Walk into (or tap) a green locker, a restroom, or a classroom door to hide. Subs take longer to notice you.</p>
+    <p>Walk into (or tap) a green locker, a restroom, or a classroom door to hide. Subs take longer to notice you. While hiding in a room you can grab stuff off the desks, but it costs time, and the teacher might call security.</p>
     <p>Security guards have narrow flashlight vision, are faster than you for a few seconds, and call for backup. Teachers at their doors yell for help and grab you if you walk past.</p>
     <p>Items turn up in the halls: tap one to pick it up (four slots, right edge). Tap a slot, then flick to throw. Banana peels trip staff, whoopee cushions and basketballs make noise that pulls staff away, the wheelie chair launches you down the hall.</p>
     <p>Three strikes and you're out. Survive six periods to finish the day. Each day gets harder. Your run saves at every bell.</p>
