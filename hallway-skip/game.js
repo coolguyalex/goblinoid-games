@@ -2559,6 +2559,43 @@ renderer.setAnimationLoop(() => {
   if (debug) { fpsAcc += dt; fpsN++; if (fpsAcc > 0.5) { ui.fps.textContent = `${Math.round(fpsN / fpsAcc)} fps`; fpsAcc = fpsN = 0; } }
 });
 
+if (debug) {   // a small test panel for phone playtests (only with ?debug in the URL)
+  const css = document.createElement("style");
+  css.textContent = `#dbg { position: fixed; left: 50%; bottom: max(6px, env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 5;
+      display: flex; flex-direction: column; align-items: center; gap: 4px; }
+    #dbg button { border: 0; border-radius: 8px; padding: 6px 9px; background: rgba(20,24,36,.85); color: #fff; font: 700 12px system-ui, sans-serif; }
+    #dbgBtns { display: flex; flex-wrap: wrap; gap: 4px; justify-content: center; max-width: 420px; }
+    #dbgBtns[hidden] { display: none; }`;
+  document.head.appendChild(css);
+  const panel = document.createElement("div"); panel.id = "dbg";
+  panel.innerHTML = `<div id="dbgBtns" hidden></div><button id="dbgToggle" type="button">🛠 test tools</button>`;
+  document.body.appendChild(panel);
+  const btns = $("dbgBtns");
+  const add = (label, fn) => {
+    const b = document.createElement("button"); b.type = "button"; b.textContent = label;
+    b.addEventListener("pointerdown", (e) => { e.stopPropagation(); e.preventDefault(); if (game.state !== "playing") return; try { fn(); } catch (err) { toast("Not in this build step"); } });
+    btns.appendChild(b);
+  };
+  $("dbgToggle").addEventListener("pointerdown", (e) => { e.stopPropagation(); e.preventDefault(); btns.hidden = !btns.hidden; });
+  add("End phase", () => { game.phaseT = phaseLen() - 0.05; });
+  add("Skip to last period", () => {
+    const last = typeof periodsToday === "function" ? periodsToday() : CFG.periodsPerDay;
+    game.period = last - 1; game.phase = "skipping"; game.phaseT = phaseLen("skipping") - 0.05;
+  });
+  let gi = 0;
+  add("Give item", () => { const k = Object.keys(ITEM_TYPES); addItem(k[gi++ % k.length]); });
+  add("Heat +30", () => { addHeat(30); });
+  add("School alert 100%", () => { game.security = 100; });
+  add("Get a strike", () => { const st = staff.find((s) => !s.type.stationary) ?? staff[0], ph = game.phase; game.phase = "skipping"; caught(st); game.phase = ph; });
+  add("Principal", () => { ensurePrincipal(true); });
+  add("Friend here", () => {
+    const c = crowd.find((k) => k.friend && k.mode !== "gone") ?? crowd.find((k) => k.friend);
+    c.mode = "wander"; c.slipT = 0; c.friend.cd = 0; c.leaveAt = 999; c.x = player.x + Math.sin(player.heading) * 1.6; c.z = player.z + Math.cos(player.heading) * 1.6;
+    const pr = hallProject(c.x, c.z); c.h = pr.h; c.t = pr.t; c.lat = pr.lat;
+    if (game.phase !== "passing") toast("Friends only offer during passing periods");
+  });
+}
+
 // small read-only hook for automated playtests
 window.__hallwaySkip = { get state() { return { ...game,
   staff: staff.map((s) => ({ key: s.key, state: s.state, suspicion: s.suspicion, x: s.x, z: s.z, h: s.h, winded: s.windedT > 0, alarm: s.alarmT })),
