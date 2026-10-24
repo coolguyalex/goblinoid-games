@@ -1,4 +1,4 @@
-// Hallway Skip — build step 10 prototype.
+// Hallway Skip — build step 11 prototype.
 // Step 1: hallway, joystick, a hall monitor that chases, a crowd that thins, and the bell.
 // Step 2: tap-to-interact and hiding spots: lockers, restrooms, classrooms (teacher and sub boot timers).
 // Step 3: security guard, the three-strike ladder, and the PA announcer.
@@ -9,6 +9,7 @@
 // Step 8: the principal, friends and passing-period mini-games, and full risk scoring.
 // Step 9: humor pass (staff barks, squinting, caught-scene lines, excuses) and ad hooks (placeholder ads).
 // Step 10: thrown things hit people (points, more for staff, and a stun), two-stage paper airplane, step-on whoopee cushion, multi-slip banana.
+// Step 11: football (erratic bounces), stink bomb (science labs), spray paint graffiti (art rooms).
 import * as THREE from "three";
 
 // =====================================================================================
@@ -274,6 +275,13 @@ const OFFICE_RANTS = [
 const EXCUSES = ["My dog ate my schedule.", "I was looking for the nurse. The nurse was also looking for me.", "I'm on the hall decorating committee.",
   "Is this not the way to band?", "My locker ate my homework. And my shoe.", "I'm new. Since September.", "I was told to deliver this... nothing."];
 const RUN_OVER_LINES = ["Your parents are on their way.", "Your mom is in the parking lot. She's doing the slow walk.", "They're calling it a \"conversation about choices.\""];
+// Spray-paint graffiti. Plain strings are painted as text; the others have their own drawings (see drawGraffiti).
+const GRAFFITI = [
+  "I wuz hea", { draw: "coolS" }, "(He × Li × N) × Ne", "SKOOL SUX", "officer dale is a dork", "I just lost the game",
+  "√-1 2³ Σ π", "d/dt (my grades) < 0", { draw: "dontRead" }, "TARDY 4 LYFE", "LUNCH LADIES R HOT", "school | prison",
+  { draw: "brick", text: "ANOTHER BRICK IN THE WALL" }, "sudo rm -rf /school", "BILLIONAIRE DROPOUTS CLUB", "SPICOLI WAS RIGHT",
+  "I AM THE KWISATZ HADERACH", "Tm with your mom", { draw: "heart" }, "THE EARTH IS A TORUS",
+];
 const LUNCHES = ["mystery tacos.", "rectangle pizza.", "the meatloaf (again).", "\"breakfast for lunch.\"", "chicken nuggets of uncertain origin.", "soup?"];
 
 // Hiding spots are data: a new kind is one entry here (placement lives in LAYOUT).
@@ -296,9 +304,9 @@ const TEACHER_TYPES = {
 // Rooms as shops: what's lying on the desks, by room type. A new room type is one line.
 const ROOM_TYPES = {
   classroom: { label: "", loot: [["spitball", 4], ["paperAirplane", 4], ["gum", 3], ["bananaPeel", 1]], count: [1, 2] },
-  science:   { label: "Science lab", plaque: 0x2ecc71, loot: [["bananaPeel", 3], ["whoopee", 2], ["spitball", 2]], count: [1, 2] },
-  art:       { label: "Art room", plaque: 0xe67e22, loot: [["wheelieChair", 3], ["paperAirplane", 3], ["gum", 2]], count: [1, 2] },
-  gym:       { label: "Gym", plaque: 0xe74c3c, loot: [["basketball", 6], ["whoopee", 1]], count: [1, 2] },
+  science:   { label: "Science lab", plaque: 0x2ecc71, loot: [["stinkBomb", 4], ["bananaPeel", 2], ["whoopee", 2], ["spitball", 1]], count: [1, 2] },
+  art:       { label: "Art room", plaque: 0xe67e22, loot: [["sprayPaint", 4], ["wheelieChair", 3], ["paperAirplane", 2], ["gum", 1]], count: [1, 2] },
+  gym:       { label: "Gym", plaque: 0xe74c3c, loot: [["basketball", 4], ["football", 3], ["whoopee", 1]], count: [1, 2] },
   office:    { label: "Main office", plaque: 0x34495e, door: 0x4a3426, staff: "office", count: [2, 3],
                loot: [["wheelieChair", 2], ["whoopee", 2], ["basketball", 2], ["bananaPeel", 2]],
                rarePrize: { points: 300, label: "Raid the confiscated-stuff drawer" } },   // once per day
@@ -322,11 +330,19 @@ const ITEM_TYPES = {
   basketball:    { label: "Basketball", icon: "🏀", kind: "throw", recoverable: true, speed: [5, 11], pitchDeg: 30, gravity: 9.8,
                    bounces: [6, 8], restitution: 0.72, noiseRadius: 10, lingerSec: 5, bouncePoints: 5, spawnWeight: 2,
                    hit: { student: 35, staff: 140, studentSec: 1.0, staffSec: 1.8, style: "fall", minSpeed: 2 } },
+  football:      { label: "Football", icon: "🏈", kind: "throw", recoverable: true, speed: [8, 15], pitchDeg: 26, gravity: 9.8,
+                   bounces: [4, 7], restitution: [0.45, 0.85], erratic: 1.3,   // each bounce turns it up to ±1.3 rad, at a random bounciness
+                   noiseRadius: 10, lingerSec: 5, bouncePoints: 6, spawnWeight: 1,
+                   hit: { student: 35, staff: 140, studentSec: 1.0, staffSec: 1.8, style: "fall", minSpeed: 2 } },
+  stinkBomb:     { label: "Stink bomb", icon: "🧪", kind: "throw", speed: [4, 9], pitchDeg: 30, gravity: 9.8, spawnWeight: 0,   // science labs only
+                   points: 60, cloudRadius: 2.3, cloudSec: 10, noiseRadius: 12,
+                   perStudent: 15, perStaff: 60, studentGagSec: 0.8, staffGagSec: 1.4 },   // extra points for everyone who walks through it
+  sprayPaint:    { label: "Spray paint", icon: "🎨", kind: "spray", uses: 3, points: 100, wallRange: 1.7, spawnWeight: 0 },   // art rooms only
   wheelieChair:  { label: "Wheelie chair", icon: "🪑", kind: "ride", rideSpeed: 9.5, maxRideSec: 3, dazeSec: 1.5, leftoverSec: 3,
                    studentPoints: 40, spawnWeight: 1 },
   gum:           { label: "Gum", icon: "🍬", kind: "instant", points: 100, line: "You stick gum under the water fountain. Gross. +havoc", spawnWeight: 3 },
 };
-const REST_Y = { basketball: 0.2, wheelieChair: 0, whoopee: 0.08 };   // how high items sit on the floor (default 0.04)
+const REST_Y = { basketball: 0.2, football: 0.14, wheelieChair: 0, whoopee: 0.08 };   // how high items sit on the floor (default 0.04)
 
 // Floor plan: a squared figure 8. An outer loop plus a main hall across the middle, around two classroom blocks.
 // Halls run node to node. "side" on a hall: +1 / -1 = which wall (+1 is the classroom side on the outer loop).
@@ -972,7 +988,7 @@ function morningSetup() {
     c.mode = "wander"; c.retargetT = rand(1, 4);
   }
   clearStaff();
-  clearObjects(); cancelAim();
+  clearObjects(); cancelAim(); clearGraffiti();   // the custodian scrubs the walls overnight
   if (player.ride) { scene.remove(player.ride.chair); player.ride = null; }
   player.slipT = player.dazeT = 0; player.mesh.rotation.z = 0;
   game.hotbar = Array(CFG.items.slots).fill(null); renderHotbar();
@@ -1975,6 +1991,21 @@ function makeItemMesh(key) {
       break;
     }
     case "basketball": m(new THREE.IcosahedronGeometry(0.2, 1), 0xe67e22); break;
+    case "football": {
+      const f = m(new THREE.IcosahedronGeometry(0.15, 1), 0x7b4a24); f.scale.set(0.75, 0.75, 1.5);
+      const lace = m(new THREE.BoxGeometry(0.03, 0.02, 0.16), 0xffffff); lace.position.y = 0.11;
+      break;
+    }
+    case "stinkBomb": {
+      m(new THREE.CylinderGeometry(0.07, 0.09, 0.22, 7), 0x8fd14f);
+      const cap = m(new THREE.CylinderGeometry(0.05, 0.05, 0.06, 7), 0x5b3a8c); cap.position.y = 0.14;
+      break;
+    }
+    case "sprayPaint": {
+      m(new THREE.CylinderGeometry(0.07, 0.07, 0.3, 8), 0xd63384).position.y = 0.15;
+      m(new THREE.CylinderGeometry(0.03, 0.03, 0.05, 6), 0xeeeeee).position.y = 0.32;
+      break;
+    }
     case "wheelieChair": {
       const seat = m(new THREE.BoxGeometry(0.5, 0.08, 0.5), 0x2c3e66); seat.position.y = 0.45;
       const back = m(new THREE.BoxGeometry(0.5, 0.5, 0.06), 0x2c3e66); back.position.set(0, 0.75, -0.24);
@@ -1997,7 +2028,7 @@ function spawnObject(key, state, x, y, z, extra = {}) {
   objects.push(o);
   return o;
 }
-function removeObject(o) { scene.remove(o.mesh); scene.remove(o.ring); o.dead = true; }
+function removeObject(o) { scene.remove(o.mesh); scene.remove(o.ring); if (o.cloud) { scene.remove(o.cloud); o.cloud.material.dispose(); } o.dead = true; }
 function clearObjects() { for (const o of objects) removeObject(o); objects.length = 0; }
 
 function pickWeighted(pairs) {
@@ -2053,6 +2084,7 @@ function selectSlot(i) {
   if (player.ride || player.dazeT > 0 || player.slipT > 0) return;
   if (game.aim?.slot === i) { cancelAim(); return; }
   const T = ITEM_TYPES[it.key];
+  if (T.kind === "spray") { if (sprayPaint()) consumeSlot(i); return; }
   if (T.kind === "instant") { consumeSlot(i); toast(T.line); havoc(it.key, T.points, T.label, { x: player.x, z: player.z }); return; }
   game.aim = { slot: i, key: it.key, id: null, sx: 0, sy: 0, cx: 0, cy: 0 };
   $("aim").hidden = false;
@@ -2154,6 +2186,7 @@ function updateObjects(dt) {
     else if (o.state === "rolling") rollObject(o, dt);
     else if (o.state === "trap") trapCheck(o);
     else if (o.state === "resting" && o.key === "whoopee") stepOnCushion(o);
+    else if (o.state === "cloud") stinkCloud(o, dt);
     if (o.dead) continue;
     if (o.life !== Infinity) { o.life -= dt; if (o.life <= 0) removeObject(o); }
   }
@@ -2166,7 +2199,7 @@ function drawObjects() {
     if (o.state === "flying") o.mesh.rotation.y = Math.atan2(o.vx, o.vz);
     if (o.state === "pickup") { o.spin += 0.02; o.mesh.rotation.y = o.spin; o.mesh.position.y = o.y + 0.1 + Math.sin(o.spin * 2) * 0.05; }
     const fading = (o.state === "pickup" || o.state === "resting" || o.state === "trap") && o.life < CFG.items.blinkSec;
-    o.mesh.visible = !(fading && Math.sin(o.life * 18) < 0);
+    o.mesh.visible = o.state !== "cloud" && !(fading && Math.sin(o.life * 18) < 0);
     const reach = pickable(o) && game.state === "playing" && !player.hidden && Math.hypot(o.x - player.x, o.z - player.z) < CFG.items.pickupRange;
     o.ring.material.opacity = reach ? pulse : pickable(o) ? 0.12 : 0;
     o.ring.position.set(o.x, 0.03, o.z);
@@ -2237,21 +2270,30 @@ function flyObject(o, dt) {
     const p = personHit(o, 0.45, 2.1);
     if (p) { hitPerson(o, p.who, p.isStaff); removeObject(o); return; }
   }
-  if (o.key === "basketball" && Math.hypot(o.vx, o.vz) > T.hit.minSpeed) {
+  if (T.bounces && T.hit && Math.hypot(o.vx, o.vz) > T.hit.minSpeed) {
     const p = personHit(o, 0.5, 1.6);
     if (p && hitPerson(o, p.who, p.isStaff)) { o.vx *= -0.35; o.vz *= -0.35; bounceNoise(o); }   // bounces off them and keeps going
   }
   const r = REST_Y[o.key] ?? 0.04;
   if (o.y <= r) {
     o.y = r;
-    if (T.bounces && o.bounces < o.maxBounces && Math.abs(o.vy) > 1.2) { o.vy = -o.vy * T.restitution; o.bounces++; bounceNoise(o); }
+    if (T.bounces && o.bounces < o.maxBounces && Math.abs(o.vy) > 1.2) {
+      const rest = Array.isArray(T.restitution) ? rand(...T.restitution) : T.restitution;
+      o.vy = -o.vy * rest; o.bounces++;
+      if (T.erratic) {   // a football: every bounce sends it off somewhere new
+        const a = rand(-T.erratic, T.erratic), c = Math.cos(a), sn = Math.sin(a), vx = o.vx;
+        o.vx = vx * c - o.vz * sn; o.vz = vx * sn + o.vz * c;
+        o.vx *= rand(0.6, 1.1); o.vz *= rand(0.6, 1.1);
+      }
+      bounceNoise(o);
+    }
     else landObject(o);
   }
 }
 function landObject(o) {
   const T = o.T;
   o.vy = 0;
-  if (o.key !== "basketball") o.vx = o.vz = 0;
+  if (!T.bounces) o.vx = o.vz = 0;
   switch (o.key) {
     case "paperAirplane": {
       const n = o.flown.size, near = crowd.filter((c) => isActive(c) && Math.hypot(c.x - o.x, c.z - o.z) < 2.5).length;
@@ -2264,7 +2306,8 @@ function landObject(o) {
     case "spitball": o.state = "spent"; o.life = 0.4; break;
     case "bananaPeel": o.state = "trap"; o.life = T.lifeSec; o.mesh.rotation.y = Math.random() * 6; break;
     case "whoopee": o.state = "resting"; o.life = T.lifeSec; o.armedAt = o.age + 0.4; break;   // waits for someone to step on it
-    case "basketball": o.state = "rolling"; break;
+    case "basketball": case "football": o.state = "rolling"; break;
+    case "stinkBomb": popStinkBomb(o); break;
     default: o.state = "resting"; o.life = 10;
   }
 }
@@ -2343,6 +2386,128 @@ function trapCheck(o) {
     slipped(player);
   }
 }
+
+// ---- the stink bomb: pops on landing (noise pulls staff over), then a cloud that pays for everyone who walks through ----
+const cloudGeo = new THREE.IcosahedronGeometry(1, 1);
+function popStinkBomb(o) {
+  const T = o.T;
+  o.state = "cloud"; o.life = T.cloudSec; o.mesh.visible = false;
+  o.cloud = new THREE.Mesh(cloudGeo, new THREE.MeshBasicMaterial({ color: 0x9bd44a, transparent: true, opacity: 0.32, depthWrite: false }));
+  o.cloud.position.set(o.x, 0.7, o.z); o.cloud.scale.set(T.cloudRadius, 0.9, T.cloudRadius); scene.add(o.cloud);
+  playBlip([140, 90, 60], 0.14, "sawtooth", 0.09);
+  havoc("stinkBomb", T.points, "Stink bomb!", { x: o.x, z: o.z, loud: true });
+  makeNoise(o.x, o.z, T.noiseRadius, true, o);
+}
+function stinkCloud(o, dt) {
+  const T = o.T, k = o.life / T.cloudSec;
+  o.cloud.material.opacity = 0.32 * Math.min(1, k * 3);
+  o.cloud.rotation.y += dt * 0.4; o.cloud.scale.y = 0.9 + Math.sin(o.age * 2) * 0.08;
+  o.hitSet ??= new Set();
+  const inside = (x, z) => Math.hypot(x - o.x, z - o.z) < T.cloudRadius;
+  for (const st of staff) {
+    if (o.hitSet.has(st) || !inside(st.x, st.z)) continue;
+    o.hitSet.add(st); stunStaff(st, T.staffGagSec, "flinch");
+    st.bubble.textContent = pick(["*cough*", "UGH. What IS that?", "*gag*"]); st.barkUntil = performance.now() + 1500; st.barkAt = game.time;
+    addScore(T.perStaff, `The ${st.type.name} walks into the stink`, "small");
+  }
+  for (const c of crowd) {
+    if (!isActive(c) || o.hitSet.has(c) || !inside(c.x, c.z)) continue;
+    o.hitSet.add(c); c.slipT = Math.max(c.slipT, T.studentGagSec); c.stunStyle = "flinch";
+    addScore(T.perStudent, "Ew!", "small");
+  }
+}
+
+// ---- spray paint: tag the nearest wall with random graffiti ----
+const graffiti = [];
+let graffitiBag = [];
+const PAINT_COLORS = ["#ff3b6b", "#2ee6a8", "#ffd23f", "#4dabff", "#b46bff", "#ff8a2b", "#f5f5f5"];
+function drawGraffiti(g) {
+  const cv = document.createElement("canvas"); cv.width = 512; cv.height = 256;
+  const x = cv.getContext("2d"), col = pick(PAINT_COLORS);
+  x.translate(256, 128); x.rotate(rand(-0.08, 0.08));
+  x.fillStyle = x.strokeStyle = col; x.lineCap = x.lineJoin = "round"; x.textAlign = "center"; x.textBaseline = "middle";
+  const font = (px) => `900 ${px}px "Comic Sans MS", "Chalkboard SE", "Marker Felt", "Segoe Print", cursive`;
+  const line = (t, y, px, maxW) => {   // one line, shrunk to fit, with a dark outline and a few drips
+    x.font = font(px);
+    while (x.measureText(t).width > maxW && px > 18) { px -= 3; x.font = font(px); }
+    x.lineWidth = Math.max(4, px * 0.1); x.strokeStyle = "rgba(20,20,30,.55)"; x.strokeText(t, 0, y); x.fillText(t, 0, y);
+    const w = x.measureText(t).width;
+    for (let i = 0; i < 3; i++) { const dx = rand(-w / 2, w / 2), len = rand(10, 30); x.fillRect(dx, y + px * 0.3, 3, len); }
+  };
+  const text = (t, y, maxPx = 90, maxW = 470) => {   // long messages go on two lines
+    x.font = font(maxPx);
+    const sp = [...t.matchAll(/ /g)].map((m) => m.index);
+    if (x.measureText(t).width > maxW * 1.35 && sp.length && !/[×/|√<]/.test(t)) {   // (formulas and code stay on one line)
+      const cut = sp.reduce((a, b) => (Math.abs(b - t.length / 2) < Math.abs(a - t.length / 2) ? b : a));
+      line(t.slice(0, cut), y - maxPx * 0.42, maxPx * 0.8, maxW); line(t.slice(cut + 1), y + maxPx * 0.48, maxPx * 0.8, maxW);
+    } else line(t, y, maxPx, maxW);
+  };
+  if (g.draw === "coolS") {   // the Cool S: two rows of three strokes, crossed in the middle, pointed at both ends
+    x.lineWidth = 11; const s = 46, h1 = 64, h2 = 22, L = [];
+    for (const xx of [-s, 0, s]) L.push([xx, -h1, xx, -h2], [xx, h2, xx, h1]);
+    L.push([-s, -h1, 0, -h1 - s * 0.9], [s, -h1, 0, -h1 - s * 0.9], [-s, h1, 0, h1 + s * 0.9], [s, h1, 0, h1 + s * 0.9]);   // the points
+    L.push([0, -h2, s, h2], [-s, -h2, 0, h2]);                // the two full diagonals
+    L.push([s, -h2, s / 2, 0], [-s, h2, -s / 2, 0]);         // the two half diagonals that meet them
+    x.beginPath(); for (const [a1, b1, a2, b2] of L) { x.moveTo(a1, b1); x.lineTo(a2, b2); } x.stroke();
+  } else if (g.draw === "dontRead") {
+    line("DONT READ THIS", -22, 70, 470);
+    x.save(); x.translate(110, 56); x.rotate(-0.06); line("ha u read it", 0, 28, 300); x.restore();
+  } else if (g.draw === "heart") {
+    x.save(); x.translate(-55, 0); line("I", -45, 64, 100); x.restore(); line("Ms. Michael", 50, 64, 470);
+    x.beginPath(); const hx = 30, hy = -50, r = 26;   // a doodled heart
+    x.moveTo(hx, hy + r * 1.3);
+    x.bezierCurveTo(hx - r * 2.2, hy - r * 0.2, hx - r * 0.9, hy - r * 1.6, hx, hy - r * 0.5);
+    x.bezierCurveTo(hx + r * 0.9, hy - r * 1.6, hx + r * 2.2, hy - r * 0.2, hx, hy + r * 1.3);
+    x.fill();
+  } else if (g.draw === "brick") {   // painted bricks behind it, so it really is on a brick in the wall
+    x.save(); x.globalAlpha = 0.55; x.fillStyle = "#a4442c"; x.strokeStyle = "#e9dcc9"; x.lineWidth = 4;
+    for (let r = 0; r < 4; r++) for (let c = -1; c < 5; c++) {
+      const bx = -250 + c * 110 + (r % 2 ? 55 : 0), by = -110 + r * 55;
+      x.fillRect(bx, by, 104, 49); x.strokeRect(bx, by, 104, 49);
+    }
+    x.restore(); x.fillStyle = col; text(g.text, 0, 80);
+  } else text(g, 0, 90);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;
+  return tex;
+}
+const graffitiGeo = new THREE.PlaneGeometry(2.4, 1.2);
+let WALL_FEATURES = null;   // things on the walls that graffiti shouldn't cover
+function wallFeatures() {
+  if (WALL_FEATURES) return WALL_FEATURES;
+  WALL_FEATURES = SPOTS.map((sp) => ({ h: sp.h, side: sp.side, t: sp.t, half: sp.kind === "classroom" ? 0.9 : 0.7 }));
+  for (const ob of OBSTACLES) WALL_FEATURES.push({ h: ob.h, side: ob.side, t: ob.t, half: ob.halfLen });
+  for (const t of [5, 19.5, 34]) WALL_FEATURES.push({ h: 6, side: 1, t, half: 1.1 });   // bulletin boards
+  const E = LAYOUT.entrance; WALL_FEATURES.push({ h: E.h, side: HALLS[E.h].outerSide, t: E.t, half: 1.3 });
+  return WALL_FEATURES;
+}
+function sprayPaint() {
+  const T = ITEM_TYPES.sprayPaint, pr = hallProject(player.x, player.z), H = HALLS[pr.h];
+  const side = pr.lat >= 0 ? 1 : -1, wl = wallLat(pr.h, side);
+  if (Math.abs(wl - pr.lat) > T.wallRange) { toast("Get right next to a wall to spray it"); return false; }
+  // find a free stretch of wall near you: not over doors, boards, machines, or your last piece
+  let t = null;
+  for (const off of [0, 1.3, -1.3, 2.6, -2.6, 3.9, -3.9, 5.2, -5.2]) {
+    const tt = clamp(pr.t + off, 2.6, H.len - 2.6);
+    if (graffiti.some((g) => g.h === pr.h && g.side === side && Math.abs(g.t - tt) < 2.4)) continue;
+    if (wallFeatures().some((f) => f.h === pr.h && f.side === side && Math.abs(f.t - tt) < f.half + 1.2)) continue;
+    t = tt; break;
+  }
+  if (t === null) { toast("This wall's full. Find another one."); return false; }
+  if (!graffitiBag.length) graffitiBag = [...GRAFFITI].sort(() => Math.random() - 0.5);
+  const g = graffitiBag.pop();
+  const mesh = new THREE.Mesh(graffitiGeo, new THREE.MeshBasicMaterial({ map: drawGraffiti(g), transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 }));
+  const p = hallPos(pr.h, t, wl - side * 0.04);
+  mesh.position.set(p.x, 1.75, p.z);
+  mesh.rotation.y = Math.atan2(-side * H.nx, -side * H.nz);   // facing into the hall
+  scene.add(mesh);
+  graffiti.push({ h: pr.h, t, side, mesh });
+  while (graffiti.length > 16) { const old = graffiti.shift(); scene.remove(old.mesh); old.mesh.material.map.dispose(); old.mesh.material.dispose(); }
+  playBlip([2400, 2200, 2600], 0.08, "sawtooth", 0.03);   // psssht
+  havoc("sprayPaint", T.points, "Graffiti!", { x: p.x, z: p.z, loud: true });
+  return true;
+}
+function clearGraffiti() { for (const g of graffiti) { scene.remove(g.mesh); g.mesh.material.map.dispose(); g.mesh.material.dispose(); } graffiti.length = 0; }
 
 // ---- the wheelie chair: flick to launch yourself, no steering ----
 function startRide(L) {
@@ -2738,6 +2903,15 @@ if (debug) {   // test-only helpers (only with ?debug in the URL)
     obj(id) { const o = objects.find((x) => x.id === id); return o ? { state: o.state, x: o.x, y: o.y, z: o.z, stage: o.stage, slips: o.slips, life: o.life, hits: o.hitSet?.size ?? 0, flown: o.flown.size, dead: !!o.dead } : null; },
     heading() { return player.heading; },
     clearCrowd() { for (const c of crowd) c.mode = "gone"; },
+    graffitiSheet() {   // every graffiti drawing in a grid, for checking the art
+      const d = document.createElement("div"); d.style.cssText = "position:fixed;inset:0;z-index:20;background:#cfc5ad;display:grid;grid-template-columns:repeat(5,1fr);gap:4px;padding:4px";
+      for (const g of GRAFFITI) { const c = drawGraffiti(g).image; c.style.cssText = "width:100%;background:#d9cdb0"; d.appendChild(c); }
+      document.body.appendChild(d);
+    },
+    spray() { return sprayPaint(); },
+    graffitiCount() { return graffiti.length; },
+    clearObjects() { clearObjects(); },
+    lookYaw(a) { cam.yaw = player.heading = a; manualCamT = 99; },
     // put staff k at (x, z) on patrol, facing away along the hall
     staffAt(k, x, z, dirSign = 1) { const st = staff[k], pr = hallProject(x, z); st.h = pr.h; st.t = pr.t; st.state = "patrol"; st.suspicion = 0; st.stunT = 0; st.pauseT = 0;
       st.to = dirSign > 0 ? HALLS[pr.h].b : HALLS[pr.h].a; hallPos(st.h, st.t, 0, st); st.facing = hallHeading(st.h, dirSign); },
