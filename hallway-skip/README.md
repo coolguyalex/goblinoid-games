@@ -13,6 +13,12 @@ Built from `Hallway_Skip_Game_Spec` v0.2. Done so far:
 - **Step 7:** two-layer heat. HEAT ("they know it's me", 0-100) rises when staff see you doing havoc or start chasing you, flows in at most 30/s, drops 60% at every bell, and cools while you hide; it makes staff faster and sharper, and at 50+ staff can detain you during passing periods (below that, a catch during passing just shoos you, no strike). SCHOOL ALERT ("they know something happened") rises with loud havoc even unseen (more if seen), only drops overnight (-40%), adds an extra guard at 50, and ending a day at 100 makes the next day the LAST DAY: 3 periods, 2× points, max staff; survive it and the run ends as a legend.
 - **Step 8:** the principal (walks the halls after strike 2; slow, sees far, and spotting you summons every staff member), friends (white tees) who raise a hand during passing periods: high five (+75), gum trade (your gum for a random item), or a fake pass that cancels your next catch; kids tossing paper airplanes you can catch; and risk scoring: unseen streak (+0.25× per 15 s, up to 3×), near miss (staff within 2.2 m who don't see you: 2× for 5 s), and points for hiding right next to staff.
 - **Step 9:** humor pass (staff speech bubbles, squinting monitors, rotating caught-scene and office lines, excuses, tomorrow's lunch; all in the humor tables near the top of `game.js` for rewriting) and ad hooks. Ads use a placeholder screen for now (`CFG.ads.provider`): at most one interstitial per day, only after a strike or between days, never mid-run; optional rewarded ads to forge a note (erase a strike, once a day) or start tomorrow with a fake pass.
+- **Step 10:** thrown things that hit someone score, and hitting staff scores more (`hit` in `ITEM_TYPES`). Spitballs and paper airplanes make people stagger; basketballs knock them down and keep bouncing. The paper airplane flies in two stages: high over heads (fly-over points), then low at head height where it can hit someone (blue and orange dots in the aim preview). Whoopee cushions go off when someone steps on them (you too), not when they land. Banana peels stay down after the first slip: they vanish 10 s later or after 5 slips.
+- **Step 11:** football (gym; flies farther, every bounce goes somewhere random), stink bomb (science labs; pops on landing, then points for everyone who walks through the cloud), and spray paint (art rooms; tags the nearest wall with random graffiti from `GRAFFITI`, scrubbed off overnight).
+- **Step 12:** grab anything from a room and it's locked for the next 2 periods, with no restock (a red sign on the door). The main office now has three once-a-day specials: the 300-point drawer, a fake hall pass, and the master key (3 uses; opens locked or already-used doors, not during a fire alarm). Friends no longer hand out fake passes for free: a gum trade pays 150 points and a fake pass (or an item if you already have one).
+- **Step 13:** survival mode replaces the Last Day. Anything that maxes your HEAT starts it: heat stays maxed, more staff arrive every 8 s and get radioed your rough location, points are doubled, and the next catch ends the run. The fire alarm (three red boxes; tap twice to pull, once a day) starts it on purpose: 500 points, every staff member stunned for 3 s, every kid floods the halls, 8 items spill out and stay, and every classroom locks while it rings. Flooding a bathroom (button while hiding in one) is 400 points and a lot of heat, and closes it for the day. The final screen depends on your heat: run over, suspended, or expelled (military school / juvenile hall). SCHOOL ALERT now just adds guards (one at 50, two at 100).
+- **Step 14:** keyboard for everything. Keyboard players get faint hints: an "E" bubble on whatever E will do (pick up, hide, high five, trade, catch, fire alarm), numbers on the hotbar, and numbers on the desk items while hiding. 1–4 picks an item, the arrow keys aim (←/→ direction, ↑/↓ distance), Space throws. Sprint: hold Shift (🏃 button on phones); about 3 s of stamina, staff notice a running kid faster, and barging through kids makes them stagger and turns staff heads.
+- **Step 15:** a bigger crowd (110 kids, `?crowd=N` in the URL to try 20–250). Kids you can't see (behind you, behind a wall, or in the fog) still move but aren't drawn.
 
 ## Before turning on real ads
 
@@ -20,13 +26,13 @@ AdSense itself doesn't allow ads inside games; game ads go through a games ad ne
 
 ## Controls
 
-- Phone: left thumb = joystick, drag on the right side = look around
+- Phone: left thumb = joystick, drag on the right side = look around, hold 🏃 to sprint
 - Hide: walk into a hiding spot, or tap it when it glows
-- Desktop: WASD / arrow keys to move, drag the mouse to look, click or E to hide, Esc to pause
+- Desktop: WASD / arrow keys to move, Shift to sprint, drag the mouse to look, E to interact, 1–4 for items (arrow keys aim, Space throws), Esc to pause
 
 ## Tuning
 
-Every tunable number is in the `CFG` object at the top of `game.js`. Staff types, the floor plan, and obstacles are data tables just below it. Add `?debug` to the URL for an FPS counter.
+Every tunable number is in the `CFG` object at the top of `game.js`. Staff types, the floor plan, and obstacles are data tables just below it. Add `?debug` to the URL for an FPS counter and a 🛠 test panel.
 
 ## Run locally
 
