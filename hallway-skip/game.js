@@ -1,4 +1,4 @@
-// Hallway Skip — build step 14 prototype.
+// Hallway Skip — build step 15 prototype.
 // Step 1: hallway, joystick, a hall monitor that chases, a crowd that thins, and the bell.
 // Step 2: tap-to-interact and hiding spots: lockers, restrooms, classrooms (teacher and sub boot timers).
 // Step 3: security guard, the three-strike ladder, and the PA announcer.
@@ -13,11 +13,13 @@
 // Step 12: raided rooms lock for a while, the principal's office (fake pass, master key), bigger gum trades.
 // Step 13: survival mode (replaces "Last Day"), the fire alarm, flooding bathrooms, endings that depend on your heat.
 // Step 14: keyboard for everything (E hints, slot numbers, arrow-key aiming), sprint with stamina and shoving.
+// Step 15: a bigger crowd (110 kids, ?crowd=N to try others); kids out of view aren't drawn.
 import * as THREE from "three";
 
 // =====================================================================================
 // CONFIG — every tunable number lives here. Values marked "guess" come from the spec.
 // =====================================================================================
+const URLQ = new URLSearchParams(location.search);
 const CFG = {
   periodsPerDay: 6,
   passingSec: 25,                 // guess (day 1; see days below)
@@ -69,14 +71,15 @@ const CFG = {
   joystick: { radiusPx: 60, deadZone: 0.12 },
 
   crowd: {
-    count: 60,
+    count: 110,                   // try other sizes with ?crowd=N in the URL (20-250)
+    cullDistance: 46,             // kids farther than this (in the fog) or out of view aren't drawn at all
     speedMin: 1.0, speedMax: 1.8, radius: 0.3,
     leaveStartFrac: 0.12,         // during passing, students head into class between these
     leaveEndFrac: 0.92,           //   fractions of the passing period
     tardyRushSpeed: 3.4,          // stragglers hurry in when the tardy bell rings
     floodSpreadSec: 3.0,          // after the period bell, students pour out over this many seconds
     coverRadius: 2.6,             // students this close to you count as cover...
-    coverPerStudent: 0.35,        // ...each one cuts detection speed: rate / (1 + n * this)
+    coverPerStudent: 0.2,         // ...each one cuts detection speed: rate / (1 + n * this). (Was 0.35 with 60 kids; more kids, less each)
   },
 
   detection: {
@@ -215,6 +218,8 @@ const CFG = {
   pa: { showSec: 4.5, sameKindCooldownSec: 12 },
   render: { maxPixelRatio: 1.75, coneRays: 28 },
 };
+
+if (URLQ.has("crowd")) CFG.crowd.count = Math.max(20, Math.min(250, parseInt(URLQ.get("crowd"), 10) || CFG.crowd.count));
 
 // Staff are data: adding a type later (principal) is one entry here.
 const STAFF_TYPES = {
@@ -767,16 +772,14 @@ const player = {
 const crowd = [];
 const crowdBodies = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.26, 0.3, 1.0, 6).translate(0, 0.5, 0), lambert(0xffffff), CFG.crowd.count);
 const crowdHeads = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(0.21, 0).translate(0, 1.24, 0), lambert(0xffffff), CFG.crowd.count);
+crowdBodies.setColorAt(0, new THREE.Color(0xffffff)); crowdHeads.setColorAt(0, new THREE.Color(0xffffff));   // per-kid colors, filled in each frame
 crowdBodies.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 crowdHeads.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 scene.add(crowdBodies, crowdHeads);
 const DOOR_SPOTS = () => SPOTS.filter((sp) => sp.kind === "classroom");
 {
-  const c = new THREE.Color();
   for (let i = 0; i < CFG.crowd.count; i++) {
-    crowdBodies.setColorAt(i, c.setHex(pick(SHIRT_COLORS)));
-    crowdHeads.setColorAt(i, c.setHex(pick(SKIN_COLORS)));
-    crowd.push({ h: 0, t: 0, to: 0, lat: 0, x: 0, z: 0, targetLat: 0, speed: 1, mode: "gone", leaveAt: 0, door: null,
+    crowd.push({ shirt: new THREE.Color(pick(SHIRT_COLORS)), skin: new THREE.Color(pick(SKIN_COLORS)), h: 0, t: 0, to: 0, lat: 0, x: 0, z: 0, targetLat: 0, speed: 1, mode: "gone", leaveAt: 0, door: null,
       spawnAt: 0, retargetT: 0, bob: Math.random() * 10, heading: 0, scale: rand(0.88, 1.08), slipT: 0 });
   }
 }
@@ -1528,18 +1531,36 @@ function updateCrowd(dt) {
   }
 }
 
-const crowdMatrix = new THREE.Object3D();
+// Only kids you could actually see get drawn: in front of the camera, closer than the fog, and not behind a wall
+// (from the camera or from the kid's own position). They all keep moving either way. The visible ones are packed
+// into the first slots of the two instanced meshes, and the meshes draw only that many.
+const crowdMatrix = new THREE.Object3D(), frustum = new THREE.Frustum(), projScreen = new THREE.Matrix4(), cullSphere = new THREE.Sphere(new THREE.Vector3(), 0.9);
+let crowdDrawn = 0, crowdCull = true;
 function drawCrowd() {
-  crowd.forEach((c, i) => {
-    const hidden = c.mode === "gone" || c.mode === "spawning";
-    crowdMatrix.position.set(c.x, hidden ? -10 : Math.abs(Math.sin(game.time * 8 + c.bob)) * 0.05, c.z);
+  projScreen.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse); frustum.setFromProjectionMatrix(projScreen);
+  const cx = camera.position.x, cz = camera.position.z, far = CFG.crowd.cullDistance;
+  let n = 0;
+  for (const c of crowd) {
+    if (c.mode === "gone" || c.mode === "spawning") continue;
+    if (crowdCull) {
+      if (Math.hypot(c.x - cx, c.z - cz) > far) continue;
+      cullSphere.center.set(c.x, 0.7, c.z);
+      if (!frustum.intersectsSphere(cullSphere)) continue;
+      if (!lineOfSight(cx, cz, c.x, c.z) && !lineOfSight(player.x, player.z, c.x, c.z) &&   // (also their shoulders, so a kid
+          !lineOfSight(cx, cz, c.x + 0.35, c.z + 0.35) && !lineOfSight(cx, cz, c.x - 0.35, c.z - 0.35)) continue;   // peeking round a corner shows)
+    }
+    crowdMatrix.position.set(c.x, Math.abs(Math.sin(game.time * 8 + c.bob)) * 0.05, c.z);
     crowdMatrix.rotation.set(c.slipT <= 0 ? 0 : c.stunStyle === "flinch" ? 0.3 + Math.sin(game.time * 16) * 0.15 : 1.35, c.heading, 0, "YXZ");
-    crowdMatrix.scale.setScalar(hidden ? 0.0001 : c.scale);
+    crowdMatrix.scale.setScalar(c.scale);
     crowdMatrix.updateMatrix();
-    crowdBodies.setMatrixAt(i, crowdMatrix.matrix);
-    crowdHeads.setMatrixAt(i, crowdMatrix.matrix);
-  });
-  crowdBodies.instanceMatrix.needsUpdate = true; crowdHeads.instanceMatrix.needsUpdate = true;
+    crowdBodies.setMatrixAt(n, crowdMatrix.matrix); crowdHeads.setMatrixAt(n, crowdMatrix.matrix);
+    crowdBodies.setColorAt(n, c.shirt); crowdHeads.setColorAt(n, c.skin);
+    n++;
+  }
+  crowdDrawn = n;
+  crowdBodies.count = crowdHeads.count = n;
+  crowdBodies.instanceMatrix.needsUpdate = crowdHeads.instanceMatrix.needsUpdate = true;
+  if (n) crowdBodies.instanceColor.needsUpdate = crowdHeads.instanceColor.needsUpdate = true;
 }
 
 function crowdCoverCount() {
@@ -3027,7 +3048,7 @@ const OFFER_LABELS = { highFive: "High five", gumTrade: "Trade gum", fakePass: "
     k.friend.el.className = "fbubble"; k.friend.el.type = "button";
     k.friend.el.addEventListener("pointerdown", (e) => { e.preventDefault(); e.stopPropagation(); friendTap(k); });
     friendsEl.appendChild(k.friend.el);
-    crowdBodies.setColorAt(i, c.setHex(0xf5f5f5));   // friends wear white tees
+    k.shirt.setHex(0xf5f5f5);   // friends wear white tees
   });
 }
 function friendTap(c) {
@@ -3152,7 +3173,7 @@ function resize() {
 window.addEventListener("resize", resize);
 resize();
 
-const debug = new URLSearchParams(location.search).has("debug");
+const debug = URLQ.has("debug");
 ui.fps.hidden = !debug;
 let fpsAcc = 0, fpsN = 0;
 const clock = new THREE.Clock();
@@ -3178,7 +3199,7 @@ renderer.setAnimationLoop(() => {
   drawFriends();
   updateHud();
   renderer.render(scene, camera);
-  if (debug) { fpsAcc += dt; fpsN++; if (fpsAcc > 0.5) { ui.fps.textContent = `${Math.round(fpsN / fpsAcc)} fps`; fpsAcc = fpsN = 0; } }
+  if (debug) { fpsAcc += dt; fpsN++; if (fpsAcc > 0.5) { ui.fps.textContent = `${Math.round(fpsN / fpsAcc)} fps · ${crowdDrawn}/${crowd.length} kids drawn`; fpsAcc = fpsN = 0; } }
 });
 
 if (debug) {   // a small test panel for phone playtests (only with ?debug in the URL)
@@ -3207,6 +3228,7 @@ if (debug) {   // a small test panel for phone playtests (only with ?debug in th
   let gi = 0;
   add("Give item", () => { const k = Object.keys(ITEM_TYPES); addItem(k[gi++ % k.length]); });
   add("Heat +30", () => { addHeat(30); });
+  add("Max heat (survival)", () => { game.heat = 100; game.heatPending = 0; });
   add("School alert 100%", () => { game.security = 100; });
   add("Get a strike", () => { const st = staff.find((s) => !s.type.stationary) ?? staff[0], ph = game.phase; game.phase = "skipping"; caught(st); game.phase = ph; });
   add("Principal", () => { ensurePrincipal(true); });
@@ -3292,6 +3314,7 @@ if (debug) {   // test-only helpers (only with ?debug in the URL)
     flood() { floodRestroom(); },
     staffCount() { return staff.length; },
     heatAdd(n) { addHeat(n); },
+    crowdStats(cull) { if (cull != null) crowdCull = cull; return { drawn: crowdDrawn, total: crowd.length, active: crowd.filter(isActive).length }; },
     sprintInfo() { return { stamina: Math.round(player.stamina * 100) / 100, sprinting: player.sprinting, winded: player.winded }; },
     ending() { return { title: $("caughtTitle").textContent, text: $("caughtText").textContent }; },
     lookYaw(a) { cam.yaw = player.heading = a; manualCamT = 99; },
