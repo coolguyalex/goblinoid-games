@@ -119,6 +119,23 @@
   #hotbar .slot.empty { opacity: .4; }
   #hotbar .slot.active { border-color: #ffd36b; box-shadow: 0 0 0 3px rgba(255,211,107,.5); }
   #hotbar .slot small { position: absolute; right: 4px; bottom: 1px; font-size: 12px; font-weight: 800; }
+  /* keyboard players: faint key hints */
+  .kbd #hotbar .slot::before { content: attr(data-key); position: absolute; left: 5px; top: 2px; font-size: 11px; font-weight: 800; opacity: .5; }
+  #keyHint { position: absolute; transform: translate(-50%, -100%); padding: 3px 9px; border-radius: 9px; background: rgba(20,24,36,.7);
+    font-size: 12px; font-weight: 700; white-space: nowrap; display: none; opacity: .85; }
+  #keyHint b { display: inline-block; min-width: 14px; padding: 0 4px; margin-right: 3px; border-radius: 4px; background: #ffd36b; color: #1d2230; text-align: center; }
+  #hpLoot { counter-reset: loot; }
+  .kbd #hpLoot button::before { counter-increment: loot; content: counter(loot); display: inline-block; min-width: 13px; margin-right: 6px; padding: 0 3px;
+    border-radius: 4px; background: rgba(255,211,107,.85); color: #1d2230; font-size: 11px; }
+  .kbdOnly { display: none; } .kbd .kbdOnly { display: inline; } .kbd .touchOnly { display: none; }
+  #kbdHelp { position: absolute; left: max(14px, env(safe-area-inset-left)); bottom: 10px; font-size: 11px; opacity: .45; display: none; }
+  .kbd #kbdHelp { display: block; }
+  #staminaMeter[hidden] { display: none; }
+  #staminaMeter b { background: #8ef0a0; } #staminaMeter.out b { background: #ff8f8f; }
+  #sprintBtn { position: fixed; right: max(10px, env(safe-area-inset-right)); bottom: max(10px, env(safe-area-inset-bottom)); width: 54px; height: 54px;
+    border-radius: 50%; border: 2px solid rgba(255,255,255,.35); background: rgba(20,24,36,.72); font-size: 24px; z-index: 4; touch-action: none; display: none; padding: 0; }
+  #sprintBtn.on { border-color: #8ef0a0; background: rgba(142,240,160,.3); }
+  @media (pointer: coarse) { #sprintBtn { display: block; } }
   #aim { position: fixed; inset: 0; background: rgba(10,12,20,.45); z-index: 3; touch-action: none; }
   #aim[hidden] { display: none; }
   #aimText { position: absolute; top: 20%; width: 100%; text-align: center; font-weight: 800; font-size: 20px; pointer-events: none;
@@ -178,6 +195,7 @@
   <div id="meters">
     <div class="meter" id="secMeter" title="They know something happened"><span>SCHOOL ALERT</span><i><b id="secFill"></b></i></div>
     <div class="meter" id="heatMeter" title="They know it's you"><span>HEAT</span><i><b id="heatFill"></b><em></em></i></div>
+    <div class="meter" id="staminaMeter" hidden><span>STAMINA</span><i><b id="staminaFill"></b></i></div>
   </div>
   <div id="pa"><span class="who">PA ANNOUNCEMENT</span><span id="paText"></span></div>
   <div id="score">0</div>
@@ -189,6 +207,8 @@
   <div id="tags"></div>
   <div id="markers"></div>
   <div id="toast"></div>
+  <div id="keyHint"></div>
+  <div id="kbdHelp">WASD move · Shift sprint · E interact · 1–4 items · Esc pause</div>
   <div id="fps" hidden></div>
 </div>
 <div id="alarmFx" hidden></div>
@@ -200,10 +220,11 @@
     <div id="hpWarn"></div>
     <div id="hpLoot"></div>
     <button id="hpLeave" type="button">Sneak out</button>
-    <div class="hint">or push the stick (E on desktop)</div>
+    <div class="hint"><span class="touchOnly">or push the stick</span><span class="kbdOnly">number keys grab · E sneaks out</span></div>
   </div>
 </div>
 <div id="hotbar"></div>
+<button id="sprintBtn" type="button" aria-label="Sprint">🏃</button>
 <div id="aim" hidden>
   <div id="aimText"></div>
   <div class="aimHint">Drag and let go: direction and distance. The dots show where it lands.</div>
@@ -214,7 +235,7 @@
 
 <div class="overlay" id="title">
   <div>
-    <span class="tag">prototype · build step 13</span>
+    <span class="tag">prototype · build step 14</span>
     <h1>Hallway Skip</h1>
     <p>Skip class. Don't get caught.</p>
     <div class="buttons">
@@ -236,7 +257,8 @@
     <p>Max out your HEAT and you're in SURVIVAL MODE: heat stays maxed, more staff keep arriving, and every point counts double, but the next catch ends your run. The fire alarm (red box on the wall, tap it twice) does this on purpose: staff are stunned, the halls flood with kids, items spill everywhere and every classroom locks. Flooding a bathroom (from inside it) is worth a lot of points and heat, and closes it for the day.</p>
     <p>Friends (white tees) raise a hand during passing periods: get close and tap the bubble for a high five or a gum trade. Trading gum pays well and gets you a fake pass that cancels your next catch. Kids toss paper airplanes: walk into one to catch it. Points multiply while nobody has eyes on you (streak), and double for a few seconds after a near miss. After your second strike, the principal walks the halls.</p>
     <p>Three strikes and you're out. Survive six periods to finish the day. Each day gets harder. Your run saves at every bell.</p>
-    <p class="keys">Phone: left thumb moves, drag on the right side to look around.<br>Desktop: WASD or arrow keys move, drag the mouse to look, click or E to hide.</p>
+    <p class="keys">Phone: left thumb moves, drag on the right side to look around, hold 🏃 to sprint.<br>Desktop: WASD or arrow keys move, Shift sprints, drag the mouse to look. E does whatever the little E bubble says (pick up, hide, high five, catch). 1–4 pick an item, then aim with the arrow keys and throw with Space. While hiding, number keys grab things off the desks.</p>
+    <p>Sprinting is fast but short, makes you easier to notice, and barging through kids gets attention.</p>
     <button class="go" id="aboutClose" type="button">Got it</button>
   </div>
 </div>

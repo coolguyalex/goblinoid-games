@@ -1,4 +1,4 @@
-// Hallway Skip — build step 13 prototype.
+// Hallway Skip — build step 14 prototype.
 // Step 1: hallway, joystick, a hall monitor that chases, a crowd that thins, and the bell.
 // Step 2: tap-to-interact and hiding spots: lockers, restrooms, classrooms (teacher and sub boot timers).
 // Step 3: security guard, the three-strike ladder, and the PA announcer.
@@ -12,6 +12,7 @@
 // Step 11: football (erratic bounces), stink bomb (science labs), spray paint graffiti (art rooms).
 // Step 12: raided rooms lock for a while, the principal's office (fake pass, master key), bigger gum trades.
 // Step 13: survival mode (replaces "Last Day"), the fire alarm, flooding bathrooms, endings that depend on your heat.
+// Step 14: keyboard for everything (E hints, slot numbers, arrow-key aiming), sprint with stamina and shoving.
 import * as THREE from "three";
 
 // =====================================================================================
@@ -42,6 +43,19 @@ const CFG = {
   },
 
   player: { speed: 4.3, radius: 0.35, turnRate: 12 },
+  // Sprint: hold Shift (or the 🏃 button on a phone). Short bursts; shoving through kids is noisy.
+  sprint: {
+    speedMult: 1.6,
+    staminaSec: 3,                // a full bar lasts this long...
+    rechargeSec: 5,               // ...and refills in this long
+    restartAt: 0.3,               // once you run dry, wait until the bar is back to this before sprinting again
+    noticeMult: 1.5,              // staff notice a running kid faster
+    shoveStaggerSec: 0.6,         // kids you barge into stagger...
+    shoveNoiseRadius: 6,          // ...staff within this range turn to look...
+    shoveSeenHeat: 4,             // ...and if one can see you, a little heat (at most once per shoveCooldownSec)
+    shoveCooldownSec: 1,
+  },
+  keyboard: { aimTurnRate: 1.8, aimPowerRate: 0.9, startPower: 0.55 },   // arrow-key aiming: radians/s and power/s
   camera: {
     fov: 75,                      // wide, to help with corner blindness
     height: 3.0,                  // slightly raised
@@ -744,7 +758,7 @@ function makePerson({ body, skin = 0xf1c27d, scale = 1, hat = null, hood = null 
 
 // ---------- player ----------
 const player = {
-  x: 0, z: 0, vx: 0, vz: 0, heading: 0,
+  x: 0, z: 0, vx: 0, vz: 0, heading: 0, stamina: 1, sprinting: false, winded: false, shoveCD: 0,
   hidden: null, hideT: 0, hideArmed: false, graceT: 0, invisT: 0, pushSpot: null, pushT: 0, slipT: 0, dazeT: 0, ride: null,
   mesh: makePerson({ body: 0x8a8f99, hood: 0x7b808a }),   // the gray hoodie
 };
@@ -940,21 +954,75 @@ function endPointer(e) {
 }
 canvas.addEventListener("pointerup", endPointer);
 canvas.addEventListener("pointercancel", endPointer);
+// Keyboard players get faint key hints (E bubbles, slot numbers). Touching the screen switches them off again.
+let usingKeys = false;
+function setUsingKeys(on) { if (usingKeys === on) return; usingKeys = on; document.body.classList.toggle("kbd", on); }
+window.addEventListener("pointerdown", (e) => { if (e.pointerType === "touch") setUsingKeys(false); }, true);
 window.addEventListener("keydown", (e) => {
-  keys.add(e.key.toLowerCase());
-  if ((e.key === " " || e.key === "Enter") && game.state !== "playing") { e.preventDefault(); onOverlayTap(); }
-  if (e.key === "Escape" && game.state === "playing") { if (game.aim) cancelAim(); else pause(); }
-  if (/^[1-9]$/.test(e.key) && game.state === "playing" && !e.repeat) selectSlot(+e.key - 1);
-  if (e.key.toLowerCase() === "e" && game.state === "playing" && !e.repeat) {   // desktop: enter / leave
-    if (player.hidden) exitSpot(false);
-    else if (!pickupNearest()) { const al = nearestAlarm(); if (al) tryAlarm(al); else { const sp = nearestSpot(); if (sp) enterSpot(sp); } }
+  const k = e.key.toLowerCase();
+  keys.add(k);
+  if (/^(w|a|s|d|e|shift|arrow\w+|[1-9]| )$/.test(k)) setUsingKeys(true);
+  if ((e.key === " " || e.key === "Enter") && game.state !== "playing") { e.preventDefault(); onOverlayTap(); return; }
+  if (game.state !== "playing") return;
+  if (e.key === "Escape") { if (game.aim) cancelAim(); else pause(); return; }
+  if (k.startsWith("arrow") || k === " ") e.preventDefault();   // no page scrolling
+  if (game.aim && k.startsWith("arrow") && !game.aim.kb) startKeyAim(game.aim);   // arrows take over a mouse aim
+  if (k === " " && game.aim && !e.repeat) { keyThrow(); return; }
+  if (/^[1-9]$/.test(e.key) && !e.repeat) {
+    if (player.hidden) { lootEl.querySelectorAll("button")[+e.key - 1]?.click(); return; }   // grab the Nth thing on the desk
+    selectSlot(+e.key - 1, true); return;
   }
+  if (k === "e" && !e.repeat) doInteract();
 });
 window.addEventListener("keyup", (e) => keys.delete(e.key.toLowerCase()));
 
+// What E would do right now (also drives the "E" hint bubble). Order: catch a plane, a friend's offer,
+// pick something up, the fire alarm, then hiding.
+function interactTarget() {
+  if (player.hidden) return { kind: "leave" };
+  for (const o of objects) if (o.wild && o.state === "flying" && Math.hypot(o.x - player.x, o.z - player.z) < 3) return { kind: "plane", o, x: o.x, y: o.y + 0.3, z: o.z, label: "catch" };
+  if (game.phase === "passing") {
+    let best = null, bd = CFG.friends.interactRange;
+    for (const c of crowd) { const F = c.friend; if (!F || F.cd > 0 || !isActive(c) || c.slipT > 0) continue; const d = Math.hypot(c.x - player.x, c.z - player.z); if (d < bd) { bd = d; best = c; } }
+    if (best) return { kind: "friend", c: best, x: best.x, y: 2.3, z: best.z, label: OFFER_LABELS[best.friend.offer].toLowerCase() };
+  }
+  let it = null, id = CFG.items.pickupRange;
+  for (const o of objects) if (pickable(o)) { const d = Math.hypot(o.x - player.x, o.z - player.z); if (d < id) { id = d; it = o; } }
+  if (it) return { kind: "item", o: it, x: it.x, y: it.y + 0.5, z: it.z, label: `pick up ${it.T.label.toLowerCase()}` };
+  const al = nearestAlarm();
+  if (al && !game.alarmPulled) { const p = hallPos(al.h, al.t, al.wl - al.side * 0.2, {}); return { kind: "alarm", a: al, x: p.x, y: 1.9, z: p.z, label: performance.now() < al.armT ? "PULL IT" : "fire alarm" }; }
+  const sp = nearestSpot();
+  if (sp && (!spotBlocked(sp) || (keyOpens(sp) && hasKey()))) { const p = hallPos(sp.h, sp.t, sp.wallLat - sp.side * 0.1, {}); return { kind: "spot", sp, x: p.x, y: 2.0, z: p.z, label: spotBlocked(sp) ? "unlock 🔑" : "hide" }; }
+  return null;
+}
+function doInteract() {
+  const t = interactTarget();
+  if (!t) { const sp = nearestSpot(); if (sp) enterSpot(sp); return; }   // shows why it's blocked
+  if (t.kind === "leave") exitSpot(false);
+  else if (t.kind === "plane") catchPlane(t.o);
+  else if (t.kind === "friend") friendTap(t.c);
+  else if (t.kind === "item") pickUp(t.o);
+  else if (t.kind === "alarm") tryAlarm(t.a);
+  else if (t.kind === "spot") enterSpot(t.sp);
+}
+const keyHintEl = document.getElementById("keyHint");
+function updateKeyHint() {
+  const t = usingKeys && game.state === "playing" && !game.aim ? interactTarget() : null;
+  if (!t || t.kind === "leave") { keyHintEl.style.display = "none"; return; }
+  projA.set(t.x, t.y, t.z).applyMatrix4(camera.matrixWorldInverse);
+  if (projA.z > -0.2) { keyHintEl.style.display = "none"; return; }
+  projA.set(t.x, t.y, t.z).project(camera);
+  const html = `<b>E</b> ${t.label}`;
+  if (keyHintEl.dataset.h !== html) { keyHintEl.innerHTML = html; keyHintEl.dataset.h = html; }
+  keyHintEl.style.display = "block";
+  keyHintEl.style.left = ((projA.x + 1) / 2) * window.innerWidth + "px"; keyHintEl.style.top = ((1 - projA.y) / 2) * window.innerHeight + "px";
+}
+
+let sprintTouch = false;
 function readInput() {
-  let x = (keys.has("d") || keys.has("arrowright") ? 1 : 0) - (keys.has("a") || keys.has("arrowleft") ? 1 : 0);
-  let y = (keys.has("w") || keys.has("arrowup") ? 1 : 0) - (keys.has("s") || keys.has("arrowdown") ? 1 : 0);
+  const arrows = !game.aim;   // while aiming, the arrow keys aim instead of moving (WASD still moves)
+  let x = (keys.has("d") || (arrows && keys.has("arrowright")) ? 1 : 0) - (keys.has("a") || (arrows && keys.has("arrowleft")) ? 1 : 0);
+  let y = (keys.has("w") || (arrows && keys.has("arrowup")) ? 1 : 0) - (keys.has("s") || (arrows && keys.has("arrowdown")) ? 1 : 0);
   if (stick.id !== null) { x = stick.x; y = stick.y; }
   let m = Math.hypot(x, y);
   if (m < CFG.joystick.deadZone) { x = y = m = 0; }
@@ -1027,7 +1095,7 @@ function morningSetup() {
   clearStaff();
   clearObjects(); cancelAim(); clearGraffiti();   // the custodian scrubs the walls overnight
   if (player.ride) { scene.remove(player.ride.chair); player.ride = null; }
-  player.slipT = player.dazeT = 0; player.mesh.rotation.z = 0;
+  player.slipT = player.dazeT = 0; player.mesh.rotation.z = 0; player.stamina = 1; player.winded = false;
   game.hotbar = Array(CFG.items.slots).fill(null); renderHotbar();
   rollSubs();             // first, so sub rooms get their extra desk loot
   resetSpotsForPeriod();
@@ -1148,7 +1216,14 @@ function startNextDay() {
   clock.getDelta();
 }
 
-function releaseControls() { stick.id = look.id = null; keys.clear(); stickBase.style.display = stickKnob.style.display = "none"; }
+function releaseControls() { stick.id = look.id = null; keys.clear(); sprintTouch = false; $("sprintBtn").classList.remove("on"); stickBase.style.display = stickKnob.style.display = "none"; }
+// the phone's sprint button: hold it
+{
+  const b = $("sprintBtn");
+  const on = (v) => (e) => { e.preventDefault(); e.stopPropagation(); sprintTouch = v; b.classList.toggle("on", v); };
+  b.addEventListener("pointerdown", on(true));
+  for (const ev of ["pointerup", "pointercancel", "pointerleave"]) b.addEventListener(ev, on(false));
+}
 
 function caught(st) {
   cancelAim();
@@ -1353,14 +1428,19 @@ function updatePlayer(dt) {
   }
   const f = { x: Math.sin(cam.yaw), z: Math.cos(cam.yaw) }, r = { x: -Math.cos(cam.yaw), z: Math.sin(cam.yaw) };
   const mx = r.x * input.x + f.x * input.y, mz = r.z * input.x + f.z * input.y;
-  const sp = CFG.player.speed;
+  updateSprint(dt);
+  const sp = CFG.player.speed * (player.sprinting ? CFG.sprint.speedMult : 1);
   const ox = player.x, oz = player.z;
   player.x += mx * sp * dt; player.z += mz * sp * dt;
-  // students jostle you out of the way
+  // students jostle you out of the way (sprinting, you barge through them instead)
+  player.shoveCD = Math.max(0, player.shoveCD - dt);
   for (const c of crowd) {
     if (c.mode === "gone" || c.mode === "spawning") continue;
     const dx = player.x - c.x, dz = player.z - c.z, d = Math.hypot(dx, dz), min = CFG.player.radius + CFG.crowd.radius;
-    if (d < min && d > 1e-4) { player.x += (dx / d) * (min - d); player.z += (dz / d) * (min - d); }
+    if (d < min && d > 1e-4) {
+      if (player.sprinting) { shove(c); player.x += (dx / d) * (min - d) * 0.3; player.z += (dz / d) * (min - d) * 0.3; }
+      else { player.x += (dx / d) * (min - d); player.z += (dz / d) * (min - d); }
+    }
   }
   collide(player, CFG.player.radius);
   player.vx = (player.x - ox) / Math.max(dt, 1e-4); player.vz = (player.z - oz) / Math.max(dt, 1e-4);
@@ -1373,6 +1453,29 @@ function updatePlayer(dt) {
   const moving = Math.hypot(player.vx, player.vz) > 0.3;
   player.mesh.position.set(player.x, moving ? Math.abs(Math.sin(game.time * 11)) * 0.07 : 0, player.z);
   player.mesh.rotation.y = player.heading;
+}
+
+// ---- sprinting ----
+function updateSprint(dt) {
+  const S = CFG.sprint, want = (keys.has("shift") || sprintTouch) && input.m > 0;
+  if (player.winded && player.stamina >= S.restartAt) player.winded = false;
+  player.sprinting = want && !player.winded && player.stamina > 0;
+  if (player.sprinting) { player.stamina = Math.max(0, player.stamina - dt / S.staminaSec); if (player.stamina <= 0) { player.winded = true; toast("Out of breath!"); } }
+  else player.stamina = Math.min(1, player.stamina + dt / S.rechargeSec);
+}
+// barging through a kid: they stagger aside, nearby staff turn to look, and if one sees you it's a bit of heat
+function shove(c) {
+  const S = CFG.sprint;
+  if (c.slipT <= 0) {
+    c.slipT = S.shoveStaggerSec; c.stunStyle = "flinch";
+    const pr = hallProject(player.x, player.z);
+    if (pr.h === c.h) { const [lo, hi] = latLimits(c.h, c.t); c.lat = c.targetLat = clamp(c.lat + (c.lat >= pr.lat ? 0.7 : -0.7), lo, hi); }
+  }
+  if (player.shoveCD > 0) return;
+  player.shoveCD = S.shoveCooldownSec;
+  playBlip([240, 180], 0.05, "square", 0.04);
+  makeNoise(player.x, player.z, S.shoveNoiseRadius, false);
+  if (staff.some((st) => canSeePlayer(st, 1, true).seen)) { addHeat(S.shoveSeenHeat); popup("Shoving! They saw that.", "bad"); }
 }
 
 function updateCrowd(dt) {
@@ -1491,6 +1594,7 @@ function noticeRate(st, d, cover) {
   const closeness = Math.max(0, 1 - d / (T.visionRange * staffMult("vision")));
   let rate = D.suspicionRate * T.notice * staffMult("notice") * (D.farRateFrac + (1 - D.farRateFrac) * closeness);
   rate /= 1 + cover * CFG.crowd.coverPerStudent;
+  if (player.sprinting) rate *= CFG.sprint.noticeMult;   // a running kid stands out
   if (game.phase === "passing") rate /= D.passingBeatMult;
   return rate;
 }
@@ -1735,6 +1839,14 @@ function updateMarkers() {
   }
 }
 
+let lastStam = -1;
+function drawStamina() {
+  const v = Math.round(player.stamina * 50) / 50;
+  if (v === lastStam) return;
+  lastStam = v;
+  $("staminaMeter").hidden = v >= 1; $("staminaFill").style.width = v * 100 + "%";
+  $("staminaMeter").classList.toggle("out", player.winded);
+}
 let lastHud = "";
 function updateHud() {
   const left = Math.max(0, Math.ceil(phaseLen() - game.phaseT));
@@ -2153,7 +2265,7 @@ function spawnHallItems() {
 // ---- hotbar ----
 const hotbarEl = $("hotbar");
 for (let i = 0; i < CFG.items.slots; i++) {
-  const b = document.createElement("button"); b.className = "slot empty"; b.type = "button";
+  const b = document.createElement("button"); b.className = "slot empty"; b.type = "button"; b.dataset.key = i + 1;
   b.addEventListener("pointerdown", (e) => { e.preventDefault(); e.stopPropagation(); selectSlot(i); });
   hotbarEl.appendChild(b);
 }
@@ -2176,7 +2288,7 @@ function addItem(key, uses) {
 }
 function consumeSlot(i) { const it = game.hotbar[i]; if (!it) return; if (--it.uses <= 0) game.hotbar[i] = null; renderHotbar(); }
 
-function selectSlot(i) {
+function selectSlot(i, fromKey = false) {
   if (game.state !== "playing") return;
   const it = game.hotbar[i]; if (!it) return;
   if (player.hidden) { toast("Not while you're hiding"); return; }
@@ -2189,12 +2301,31 @@ function selectSlot(i) {
   game.aim = { slot: i, key: it.key, id: null, sx: 0, sy: 0, cx: 0, cy: 0 };
   $("aim").hidden = false;
   $("aimText").textContent = T.kind === "ride" ? "Flick to launch the wheelie chair" : `Flick to throw the ${T.label.toLowerCase()}`;
+  if (fromKey) startKeyAim(game.aim);
   renderHotbar();
 }
-function cancelAim() { if (!game.aim) return; game.aim = null; $("aim").hidden = true; arc.visible = false; renderHotbar(); }
+// arrow-key aiming: ←/→ turn the throw, ↑/↓ change the power, Space throws
+function startKeyAim(a) {
+  a.kb = { yaw: cam.yaw, power: CFG.keyboard.startPower };
+  $("aimText").textContent = $("aimText").textContent.replace(/^Flick/, "Aim");
+  aimEl.querySelector(".aimHint").textContent = "←/→ aim · ↑/↓ distance · Space to throw · Esc to cancel";
+}
+const keyLaunch = (a) => ({ dx: Math.sin(a.kb.yaw), dz: Math.cos(a.kb.yaw), power: a.kb.power });
+function keyThrow() { const a = game.aim; if (!a) return; if (!a.kb) startKeyAim(a); release(a, keyLaunch(a)); }
+function updateKeyAim(dt) {
+  const a = game.aim; if (!a?.kb) return;
+  const K = CFG.keyboard;
+  a.kb.yaw += ((keys.has("arrowleft") ? 1 : 0) - (keys.has("arrowright") ? 1 : 0)) * K.aimTurnRate * dt;
+  a.kb.power = clamp(a.kb.power + ((keys.has("arrowup") ? 1 : 0) - (keys.has("arrowdown") ? 1 : 0)) * K.aimPowerRate * dt, 0.15, 1);
+}
+function cancelAim() {
+  if (!game.aim) return;
+  game.aim = null; $("aim").hidden = true; arc.visible = false; renderHotbar();
+  aimEl.querySelector(".aimHint").textContent = AIM_HINT;
+}
 
 // ---- aiming: drag anywhere, the dotted arc shows where it will go, release to throw ----
-const aimEl = $("aim");
+const aimEl = $("aim"), AIM_HINT = aimEl.querySelector(".aimHint").textContent;
 aimEl.addEventListener("pointerdown", (e) => {
   if (!game.aim || e.target.id === "aimCancel") return;
   const a = game.aim; a.id = e.pointerId; a.sx = a.cx = e.clientX; a.sy = a.cy = e.clientY;
@@ -2245,8 +2376,8 @@ const ARC_YELLOW = new THREE.Color(0xffe066), ARC_HIGH = new THREE.Color(0x35c8f
 arc.visible = false; arc.renderOrder = 5; arc.frustumCulled = false; scene.add(arc);
 function updateAimPreview() {
   const a = game.aim;
-  if (!a || a.id === null || Math.hypot(a.cx - a.sx, a.cy - a.sy) < CFG.items.minFlickPx) { arc.visible = false; return; }
-  const T = ITEM_TYPES[a.key], L = flickLaunch(a), pos = arc.geometry.attributes.position, col = arc.geometry.attributes.color, step = 0.04;
+  if (!a || (!a.kb && (a.id === null || Math.hypot(a.cx - a.sx, a.cy - a.sy) < CFG.items.minFlickPx))) { arc.visible = false; return; }
+  const T = ITEM_TYPES[a.key], L = a.kb ? keyLaunch(a) : flickLaunch(a), pos = arc.geometry.attributes.position, col = arc.geometry.attributes.color, step = 0.04;
   const sim = { x: player.x + L.dx * 0.45, y: T.kind === "ride" ? 0.1 : THROW_Y, z: player.z + L.dz * 0.45, vx: 0, vy: 0, vz: 0 };
   if (T.kind === "ride") { sim.vx = L.dx * T.rideSpeed; sim.vz = L.dz * T.rideSpeed; } else Object.assign(sim, launchVel(T, L));
   const plane = a.key === "paperAirplane";
@@ -3037,7 +3168,10 @@ renderer.setAnimationLoop(() => {
   if (toastTimer > 0) { toastTimer -= dt; if (toastTimer <= 0) ui.toast.classList.remove("show"); }
   drawCrowd();
   updateCamera(dt);
+  if (game.state === "playing") updateKeyAim(dt);
   updateAimPreview();
+  updateKeyHint();
+  drawStamina();
   drawObjects();
   updateMarkers();
   updateSpotsUI();
@@ -3158,6 +3292,7 @@ if (debug) {   // test-only helpers (only with ?debug in the URL)
     flood() { floodRestroom(); },
     staffCount() { return staff.length; },
     heatAdd(n) { addHeat(n); },
+    sprintInfo() { return { stamina: Math.round(player.stamina * 100) / 100, sprinting: player.sprinting, winded: player.winded }; },
     ending() { return { title: $("caughtTitle").textContent, text: $("caughtText").textContent }; },
     lookYaw(a) { cam.yaw = player.heading = a; manualCamT = 99; },
     // put staff k at (x, z) on patrol, facing away along the hall
