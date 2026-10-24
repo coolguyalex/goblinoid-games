@@ -27,22 +27,15 @@ Play against the CPU with the mouse, arrow keys / A·D, or touch. First to 7 win
 You're a kid skipping class. Each bell you slip out into a crowded hallway, dodge staff, and
 stay out of class until the next bell. Mobile first, played in landscape.
 
-**Status: prototype, build step 1 of 9.** It has one looping hallway, a virtual joystick,
-a hall monitor with a vision cone that patrols and chases, a crowd that thins out as students
-head to class, and the bell cycle: a 25-second passing period, then 60 seconds of skipping.
-Each period you survive is worth 100 points. More hall monitors show up in later periods.
+**Status: prototype, build step 15b.** A figure-8 school with six-period days that get harder,
+hall monitors, security guards, teachers and the principal, lockers, restrooms and classrooms to hide in,
+a hotbar of throwable items (spitballs, banana peels, stink bombs, spray-paint graffiti and more),
+rooms to raid, friends to trade with, heat and a school-wide alert, survival mode, the fire alarm,
+and full keyboard controls with sprint.
 
-Controls:
+What each build added, the controls, and tuning notes: [`hallway-skip/README.md`](hallway-skip/README.md).
 
-- Phone: left thumb = joystick, drag on the right side = look around
-- Desktop: WASD / arrow keys to move, drag the mouse to look, Esc to pause
-
-Tuning: every tunable number is in the `CFG` object at the top of `hallway-skip/game.js`.
-Staff types, the floor plan, and obstacles are data tables just below it.
-Add `?debug` to the URL for an FPS counter.
-
-Coming next: lockers, bathrooms, and classrooms to hide in; a security guard and the
-three-strike system; a full six-period day; then items to throw.
+Add `?debug` to the URL for an FPS counter and a test panel.
 
 ## Other files
 
@@ -61,3 +54,18 @@ Then open http://localhost:8000 (Pong) or http://localhost:8000/hallway-skip/ (H
 ## Deploy
 
 Connected to AWS Amplify Hosting: every push to `main` redeploys both games.
+
+## Versions and rollback
+
+Each Hallway Skip build is its own commit with a tag (`hallway-step5` … `hallway-step15b`;
+`hallway-step4-live` is the build that was live before step 5). Browse them on the repo's Tags page.
+
+To roll back, restore the files from an earlier tag in a new commit, then push:
+
+```bash
+git checkout hallway-step14 -- hallway-skip
+git commit -m "Roll back Hallway Skip to step 14"
+git push
+```
+
+History is never rewritten, so going forward again works the same way.
