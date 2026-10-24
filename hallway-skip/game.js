@@ -1,6 +1,7 @@
-// Hallway Skip — build step 2 prototype.
+// Hallway Skip — build step 3 prototype.
 // Step 1: one looping hallway, joystick, a hall monitor that chases, a crowd that thins, and the bell.
 // Step 2: tap-to-interact and hiding spots: lockers, restrooms, classrooms (teacher and sub boot timers).
+// Step 3: security guard, the three-strike ladder, and the PA announcer.
 import * as THREE from "three";
 
 // =====================================================================================
@@ -68,18 +69,59 @@ const CFG = {
 
   footsteps: { hearRange: 20, patrolInterval: 0.55, chaseInterval: 0.3, volume: 0.55 },
   monitorsPerPeriod: [1, 1, 2, 2, 2, 3],   // within-day difficulty (expanded in build step 4)
+  guardsPerPeriod:   [0, 1, 1, 1, 1, 2],
+
+  strikes: {
+    max: 3,
+    warningSceneSec: 2.6,         // strike 1: "you better get to class"
+    officeSceneSec: 3.4,          // strike 2: the office
+    afterStrikeGraceSec: 3.0,     // after a strike scene, staff can't see you for this long
+    officeLosesPeriodPoints: true,   // strike 2 costs you everything earned this period
+    alert: { vision: 1.2, notice: 1.4, speed: 1.1 },   // after strike 2, staff stay this much sharper for the rest of the day
+  },
+  backup: { range: 45, maxResponders: 2 },   // a guard's radio call pulls this many nearby staff toward you
+  pa: { showSec: 4.5, sameKindCooldownSec: 12 },
   render: { maxPixelRatio: 1.75, coneRays: 28 },
 };
 
 // Staff are data: adding a type later (security guard, principal) is one entry here.
 const STAFF_TYPES = {
   hallMonitor: {
+    name: "hall monitor",
     patrolSpeed: 2.0, chaseSpeed: 3.7,
     visionRange: 9, visionHalfAngleDeg: 50,   // slow, wide vision cone
     sweepDeg: 25, sweepRate: 0.9,             // looks side to side while patrolling
-    vestColor: 0xe8c547, scale: 1.12,
+    notice: 1.0,                              // how fast suspicion builds (multiplier)
+    vestColor: 0xe8c547, hatColor: 0x2c3e66, scale: 1.12,
+    caughtLine: "\"You better get to class.\"",
+  },
+  securityGuard: {
+    name: "security guard",
+    patrolSpeed: 2.5, chaseSpeed: 4.8,        // faster than you (4.3)...
+    sprintSec: 5, windedSec: 3, windedSpeed: 2.6,   // ...but only for a few seconds at a time
+    visionRange: 13, visionHalfAngleDeg: 28,  // narrow, long cone, like a flashlight
+    sweepDeg: 35, sweepRate: 0.6,
+    roamTurnSec: [6, 14],                     // roams: turns around every so often instead of a fixed loop
+    notice: 1.3,
+    callsBackup: true,
+    vestColor: 0x26364f, hatColor: 0x111111, scale: 1.2,
+    caughtLine: "\"Let's go, chief. Walk with me.\"",
   },
 };
+
+// The PA announcer. Placeholder jokes: Alexander will punch these up. {hall}, {n} and {d} get filled in.
+const PA_LINES = {
+  start:      ["Good morning, students. Please proceed to your first-period class.", "Reminder: hallways are for passing, not loitering."],
+  guardOnDuty:["Security is now patrolling the halls. He has had his coffee.", "Attention: Officer Dale is on duty. Please do not make eye contact."],
+  backup:     ["Security to the {hall}. Security to the {hall}.", "All available staff, please check the {hall}."],
+  strike1:    ["Attention staff: keep an eye out for a student in a gray hoodie.", "A reminder that skipping class is against school policy. Looking at you, gray hoodie."],
+  strike2:    ["Will the student in the gray hoodie report to the main office. Oh. You're already here.", "Staff, please remain on high alert for the rest of the day."],
+  lastStrike: ["One more and we're calling home.", "Gray hoodie, this is your final warning."],
+  sweep:      ["Custodial reminder: restrooms are not study halls."],
+  daySurvived:["That concludes day {d}. Tomorrow's lunch: mystery tacos.", "Day {d} is over. Somehow nobody caught that kid."],
+  runOver:    ["Gray hoodie, your parents are on line two."],
+};
+const HALL_NAMES = ["south hall", "east hall", "north hall", "west hall"];
 
 // Floor plan: a ring corridor around a block of classrooms (one floor, fixed layout).
 const LAYOUT = {
@@ -412,7 +454,7 @@ const markersEl = document.getElementById("markers");
 function spawnStaff(typeKey, s) {
   const T = STAFF_TYPES[typeKey];
   const p = ringPos(s, 0);
-  const mesh = makePerson({ body: T.vestColor, skin: pick(SKIN_COLORS), scale: T.scale, hat: 0x2c3e66 });
+  const mesh = makePerson({ body: T.vestColor, skin: pick(SKIN_COLORS), scale: T.scale, hat: T.hatColor });
   const RAYS = CFG.render.coneRays;
   const geo = new THREE.BufferGeometry();
   geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array((RAYS + 2) * 3), 3));
@@ -425,7 +467,8 @@ function spawnStaff(typeKey, s) {
   const edge = document.createElement("div"); edge.className = "edge"; markersEl.appendChild(edge);
   const st = { type: T, x: p.x, z: p.z, s, dir: Math.random() < 0.5 ? 1 : -1, facing: 0, state: "patrol",
     suspicion: 0, lastX: 0, lastZ: 0, lastVX: 0, lastVZ: 0, searchT: 0, stepT: 0, sweep: Math.random() * 10,
-    tx: 0, tz: 0, pauseT: 0, bustSpot: null, mesh, cone, alert, edge };
+    tx: 0, tz: 0, pauseT: 0, bustSpot: null, chaseT: 0, windedT: 0, roamT: T.roamTurnSec ? rand(...T.roamTurnSec) : 0,
+    key: typeKey, mesh, cone, alert, edge };
   st.facing = ringHeading(s, st.dir);
   staff.push(st);
   return st;
@@ -563,7 +606,8 @@ function readInput() {
 // =====================================================================================
 // Game state
 // =====================================================================================
-const game = { state: "title", day: 1, period: 1, phase: "passing", phaseT: 0, score: 0, time: 0 };
+const game = { state: "title", day: 1, period: 1, phase: "passing", phaseT: 0, score: 0, time: 0,
+  strikes: 0, highAlert: false, periodScore: 0, periodsSkipped: 0, sceneT: 0, sceneEnd: null };
 const cam = { yaw: 0 };
 const $ = (id) => document.getElementById(id);
 const ui = { phase: $("phase"), label: $("phaseLabel"), timer: $("timer"), score: $("score"), uses: $("uses"), banner: $("banner"), fps: $("fps"),
@@ -578,6 +622,8 @@ function toast(text, sec = 1.8) {
 
 function resetGame() {
   game.day = 1; game.period = 1; game.score = 0; game.time = 0;
+  game.strikes = 0; game.highAlert = false; game.periodScore = 0; game.periodsSkipped = 0;
+  player.invisT = 0; paLast = {};
   // kid walks in from the entrance
   const p = ringPos(LAYOUT.entranceS, OUTER_LAT - 0.8);
   player.x = p.x; player.z = p.z; player.vx = player.vz = 0;
@@ -613,10 +659,16 @@ function startPassing(first) {
     c.doorS = pick(LAYOUT.doorS);
     if (!first) { c.mode = "spawning"; c.spawnAt = rand(0, CFG.crowd.floodSpreadSec); c.speed = rand(CFG.crowd.speedMin, CFG.crowd.speedMax); }
   }
-  // add hall monitors for this period, far from the kid
-  const want = CFG.monitorsPerPeriod[Math.min(game.period, CFG.monitorsPerPeriod.length) - 1];
+  game.periodScore = 0;
+  // add staff for this period, far from the kid
+  const idx = Math.min(game.period, CFG.periodsPerDay) - 1;
   const ps = ringProject(player.x, player.z).s;
-  while (staff.length < want) spawnStaff("hallMonitor", ps + PERIM / 2 + staff.length * 17);
+  for (const [key, table] of [["hallMonitor", CFG.monitorsPerPeriod], ["securityGuard", CFG.guardsPerPeriod]]) {
+    const want = table[Math.min(idx, table.length - 1)];
+    let have = staff.filter((st) => st.key === key).length;
+    if (key === "securityGuard" && have < want) pa("guardOnDuty");
+    while (have < want) { spawnStaff(key, ps + PERIM / 2 + staff.length * 17); have++; }
+  }
 }
 
 function startSkipping() {
@@ -628,12 +680,14 @@ function startSkipping() {
 
 function periodSurvived() {
   playBell();
-  game.period++;
+  game.period++; game.periodsSkipped++;
   resetSpotsForPeriod();
   if (player.hidden?.kind === "classroom") exitSpot(false, "Bell! You slip out with the class.");
   if (game.period > CFG.periodsPerDay) {
     banner(`DAY ${game.day} SURVIVED!<small>Day ${game.day + 1} starts now. New subs today.</small>`, 3);
+    pa("daySurvived", null, null, { d: game.day });
     game.day++; game.period = 1;
+    game.highAlert = false;   // the office forgets about you overnight
     rollSubs();
   } else {
     banner(`BELL! +${CFG.pointsPerPeriod}<small>Period ${game.period - 1} skipped. Blend into the crowd.</small>`);
@@ -641,13 +695,77 @@ function periodSurvived() {
   startPassing(false);
 }
 
+function releaseControls() { stick.id = look.id = null; keys.clear(); stickBase.style.display = stickKnob.style.display = "none"; }
+
 function caught(st) {
-  game.state = "caught";
-  playBlip([660, 520, 390, 260], 0.13, "sawtooth", 0.07);
-  $("caughtText").textContent = `The hall monitor walks you back to class. Day ${game.day}, period ${game.period} · Score ${Math.floor(game.score)}`;
-  $("caught").hidden = false;
+  game.strikes++;
   ui.hide.hidden = true;
-  stick.id = look.id = null; stickBase.style.display = stickKnob.style.display = "none";
+  releaseControls();
+  playBlip([660, 520, 390, 260], 0.13, "sawtooth", 0.07);
+  if (game.strikes >= CFG.strikes.max) {   // strike 3: run over
+    game.state = "caught";
+    pa("runOver");
+    $("caughtText").innerHTML = `The ${st.type.name} walks you to the office. Your parents are on their way.<br>` +
+      `<b>Score ${Math.floor(game.score)}</b> · Day ${game.day}, period ${game.period} · ${game.periodsSkipped} period${game.periodsSkipped === 1 ? "" : "s"} skipped`;
+    $("caught").hidden = false;
+    return;
+  }
+  game.state = "scene"; game.sceneT = 0;
+  const office = game.strikes === 2;
+  game.sceneEnd = office ? CFG.strikes.officeSceneSec : CFG.strikes.warningSceneSec;
+  const lost = office && CFG.strikes.officeLosesPeriodPoints ? Math.floor(game.periodScore) : 0;
+  $("strikeTitle").textContent = office ? "STRIKE 2 · THE OFFICE" : "STRIKE 1 · WARNING";
+  $("strikeLine").textContent = office
+    ? "The vice principal yells at you for a solid minute. Staff will be watching you for the rest of the day."
+    : `The ${st.type.name} catches you. ${st.type.caughtLine}`;
+  $("strikeSub").textContent = office ? (lost ? `-${lost} points (this period's skipping)` : "") : "One more and you're going to the office.";
+  $("strikeDots").innerHTML = strikeDotsHtml();
+  $("strike").className = "overlay " + (office ? "office" : "warning");
+  $("strike").hidden = false;
+  if (office) { game.score -= lost; game.periodScore = 0; }
+  pa(office ? "strike2" : "strike1");
+  // everyone backs off
+  for (const o of staff) {
+    if (o.state !== "patrol") { o.state = "return"; o.s = ringProject(o.x, o.z).s; }
+    o.suspicion = 0; o.calledBackup = false; o.chaseT = 0; o.windedT = 0; o.pauseT = 0.8;
+  }
+  game.pendingOffice = office;
+}
+
+function endScene() {
+  if (game.state !== "scene") return;
+  $("strike").hidden = true;
+  if (game.pendingOffice) {
+    game.highAlert = true;
+    // sent back out from the office, by the entrance
+    const p = ringPos(LAYOUT.entranceS, OUTER_LAT - 0.8);
+    player.x = p.x; player.z = p.z; player.heading = ringHeading(LAYOUT.entranceS, 1); cam.yaw = player.heading;
+    banner("HIGH ALERT<small>Staff see farther and move faster for the rest of the day.</small>", 2.6);
+  }
+  if (game.strikes === CFG.strikes.max - 1) setTimeout(() => pa("lastStrike"), 4800);
+  player.invisT = CFG.strikes.afterStrikeGraceSec;
+  game.state = "playing";
+  clock.getDelta();
+}
+function strikeDotsHtml() {
+  let h = "";
+  for (let i = 0; i < CFG.strikes.max; i++) h += `<span class="${i < game.strikes ? "on" : ""}"></span>`;
+  return h;
+}
+
+// ---- PA announcer: chime + text box. Rate-limited per kind so it doesn't nag.
+let paLast = {}, paTimer = 0;
+function pa(kind, text = null, sec = null, vars = {}) {
+  if (kind) {
+    if (game.time - (paLast[kind] ?? -99) < CFG.pa.sameKindCooldownSec) return;
+    paLast[kind] = game.time;
+    text = pick(PA_LINES[kind]).replace(/\{(\w+)\}/g, (m, k) => vars[k] ?? m);
+    playBlip([784, 622], 0.22, "sine", 0.06);   // ding-dong
+  }
+  $("paText").textContent = text;
+  $("pa").classList.add("show");
+  $("pa").classList.toggle("quiet", !kind);
+  paTimer = sec ?? CFG.pa.showSec;
 }
 
 function pause() {
@@ -662,6 +780,7 @@ function onOverlayTap() {
     $("title").hidden = true; $("caught").hidden = true;
     game.state = "playing";
     banner("PASSING PERIOD<small>Blend in. When the bell rings, don't be in class.</small>");
+    setTimeout(() => game.state === "playing" && pa("start"), 1200);
     tryFullscreenLandscape();
   } else if (game.state === "paused") {
     $("paused").hidden = true; game.state = "playing";
@@ -669,6 +788,7 @@ function onOverlayTap() {
   clock.getDelta();
 }
 for (const id of ["title", "caught", "paused"]) $(id).addEventListener("click", onOverlayTap);
+$("strike").addEventListener("click", () => { if (game.sceneT > 0.8) endScene(); });
 $("hpLeave").addEventListener("click", () => { if (game.state === "playing") exitSpot(false); });
 window.addEventListener("blur", pause);
 document.addEventListener("visibilitychange", () => { if (document.hidden) pause(); });
@@ -695,6 +815,7 @@ function latLimits(s) {
 function updatePlayer(dt) {
   readInput();
   player.graceT = Math.max(0, player.graceT - dt);
+  if (player.invisT > 0) { player.invisT -= dt; player.mesh.visible = player.invisT <= 0 || Math.sin(game.time * 22) > -0.3; }
   if (player.hidden) { updateHiding(dt); return; }
   const f = { x: Math.sin(cam.yaw), z: Math.cos(cam.yaw) }, r = { x: -Math.cos(cam.yaw), z: Math.sin(cam.yaw) };
   const mx = r.x * input.x + f.x * input.y, mz = r.z * input.x + f.z * input.y;
@@ -788,7 +909,8 @@ function moveToward(st, tx, tz, speed, dt) {
 function canSeePlayer(st, rangeMult, needCone) {
   if (player.hidden) return { seen: false, d: Infinity };
   const T = st.type, dx = player.x - st.x, dz = player.z - st.z, d = Math.hypot(dx, dz);
-  if (d > T.visionRange * rangeMult) return { seen: false, d };
+  if (player.invisT > 0) return { seen: false, d };   // just served a strike: a moment to get away
+  if (d > T.visionRange * alertMult("vision") * rangeMult) return { seen: false, d };
   if (needCone && Math.abs(angDiff(st.facing, Math.atan2(dx, dz))) > (T.visionHalfAngleDeg * Math.PI) / 180) return { seen: false, d };
   return { seen: lineOfSight(st.x, st.z, player.x, player.z), d };
 }
@@ -810,8 +932,8 @@ function updateStaff(dt, cover) {
     if (st.state === "patrol" || st.state === "return") {
       const look = canSeePlayer(st, 1, true);
       if (look.seen) {
-        const closeness = 1 - look.d / T.visionRange;
-        let rate = D.suspicionRate * (D.farRateFrac + (1 - D.farRateFrac) * closeness);
+        const closeness = Math.max(0, 1 - look.d / (T.visionRange * alertMult("vision")));
+        let rate = D.suspicionRate * T.notice * alertMult("notice") * (D.farRateFrac + (1 - D.farRateFrac) * closeness);
         rate /= 1 + cover * CFG.crowd.coverPerStudent;
         if (game.phase === "passing") rate /= D.passingBeatMult;
         st.suspicion += rate * dt;
@@ -825,7 +947,8 @@ function updateStaff(dt, cover) {
         if (moveToward(st, tgt.x, tgt.z, speed, dt) < 0.3) st.state = "patrol";
       } else {
         // patrol loop; slow down and squint while suspicious
-        speed = T.patrolSpeed * (st.suspicion > 0.05 ? D.suspiciousSlow : 1);
+        speed = T.patrolSpeed * alertMult("speed") * (st.suspicion > 0.05 ? D.suspiciousSlow : 1);
+        if (T.roamTurnSec) { st.roamT -= dt; if (st.roamT <= 0) { st.roamT = rand(...T.roamTurnSec); if (Math.random() < 0.6) st.dir *= -1; } }
         st.s += st.dir * speed * dt;
         const tgt = ringPos(st.s, 0);
         st.x = tgt.x; st.z = tgt.z;
@@ -835,11 +958,12 @@ function updateStaff(dt, cover) {
       }
     } else if (st.state === "chase") {
       const look = canSeePlayer(st, D.chaseSightRangeMult, false);
-      speed = T.chaseSpeed;
+      speed = chaseSpeed(st, dt);
       if (look.seen) {
         st.lastX = player.x; st.lastZ = player.z; st.lastVX = player.vx; st.lastVZ = player.vz;
         moveToward(st, player.x, player.z, speed, dt);
         if (look.d < D.catchRadius && player.graceT <= 0) { caught(st); return; }
+        if (T.callsBackup && !st.calledBackup) { st.calledBackup = true; callBackup(st); }
       } else {
         st.state = "search"; st.searchT = 0;
         const g = { x: st.lastX + st.lastVX * D.predictSec, z: st.lastZ + st.lastVZ * D.predictSec };
@@ -847,25 +971,26 @@ function updateStaff(dt, cover) {
       }
     } else if (st.state === "bust") {
       // they saw you duck into a hiding spot: go yank you out
-      speed = T.chaseSpeed;
+      speed = chaseSpeed(st, dt);
       const sp = st.bustSpot, f = ringPos(sp.s, sp.frontLat);
       if (!player.hidden && canSeePlayer(st, D.chaseSightRangeMult, false).seen) startChase(st);
       else if (moveToward(st, f.x, f.z, speed, dt) < 0.75) {
         if (player.hidden === sp) {
-          exitSpot(true, sp.kind === "locker" ? "The hall monitor yanks the locker open: \"I saw you go in there.\""
-            : sp.kind === "restroom" ? "The hall monitor bangs on the stall: \"I saw you go in there.\""
-            : "The hall monitor leans in the door: \"That one's mine.\"");
+          const who = `The ${T.name}`;
+          exitSpot(true, sp.kind === "locker" ? `${who} yanks the locker open: "I saw you go in there."`
+            : sp.kind === "restroom" ? `${who} bangs on the stall: "I saw you go in there."`
+            : `${who} leans in the door: "That one's mine."`);
           startChase(st); st.pauseT = CFG.hiding.bustPauseSec;
         } else { st.state = "search"; st.searchT = 0; st.lastX = st.tx = f.x; st.lastZ = st.tz = f.z; }
       }
     } else if (st.state === "search") {
       st.searchT += dt;
-      speed = T.chaseSpeed * 0.8;
+      speed = chaseSpeed(st, dt) * 0.8;
       const reached = moveToward(st, st.searchT < 0.6 ? st.lastX : st.tx, st.searchT < 0.6 ? st.lastZ : st.tz, speed, dt) < 0.3;
       if (reached) { speed = 0; st.facing += Math.sin(game.time * 3) * dt * 2.5; }   // look around
       if (canSeePlayer(st, 1, true).seen) startChase(st);
       else if (st.searchT > D.searchSec) {
-        st.state = "return"; st.suspicion = 0;
+        st.state = "return"; st.suspicion = 0; st.calledBackup = false;
         const pr = ringProject(st.x, st.z); st.s = pr.s;
         st.dir = Math.random() < 0.5 ? 1 : -1;
         playBlip([330, 260], 0.12, "triangle", 0.05);   // "hmph"
@@ -878,10 +1003,38 @@ function updateStaff(dt, cover) {
       const interval = st.state === "chase" ? CFG.footsteps.chaseInterval : CFG.footsteps.patrolInterval;
       if (st.stepT >= interval) { st.stepT = 0; playFootstep(st.x, st.z, st.state === "chase"); }
     }
+    if (st.state !== "chase" && st.state !== "bust" && st.state !== "search") st.chaseT = Math.max(0, st.chaseT - dt);
     st.mesh.position.set(st.x, speed > 0.2 ? Math.abs(Math.sin(game.time * (st.state === "chase" ? 12 : 7))) * 0.06 : 0, st.z);
     st.mesh.rotation.y = st.facing;
     updateCone(st);
   }
+}
+
+// Guards sprint faster than you, then get winded. Everyone moves a bit faster on high alert.
+function chaseSpeed(st, dt) {
+  const T = st.type;
+  let v = T.chaseSpeed;
+  if (T.sprintSec) {
+    if (st.windedT > 0) { st.windedT -= dt; v = T.windedSpeed; if (st.windedT <= 0) st.chaseT = 0; }
+    else { st.chaseT += dt; if (st.chaseT > T.sprintSec) { st.windedT = T.windedSec; toast("The guard is winded! *huff* *huff*"); } }
+  }
+  return v * alertMult("speed");
+}
+function alertMult(k) { return game.highAlert ? CFG.strikes.alert[k] : 1; }
+
+// A guard radios in: the nearest free staff head for your position, and the PA says where.
+function callBackup(caller) {
+  playBlip([1400, 1100, 1400], 0.05, "square", 0.05);   // radio chirp
+  const others = staff.filter((o) => o !== caller && o.state !== "chase" && o.state !== "bust")
+    .map((o) => ({ o, d: Math.hypot(o.x - player.x, o.z - player.z) }))
+    .filter((e) => e.d < CFG.backup.range).sort((a, b) => a.d - b.d).slice(0, CFG.backup.maxResponders);
+  for (const { o, d } of others) {
+    o.state = "search"; o.suspicion = 0.6;
+    o.searchT = -Math.min(14, d / (o.type.chaseSpeed * 0.8));   // time to get there before they give up
+    o.lastX = o.tx = player.x; o.lastZ = o.tz = player.z;
+  }
+  const seg = SEGS.indexOf(segAt(ringProject(player.x, player.z).s));
+  pa("backup", null, null, { hall: HALL_NAMES[seg] });
 }
 
 function startChase(st) {
@@ -893,7 +1046,7 @@ function startChase(st) {
 const CONE_COLORS = { patrol: new THREE.Color(0xfff2a8), suspicious: new THREE.Color(0xffa94d), chase: new THREE.Color(0xff4d4d) };
 function updateCone(st) {
   const T = st.type, RAYS = CFG.render.coneRays, half = (T.visionHalfAngleDeg * Math.PI) / 180;
-  const range = T.visionRange * (st.state === "chase" ? CFG.detection.chaseSightRangeMult : 1);
+  const range = T.visionRange * alertMult("vision") * (st.state === "chase" ? CFG.detection.chaseSightRangeMult : 1);
   const pos = st.cone.geometry.attributes.position;
   pos.setXYZ(0, st.x, 0.03, st.z);
   for (let i = 0; i <= RAYS; i++) {
@@ -960,7 +1113,7 @@ function updateHud() {
   const total = game.phase === "passing" ? CFG.passingSec : CFG.skippingSec;
   const left = Math.max(0, Math.ceil(total - game.phaseT));
   const label = `DAY ${game.day} · PERIOD ${game.period} · ${game.phase === "passing" ? "PASSING" : "SKIPPING"}`;
-  const key = label + left + Math.floor(game.score) + "|" + game.lockerUses;
+  const key = label + left + Math.floor(game.score) + "|" + game.lockerUses + "|" + game.strikes + game.highAlert;
   if (key === lastHud) return;
   lastHud = key;
   ui.label.textContent = label;
@@ -969,6 +1122,7 @@ function updateHud() {
   ui.score.textContent = Math.floor(game.score);
   ui.uses.textContent = `LOCKERS ×${game.lockerUses}`;
   ui.uses.classList.toggle("out", game.lockerUses === 0);
+  $("strikes").innerHTML = strikeDotsHtml() + (game.highAlert ? `<b>HIGH ALERT</b>` : "");
 }
 
 function update(dt) {
@@ -976,6 +1130,7 @@ function update(dt) {
   if (game.phase === "passing" && game.phaseT >= CFG.passingSec) startSkipping();
   else if (game.phase === "skipping") {
     game.score += (CFG.pointsPerPeriod / CFG.skippingSec) * dt;
+    game.periodScore += (CFG.pointsPerPeriod / CFG.skippingSec) * dt;
     if (game.phaseT >= CFG.skippingSec) periodSurvived();
   }
   updatePlayer(dt);
@@ -1096,6 +1251,7 @@ function updateRestrooms() {
     sp.nextSweep = game.time + CFG.hiding.restroomSweepEverySec + rand(-J, J);
     if (player.hidden !== sp) continue;
     exitSpot(true, "Restroom sweep! A monitor shoos everyone out.");
+    pa("sweep");
     // the nearest monitor who isn't busy comes to see who that was
     const f = spotFront(sp, {});
     let best = null, bd = Infinity;
@@ -1179,6 +1335,8 @@ updateCrowd(0.016); drawCrowd(); for (const st of staff) updateCone(st);
 renderer.setAnimationLoop(() => {
   const dt = Math.min(clock.getDelta(), 0.05);
   if (game.state === "playing") update(dt);
+  if (game.state === "scene") { game.sceneT += dt; if (game.sceneT >= game.sceneEnd) endScene(); }
+  if (paTimer > 0) { paTimer -= dt; if (paTimer <= 0) $("pa").classList.remove("show"); }
   if (bannerTimer > 0) { bannerTimer -= dt; if (bannerTimer <= 0) ui.banner.classList.remove("show"); }
   if (toastTimer > 0) { toastTimer -= dt; if (toastTimer <= 0) ui.toast.classList.remove("show"); }
   drawCrowd();
@@ -1191,7 +1349,7 @@ renderer.setAnimationLoop(() => {
 });
 
 // small read-only hook for automated playtests
-window.__hallwaySkip = { get state() { return { ...game, staff: staff.map((s) => ({ state: s.state, suspicion: s.suspicion })), crowdLeft: crowd.filter((c) => c.mode !== "gone").length,
+window.__hallwaySkip = { get state() { return { ...game, staff: staff.map((s) => ({ key: s.key, state: s.state, suspicion: s.suspicion, x: s.x, z: s.z, winded: s.windedT > 0 })), pa: $("pa").classList.contains("show") ? $("paText").textContent : null, crowdLeft: crowd.filter((c) => c.mode !== "gone").length,
   player: { x: player.x, z: player.z, hidden: player.hidden ? `${player.hidden.kind}${player.hidden.room ? " " + player.hidden.room : ""}` : null, graceT: player.graceT },
   spots: SPOTS.map((sp) => ({ kind: sp.kind, s: sp.s, room: sp.room, teacher: sp.teacher, blocked: spotBlocked(sp) })) }; }, CFG, STAFF_TYPES };
 if (debug) {   // test-only helpers (only with ?debug in the URL)
@@ -1201,6 +1359,7 @@ if (debug) {   // test-only helpers (only with ?debug in the URL)
     faceSpot(i) { const sp = SPOTS[i], seg = segAt(sp.s); cam.yaw = player.heading = Math.atan2(sp.sign * seg.nx, sp.sign * seg.nz); manualCamT = 99; },
     staffTo(k, x, z, state) { const st = staff[k]; st.x = x; st.z = z; if (state) { st.state = state; st.suspicion = 1; } },
     setTime(t) { game.phaseT = t; },
+    catchNow(k = 0) { caught(staff[k]); },
     sweepNow(i) { SPOTS[i].nextSweep = game.time; },
   });
 }
