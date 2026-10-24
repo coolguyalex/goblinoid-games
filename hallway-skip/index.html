@@ -17,7 +17,7 @@
     text-align: center; text-shadow: 0 2px 4px rgba(0,0,0,.6); }
   #phase .label { font-size: 13px; letter-spacing: .14em; font-weight: 700; opacity: .9; }
   #phase .timer { font-size: 30px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.1; }
-  #phase.passing .label { color: #9fe0ff; } #phase.skipping .label { color: #ffd36b; }
+  #phase.passing .label { color: #9fe0ff; } #phase.skipping .label { color: #ffd36b; } #phase.survival .label { color: #ff6b6b; }
   #score { position: absolute; top: max(10px, env(safe-area-inset-top)); right: max(14px, env(safe-area-inset-right));
     font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; text-shadow: 0 2px 4px rgba(0,0,0,.6); }
   #uses { position: absolute; top: calc(max(10px, env(safe-area-inset-top)) + 30px); right: max(14px, env(safe-area-inset-right));
@@ -72,6 +72,11 @@
   .itag.near { box-shadow: 0 0 0 2px #ffdc80; }
   .itag.sub { color: #8ef0a0; }
   .itag.off { opacity: .5; }
+  .itag.alarm { color: #ff9c9c; }
+  .itag.alarm.armed { background: #c0392b; color: #fff; }
+  #alarmFx { position: fixed; inset: 0; pointer-events: none; z-index: 1; box-shadow: inset 0 0 90px 30px rgba(255, 40, 40, .55); animation: strobe .7s steps(2) infinite; }
+  #alarmFx[hidden] { display: none; }
+  @keyframes strobe { 50% { box-shadow: inset 0 0 60px 10px rgba(255, 40, 40, .15); } }
 
   /* while hiding */
   #hidePanel { position: fixed; inset: 0; pointer-events: none; background: radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,.6)); }
@@ -186,6 +191,7 @@
   <div id="toast"></div>
   <div id="fps" hidden></div>
 </div>
+<div id="alarmFx" hidden></div>
 <div id="hidePanel" hidden>
   <div class="box">
     <div id="hpTitle"></div>
@@ -208,7 +214,7 @@
 
 <div class="overlay" id="title">
   <div>
-    <span class="tag">prototype · build step 12</span>
+    <span class="tag">prototype · build step 13</span>
     <h1>Hallway Skip</h1>
     <p>Skip class. Don't get caught.</p>
     <div class="buttons">
@@ -226,7 +232,8 @@
     <p>Walk into (or tap) a green locker, a restroom, or a classroom door to hide. Subs take longer to notice you. While hiding in a room you can grab stuff off the desks, but it costs time, the teacher might call security, and the room stays locked for the next two periods. The main office (room 105) hides a fake hall pass and the master key, which opens locked doors.</p>
     <p>Security guards have narrow flashlight vision, are faster than you for a few seconds, and call for backup. Teachers at their doors yell for help and grab you if you walk past.</p>
     <p>Items turn up in the halls: tap one to pick it up (four slots, right edge). Tap a slot, then flick to throw. Anything you hit someone with scores, and hitting staff scores more. Banana peels trip anyone who steps on them (several people, until they wear out). Whoopee cushions go off when someone steps on them, pulling staff over. Basketballs knock people down and make noise on every bounce. Paper airplanes soar over heads, then drop low to hit someone (the orange dots). The wheelie chair launches you down the hall. The gym has footballs (they fly far and bounce anywhere), science labs have stink bombs (points for everyone who walks through the cloud), and art rooms have spray paint (tap it next to a wall).</p>
-    <p>HEAT (they know it's you) rises when staff see you making mischief or running away, and drops at every bell. Above the line, staff can catch you during passing periods too. SCHOOL ALERT (they know something happened) rises with loud mischief and only drops overnight. Max it out and tomorrow is your LAST DAY.</p>
+    <p>HEAT (they know it's you) rises when staff see you making mischief or running away, and drops at every bell. Above the line, staff can catch you during passing periods too. SCHOOL ALERT (they know something happened) rises with loud mischief and only drops overnight; the higher it is, the more guards are on duty.</p>
+    <p>Max out your HEAT and you're in SURVIVAL MODE: heat stays maxed, more staff keep arriving, and every point counts double, but the next catch ends your run. The fire alarm (red box on the wall, tap it twice) does this on purpose: staff are stunned, the halls flood with kids, items spill everywhere and every classroom locks. Flooding a bathroom (from inside it) is worth a lot of points and heat, and closes it for the day.</p>
     <p>Friends (white tees) raise a hand during passing periods: get close and tap the bubble for a high five or a gum trade. Trading gum pays well and gets you a fake pass that cancels your next catch. Kids toss paper airplanes: walk into one to catch it. Points multiply while nobody has eyes on you (streak), and double for a few seconds after a near miss. After your second strike, the principal walks the halls.</p>
     <p>Three strikes and you're out. Survive six periods to finish the day. Each day gets harder. Your run saves at every bell.</p>
     <p class="keys">Phone: left thumb moves, drag on the right side to look around.<br>Desktop: WASD or arrow keys move, drag the mouse to look, click or E to hide.</p>
