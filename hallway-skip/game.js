@@ -1,4 +1,4 @@
-// Hallway Skip — build step 15 prototype.
+// Hallway Skip — build step 15b prototype.
 // Step 1: hallway, joystick, a hall monitor that chases, a crowd that thins, and the bell.
 // Step 2: tap-to-interact and hiding spots: lockers, restrooms, classrooms (teacher and sub boot timers).
 // Step 3: security guard, the three-strike ladder, and the PA announcer.
@@ -373,7 +373,7 @@ const ITEM_TYPES = {
                    hit: { student: 20, staff: 80, studentSec: 0.5, staffSec: 0.7, style: "flinch" } },
   spitball:      { label: "Spitball", icon: "🫧", kind: "throw", uses: 3, speed: [12, 18], pitchDeg: 4, gravity: 6, spawnWeight: 4,
                    hit: { student: 25, staff: 75, studentSec: 0.4, staffSec: 0.8, style: "flinch" } },
-  bananaPeel:    { label: "Banana peel", icon: "🍌", kind: "throw", speed: [3, 8], pitchDeg: 35, gravity: 9.8, lifeSec: 40,
+  bananaPeel:    { label: "Banana peel", icon: "🍌", kind: "throw", speed: [2, 4.5], pitchDeg: 35, gravity: 9.8, lifeSec: 40,
                    afterSlipSec: 10, maxSlips: 5,   // stays down after the first slip so others can slip too
                    slipStaffSec: 2.5, slipStudentSec: 1.0, slipPlayerSec: 0.8, staffPoints: 150, studentPoints: 30, spawnWeight: 2 },
   whoopee:       { label: "Whoopee cushion", icon: "💨", kind: "throw", recoverable: true, speed: [3, 8], pitchDeg: 35, gravity: 9.8,
@@ -775,6 +775,9 @@ const crowdHeads = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(0.21, 0
 crowdBodies.setColorAt(0, new THREE.Color(0xffffff)); crowdHeads.setColorAt(0, new THREE.Color(0xffffff));   // per-kid colors, filled in each frame
 crowdBodies.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 crowdHeads.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+// drawCrowd() does its own per-kid culling; three.js would otherwise cull the whole crowd using a bounding sphere
+// computed once from the first frame, so every kid vanished at some camera angles.
+crowdBodies.frustumCulled = crowdHeads.frustumCulled = false;
 scene.add(crowdBodies, crowdHeads);
 const DOOR_SPOTS = () => SPOTS.filter((sp) => sp.kind === "classroom");
 {
@@ -3314,7 +3317,8 @@ if (debug) {   // test-only helpers (only with ?debug in the URL)
     flood() { floodRestroom(); },
     staffCount() { return staff.length; },
     heatAdd(n) { addHeat(n); },
-    crowdStats(cull) { if (cull != null) crowdCull = cull; return { drawn: crowdDrawn, total: crowd.length, active: crowd.filter(isActive).length }; },
+    crowdStats(cull) { if (cull != null) crowdCull = cull; return { drawn: crowdDrawn, total: crowd.length, active: crowd.filter(isActive).length,
+      meshShown: !crowdBodies.frustumCulled || frustum.intersectsObject(crowdBodies) }; },
     sprintInfo() { return { stamina: Math.round(player.stamina * 100) / 100, sprinting: player.sprinting, winded: player.winded }; },
     ending() { return { title: $("caughtTitle").textContent, text: $("caughtText").textContent }; },
     lookYaw(a) { cam.yaw = player.heading = a; manualCamT = 99; },
