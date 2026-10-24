@@ -1,10 +1,11 @@
-// Hallway Skip — build step 6 prototype.
+// Hallway Skip — build step 7 prototype.
 // Step 1: hallway, joystick, a hall monitor that chases, a crowd that thins, and the bell.
 // Step 2: tap-to-interact and hiding spots: lockers, restrooms, classrooms (teacher and sub boot timers).
 // Step 3: security guard, the three-strike ladder, and the PA announcer.
 // Step 4: the six-period day, escalating days, hall teachers, save at the bell. Figure-8 floor plan.
 // Step 5: four-slot hotbar, tap-then-flick throwing with an arc preview, and the first seven items.
 // Step 6: rooms as shops (loot tables by room type, grabbing costs boot time, teachers can call security) and despawn timers.
+// Step 7: heat ("they know it's me") and the persistent security level ("they know something happened").
 import * as THREE from "three";
 
 // =====================================================================================
@@ -105,6 +106,32 @@ const CFG = {
     hallItemLifeSec: 45,          // items lying in the halls vanish after this long (blinking at the end)
   },
 
+  // Short-term heat, 0-100: "they know it's me". Like a GTA wanted level.
+  heat: {
+    seenHavocMult: 0.25,          // seen doing havoc: heat += the points it earned * this...
+    seenHavocMax: 25,             // ...but no more than this per event
+    seenRunning: 12,              // a chase starts (you were seen running away)
+    roomCall: 15,                 // a teacher calls security on you
+    bellDrop: 0.6,                // each bell takes away this fraction (steep, per the spec)
+    hiddenCoolPerSec: 1.0,        // slow cooling while hidden, to reward patience
+    maxRisePerSec: 30,            // heat can't climb faster than this, so one mistake can't blow past every threshold at once
+    passingCatchAt: 50,           // at or above this, staff can detain you during passing periods (PA announces it)
+    shooHeat: 15,                 // caught in a passing period below that: no strike, just shooed to class (and a bit of heat)
+    effect: { speed: 0.25, vision: 0.2, notice: 0.5 },   // at 100 heat: staff +25% speed, +20% vision range, +50% notice
+  },
+  // Persistent security level, 0-100: "they know something happened". Drops only between days.
+  security: {
+    loudUnseen: 3,                // loud havoc nobody saw
+    loudSeen: 10,                 // loud havoc someone saw
+    quietSeen: 2,                 // quiet havoc someone saw
+    dayDecay: 0.4,                // overnight it drops by this fraction
+    effect: { speed: 0.15, vision: 0.15, notice: 0.3 },   // at 100
+    extraGuardAt: 50,             // at or above this, one extra guard is on duty
+    lastDayAt: 100,               // end a day maxed out and tomorrow is the LAST DAY...
+    lastDayPeriods: 3,            // ...a short, frantic scoring sprint
+    lastDayScoreMult: 2,
+  },
+
   footsteps: { hearRange: 20, patrolInterval: 0.55, chaseInterval: 0.3, volume: 0.55 },
 
   strikes: {
@@ -170,6 +197,9 @@ const PA_LINES = {
   lastPeriod: ["Sixth period, everyone. Almost there. Some of you more than others."],
   newDay:     ["Good morning! It's day {d}. Security has been, quote, 'beefed up.'", "Welcome to day {d}. Staff have been briefed about a certain hoodie."],
   runOver:    ["Gray hoodie, your parents are on line two."],
+  heatHigh:   ["Attention staff: you may now detain students in the halls between classes.", "Staff, eyes open during passing periods. You know who you're looking for."],
+  securityUp: ["We've had reports of... noises. All staff, stay alert.", "Whoever is responsible for the whoopee cushions: we will find you."],
+  lastDay:    ["This is your principal speaking. Today, the hoodie goes down.", "Lockdown drill. Just kidding. Unless...?"],
 };
 
 // Hiding spots are data: a new kind is one entry here (placement lives in LAYOUT).
@@ -797,7 +827,7 @@ function readInput() {
 // =====================================================================================
 const game = { state: "title", day: 1, period: 1, phase: "passing", phaseT: 0, score: 0, time: 0,
   strikes: 0, highAlert: false, periodScore: 0, periodsSkipped: 0, dayPeriodsSkipped: 0, sceneT: 0, sceneEnd: null,
-  lockerUses: 0, pendingOffice: false, hotbar: [], aim: null, havocCount: {} };
+  lockerUses: 0, pendingOffice: false, hotbar: [], aim: null, havocCount: {}, heat: 0, heatPending: 0, security: 0, lastDay: false };
 const cam = { yaw: 0 };
 const $ = (id) => document.getElementById(id);
 const ui = { phase: $("phase"), label: $("phaseLabel"), timer: $("timer"), score: $("score"), uses: $("uses"), banner: $("banner"), fps: $("fps"),
@@ -811,13 +841,14 @@ function toast(text, sec = 1.8) {
 }
 
 // ---- difficulty: within-day tables (by period) and across-days multipliers (by day) ----
-const perPeriod = (table) => table[Math.min(game.period, table.length) - 1];
+const perPeriod = (table) => (game.lastDay ? table[table.length - 1] : table[Math.min(game.period, table.length) - 1]);
 function dayMult(perDay) { return Math.min(CFG.days.maxMult, 1 + perDay * (game.day - 1)); }
 function alertMult(k) { return game.highAlert ? CFG.strikes.alert[k] : 1; }
 function staffMult(k) {
   const day = { speed: CFG.days.staffSpeedPerDay, vision: CFG.days.staffVisionPerDay, notice: CFG.days.staffNoticePerDay }[k];
-  return alertMult(k) * dayMult(day);
+  return alertMult(k) * dayMult(day) * (1 + CFG.heat.effect[k] * game.heat / 100) * (1 + CFG.security.effect[k] * game.security / 100);
 }
+const periodsToday = () => (game.lastDay ? CFG.security.lastDayPeriods : CFG.periodsPerDay);
 function phaseLen(phase = game.phase) {
   const D = CFG.days, n = game.day - 1;
   return phase === "passing" ? Math.max(D.minPassingSec, CFG.passingSec + D.passingSecPerDay * n)
@@ -828,7 +859,7 @@ function phaseLen(phase = game.phase) {
 const SAVE_KEY = "hallwaySkip.save.v1";
 function saveGame() {
   try { localStorage.setItem(SAVE_KEY, JSON.stringify({ day: game.day, period: game.period, score: Math.floor(game.score),
-    strikes: game.strikes, highAlert: game.highAlert, periodsSkipped: game.periodsSkipped })); } catch (e) { /* storage blocked: fine */ }
+    strikes: game.strikes, highAlert: game.highAlert, periodsSkipped: game.periodsSkipped, security: Math.round(game.security), lastDay: game.lastDay })); } catch (e) { /* storage blocked: fine */ }
 }
 function loadSave() { try { const s = JSON.parse(localStorage.getItem(SAVE_KEY)); return s && s.day ? s : null; } catch (e) { return null; } }
 function clearSave() { try { localStorage.removeItem(SAVE_KEY); } catch (e) { /* fine */ } }
@@ -867,6 +898,7 @@ function resetGame(save = null) {
   game.day = save?.day ?? 1; game.period = save?.period ?? 1; game.score = save?.score ?? 0; game.time = 0;
   game.strikes = save?.strikes ?? 0; game.highAlert = save?.highAlert ?? false;
   game.periodScore = 0; game.periodsSkipped = save?.periodsSkipped ?? 0; game.dayPeriodsSkipped = 0;
+  game.security = save?.security ?? 0; game.lastDay = save?.lastDay ?? false; game.heat = game.heatPending = 0;
   paLast = {};
   morningSetup();
 }
@@ -895,11 +927,11 @@ function startPassing(first) {
   // staff for this period (the within-day curve); they stay on for the rest of the day
   for (const [key, table, line] of [["hallMonitor", CFG.monitorsPerPeriod], ["securityGuard", CFG.guardsPerPeriod, "guardOnDuty"], ["hallTeacher", CFG.teachersPerPeriod, "teacherOut"]]) {
     let have = staff.filter((st) => st.key === key).length;
-    const want = perPeriod(table);
+    const want = perPeriod(table) + (key === "securityGuard" && game.security >= CFG.security.extraGuardAt ? 1 : 0);
     if (have < want && line && game.state === "playing") pa(line);
     while (have < want) { spawnStaff(key, pickStaffPlace(key)); have++; }
   }
-  if (game.period === CFG.periodsPerDay && !first) setTimeout(() => game.state === "playing" && pa("lastPeriod"), 2500);
+  if (game.period === periodsToday() && !first && !game.lastDay) setTimeout(() => game.state === "playing" && game.period === periodsToday() && !game.lastDay && pa("lastPeriod"), 2500);
 }
 
 function startSkipping() {
@@ -912,7 +944,8 @@ function startSkipping() {
 function periodSurvived() {
   playBell();
   game.periodsSkipped++; game.dayPeriodsSkipped++;
-  if (game.period >= CFG.periodsPerDay) { dayOver(); return; }
+  game.heat *= 1 - CFG.heat.bellDrop; game.heatPending *= 1 - CFG.heat.bellDrop;
+  if (game.period >= periodsToday()) { dayOver(); return; }
   game.period++;
   resetSpotsForPeriod();
   if (player.hidden?.kind === "classroom") exitSpot(false, "Bell! You slip out with the class.");
@@ -923,6 +956,7 @@ function periodSurvived() {
 
 // End of the day: a summary screen, then the next (harder) day starts in the morning.
 function dayOver() {
+  if (game.lastDay) { lastDaySurvived(); return; }
   game.state = "dayEnd";
   releaseControls();
   ui.banner.classList.remove("show"); bannerTimer = 0;
@@ -933,17 +967,38 @@ function dayOver() {
   $("dayStats").innerHTML = `${game.dayPeriodsSkipped} periods skipped today · +${D.dayBonus} day bonus<br><b>Score ${Math.floor(game.score)}</b> · Strikes ${game.strikes}/${CFG.strikes.max}`;
   const pass = Math.max(D.minPassingSec, CFG.passingSec + D.passingSecPerDay * (next - 1));
   const skip = Math.min(D.maxSkippingSec, CFG.skippingSec + D.skippingSecPerDay * (next - 1));
-  $("dayNext").textContent = `Day ${next}: staff are faster and sharper. Passing ${pass}s, skipping ${skip}s.`;
+  const S = CFG.security, before = Math.round(game.security);
+  const tomorrowLast = game.security >= S.lastDayAt;
+  game.security *= 1 - S.dayDecay;
+  $("dayNext").innerHTML = tomorrowLast
+    ? `<b class="warn">School alert maxed out. Tomorrow is your LAST DAY.</b> ${S.lastDayPeriods} periods, ${S.lastDayScoreMult}× points, every staff member on duty.`
+    : `Day ${next}: staff are faster and sharper. Passing ${pass}s, skipping ${skip}s. School alert ${before}% → ${Math.round(game.security)}% overnight.`;
   $("dayEnd").hidden = false;
-  game.day = next; game.period = 1; game.highAlert = false; game.dayPeriodsSkipped = 0;
+  game.day = next; game.period = 1; game.highAlert = false; game.dayPeriodsSkipped = 0; game.lastDay = tomorrowLast;
+  game.heat = game.heatPending = 0;
   saveGame();
+}
+// Surviving the last day ends the run on your own terms.
+function lastDaySurvived() {
+  game.state = "caught";
+  releaseControls();
+  if (player.hidden) exitSpot(false);
+  clearSave();
+  $("caughtTitle").textContent = "Legend.";
+  $("caughtText").innerHTML = `You survived the LAST DAY. Nobody ever proved a thing.<br><b>Score ${Math.floor(game.score)}</b> · ${game.day} days · ${game.periodsSkipped} periods skipped`;
+  $("caught").hidden = false;
 }
 function startNextDay() {
   $("dayEnd").hidden = true;
   morningSetup();
   game.state = "playing";
-  banner(`DAY ${game.day}<small>New day, same hoodie. New subs today.</small>`, 2.6);
-  setTimeout(() => game.state === "playing" && pa("newDay", null, null, { d: game.day }), 1500);
+  if (game.lastDay) {
+    banner(`LAST DAY<small>${CFG.security.lastDayPeriods} periods. ${CFG.security.lastDayScoreMult}× points. Go out in style.</small>`, 3.2);
+    setTimeout(() => game.state === "playing" && pa("lastDay"), 1500);
+  } else {
+    banner(`DAY ${game.day}<small>New day, same hoodie. New subs today.</small>`, 2.6);
+    setTimeout(() => game.state === "playing" && pa("newDay", null, null, { d: game.day }), 1500);
+  }
   clock.getDelta();
 }
 
@@ -952,6 +1007,7 @@ function releaseControls() { stick.id = look.id = null; keys.clear(); stickBase.
 function caught(st) {
   cancelAim();
   if (player.ride) endRide(false);
+  if (game.phase === "passing" && game.heat < CFG.heat.passingCatchAt && !game.lastDay) { shoo(st); return; }
   game.strikes++;
   ui.hide.hidden = true;
   releaseControls();
@@ -960,6 +1016,7 @@ function caught(st) {
     game.state = "caught";
     clearSave();
     pa("runOver");
+    $("caughtTitle").textContent = "Run over!";
     $("caughtText").innerHTML = `The ${st.type.name} walks you to the office. Your parents are on their way.<br>` +
       `<b>Score ${Math.floor(game.score)}</b> · Day ${game.day}, period ${game.period} · ${game.periodsSkipped} period${game.periodsSkipped === 1 ? "" : "s"} skipped`;
     $("caught").hidden = false;
@@ -986,6 +1043,19 @@ function caught(st) {
     o.suspicion = 0; o.calledBackup = false; o.chaseT = 0; o.windedT = 0; o.pauseT = 0.8;
   }
   game.pendingOffice = office;
+}
+
+// Caught during a passing period while heat is low: no strike, just "get to class!" and a little heat.
+function shoo(st) {
+  toast(`The ${st.type.name}: "Get to class!" (No strike: heat is low during passing.)`, 2.6);
+  playBlip([520, 390], 0.1, "triangle", 0.07);
+  addHeat(CFG.heat.shooHeat);
+  for (const o of staff) {
+    if (o.type.stationary) { o.suspicion = 0; o.alarmT = Math.max(o.alarmT, 3); continue; }
+    if (o.state !== "patrol") { o.state = "return"; setReturnPoint(o); }
+    o.suspicion = 0; o.calledBackup = false; o.pauseT = 1.0;
+  }
+  player.invisT = 2.0;
 }
 
 function endScene() {
@@ -1397,7 +1467,7 @@ function callBackup(caller, announce) {
 }
 
 function startChase(st) {
-  if (st.state !== "chase") playBlip([520, 780], 0.1, "square", 0.08);   // "Hey!"
+  if (st.state !== "chase") { playBlip([520, 780], 0.1, "square", 0.08); addHeat(CFG.heat.seenRunning); }   // "Hey!"
   st.state = "chase"; st.suspicion = 1;
   st.lastX = player.x; st.lastZ = player.z;
 }
@@ -1475,10 +1545,13 @@ let lastHud = "";
 function updateHud() {
   const left = Math.max(0, Math.ceil(phaseLen() - game.phaseT));
   const label = `DAY ${game.day} · PERIOD ${game.period} · ${game.phase === "passing" ? "PASSING" : "SKIPPING"}`;
-  const key = label + left + Math.floor(game.score) + "|" + game.lockerUses + "|" + game.strikes + game.highAlert;
+  const label2 = game.lastDay ? label.replace(`DAY ${game.day}`, "LAST DAY") : label;
+  const key = label2 + left + Math.floor(game.score) + "|" + game.lockerUses + "|" + game.strikes + game.highAlert + "|" + Math.round(game.heat) + "|" + Math.round(game.security);
   if (key === lastHud) return;
   lastHud = key;
-  ui.label.textContent = label;
+  ui.label.textContent = label2;
+  $("heatFill").style.width = game.heat + "%"; $("secFill").style.width = game.security + "%";
+  $("heatMeter").classList.toggle("hot", game.heat >= CFG.heat.passingCatchAt);
   ui.timer.textContent = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
   ui.phase.className = game.phase;
   ui.score.textContent = Math.floor(game.score);
@@ -1491,7 +1564,7 @@ function update(dt) {
   game.time += dt; game.phaseT += dt;
   if (game.phase === "passing" && game.phaseT >= phaseLen("passing")) startSkipping();
   else if (game.phase === "skipping") {
-    const pts = (CFG.pointsPerPeriod / phaseLen("skipping")) * dt;
+    const pts = (CFG.pointsPerPeriod / phaseLen("skipping")) * dt * scoreMult();
     game.score += pts; game.periodScore += pts;
     if (game.phaseT >= phaseLen("skipping")) { periodSurvived(); if (game.state !== "playing") return; }
   }
@@ -1499,7 +1572,7 @@ function update(dt) {
   updateRestrooms();
   updateCrowd(dt);
   updateStaff(dt, crowdCoverCount());
-  if (game.state === "playing") updateObjects(dt);
+  if (game.state === "playing") { updateObjects(dt); updateHeat(dt); }
 }
 
 // =====================================================================================
@@ -1660,7 +1733,7 @@ function roomBackfire(sp) {
   onRoomBackfire(sp);
 }
 const TT_NAME = (sp) => (sp.teacher === "office" ? "The secretary" : sp.teacher === "sub" ? "The sub" : "The teacher");
-function onRoomBackfire(sp) { /* build step 7: raises short-term heat (not the security level) */ }
+function onRoomBackfire(sp) { addHeat(CFG.heat.roomCall); }   // short-term heat only; the security level is for loud havoc
 
 function updateRestrooms() {
   for (const sp of SPOTS) {
@@ -2104,7 +2177,7 @@ function tryTapPickup(x, y) {
 }
 
 // ---- havoc: flat points for mischief, worth less each time you repeat it in a period ----
-function scoreMult() { return 1; }
+function scoreMult() { return game.lastDay ? CFG.security.lastDayScoreMult : 1; }
 function havoc(kind, base, label, opts = {}) {
   const n = game.havocCount[kind] ?? 0;
   game.havocCount[kind] = n + 1;
@@ -2114,7 +2187,34 @@ function havoc(kind, base, label, opts = {}) {
   onHavoc(kind, pts, opts);
   return pts;
 }
-function onHavoc(kind, pts, opts) { /* build step 7 adds heat and the security level here */ }
+// Heat if someone saw you do it; the security level goes up for loud havoc even if nobody did.
+function onHavoc(kind, pts, opts) {
+  const seen = staff.some((st) => canSeePlayer(st, 1, !(st.state === "chase" || st.state === "search")).seen);
+  const S = CFG.security;
+  if (seen) {
+    addHeat(Math.min(CFG.heat.seenHavocMax, pts * CFG.heat.seenHavocMult));
+    addSecurity(opts.loud ? S.loudSeen : S.quietSeen);
+    popup("...and they SAW that.", "bad");
+  } else if (opts.loud) addSecurity(S.loudUnseen);
+}
+function addHeat(n) { game.heatPending += n; }
+function addSecurity(n) {
+  const before = game.security;
+  game.security = Math.min(100, game.security + n);
+  if (before < CFG.security.extraGuardAt && game.security >= CFG.security.extraGuardAt) pa("securityUp");
+}
+// heat flows in no faster than maxRisePerSec; cools slowly while you're hidden
+function updateHeat(dt) {
+  const H = CFG.heat, before = game.heat;
+  const flow = Math.min(game.heatPending, H.maxRisePerSec * dt);
+  game.heatPending -= flow;
+  game.heat = Math.min(100, game.heat + flow);
+  if (player.hidden) game.heat = Math.max(0, game.heat - H.hiddenCoolPerSec * dt);
+  if (before < H.passingCatchAt && game.heat >= H.passingCatchAt) {
+    pa("heatHigh");
+    banner("HEAT RISING<small>Staff can now detain you during passing periods too.</small>", 2.6);
+  }
+}
 const popupsEl = $("popups");
 function popup(text, cls = "") {
   const el = document.createElement("div"); el.className = "pop " + cls; el.textContent = text;
@@ -2181,6 +2281,8 @@ if (debug) {   // test-only helpers (only with ?debug in the URL)
     give(key, uses) { return addItem(key, uses); },
     roomInfo() { return SPOTS.filter((sp) => sp.kind === "classroom").map((sp) => ({ room: sp.room, type: sp.roomType, teacher: sp.teacher, loot: [...sp.loot], i: SPOTS.indexOf(sp) })); },
     hideT() { return player.hideT; },
+    setHeat(h, s) { if (h != null) { game.heat = h; game.heatPending = 0; } if (s != null) game.security = s; },
+    heat() { return { heat: game.heat, pending: game.heatPending, security: game.security, lastDay: game.lastDay }; },
     objects() { return objects.map((o) => ({ key: o.key, state: o.state, x: o.x, y: o.y, z: o.z, bounces: o.bounces, life: o.life })); },
     dropItem(key, dx, dz) { const o = spawnObject(key, "pickup", player.x + dx, REST_Y[key] ?? 0.04, player.z + dz); return o.id; },
     hotbar() { return game.hotbar.map((s) => s && `${s.key}${s.uses > 1 ? "x" + s.uses : ""}`); },
