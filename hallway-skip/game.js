@@ -975,13 +975,18 @@ function startRun(save) {
 }
 function onOverlayTap(e) {
   initAudio();
-  if (game.state === "title") startRun(e?.target?.id === "continueBtn" ? loadSave() : null);
+  if (game.state === "title") {   // only the buttons do anything on the title screen
+    const id = e?.target?.id ?? "startBtn";
+    if (id === "aboutBtn") { $("about").hidden = false; return; }
+    if (id === "startBtn" || id === "continueBtn") startRun(id === "continueBtn" ? loadSave() : null);
+  }
   else if (game.state === "caught") startRun(null);
   else if (game.state === "paused") { $("paused").hidden = true; game.state = "playing"; }
   else if (game.state === "dayEnd") startNextDay();
   clock.getDelta();
 }
 for (const id of ["title", "caught", "paused", "dayEnd"]) $(id).addEventListener("click", onOverlayTap);
+for (const id of ["aboutClose", "aboutX"]) $(id).addEventListener("click", () => { $("about").hidden = true; });
 $("strike").addEventListener("click", () => { if (game.sceneT > 0.8) endScene(); });
 $("hpLeave").addEventListener("click", () => { if (game.state === "playing") exitSpot(false); });
 window.addEventListener("blur", pause);

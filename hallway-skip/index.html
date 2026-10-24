@@ -91,9 +91,20 @@
   .overlay .keys { font-size: 13px; opacity: .7; }
   #caught h1 { color: #ff6b6b; }
   #dayEnd h1 { color: #8ef0a0; }
-  .overlay button.go { border: 0; font: inherit; font-weight: 800; cursor: pointer; margin-left: 8px; }
+  .overlay button.go { border: 0; font: inherit; font-weight: 800; cursor: pointer; }
   .overlay .go.alt { background: #8ef0a0; }
   .overlay button[hidden] { display: none; }
+  .overlay .buttons { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-top: 12px; }
+  .overlay .buttons .go { margin: 0; }
+  .overlay .go.ghost { background: transparent; color: #fff; box-shadow: inset 0 0 0 2px rgba(255,255,255,.6); }
+  .overlay.scroll { align-items: flex-start; overflow-y: auto; cursor: default; -webkit-overflow-scrolling: touch; touch-action: pan-y; }
+  .overlay.scroll .aboutBox { margin: auto; max-width: 36em; padding: 4px 34px 12px; font-size: 14px; }
+  .overlay.scroll .aboutBox p { margin: 5px auto; line-height: 1.4; }
+  #about { background: rgba(18, 21, 31, .97); z-index: 3; }
+  #aboutX { position: fixed; top: max(10px, env(safe-area-inset-top)); right: max(12px, env(safe-area-inset-right)); width: 40px; height: 40px;
+    border-radius: 50%; border: 0; background: rgba(255,255,255,.14); color: #fff; font: 700 22px system-ui, sans-serif; cursor: pointer; }
+  .overlay h2 { margin: 0 0 6px; font-size: 24px; }
+  .overlay { overflow-y: auto; }
   #strike h1 { font-size: clamp(26px, 5vw, 40px); }
   #strike.warning h1 { color: #ffd36b; } #strike.office h1 { color: #ff8f5c; }
   #strikeDots { display: flex; gap: 8px; justify-content: center; margin: 8px 0; }
@@ -134,13 +145,24 @@
   <div>
     <span class="tag">prototype · build step 4</span>
     <h1>Hallway Skip</h1>
-    <p>Slip out with the crowd, then stay out of class until the next bell. Keep out of the hall monitor's cone. If you're spotted, break line of sight, then hide.</p>
+    <p>Skip class. Don't get caught.</p>
+    <div class="buttons">
+      <button class="go" id="startBtn" type="button">Play</button>
+      <button class="go alt" id="continueBtn" type="button" hidden></button>
+      <button class="go ghost" id="aboutBtn" type="button">How to play</button>
+    </div>
+  </div>
+</div>
+<div class="overlay scroll" id="about" hidden>
+  <button id="aboutX" type="button" aria-label="Close">×</button>
+  <div class="aboutBox">
+    <h2>How to play</h2>
+    <p>Slip out with the crowd, then stay out of class until the next bell. Keep out of the staff's vision cones. If you're spotted, break line of sight, then hide.</p>
     <p>Walk into (or tap) a green locker, a restroom, or a classroom door to hide. Subs take longer to notice you.</p>
-    <p>Watch for the security guard: narrow flashlight vision, faster than you for a few seconds, and calls for backup. Three strikes and you're out.</p>
-    <p>Survive six periods to finish the day. Each day gets harder. Your run saves at every bell.</p>
+    <p>Security guards have narrow flashlight vision, are faster than you for a few seconds, and call for backup. Teachers at their doors yell for help and grab you if you walk past.</p>
+    <p>Three strikes and you're out. Survive six periods to finish the day. Each day gets harder. Your run saves at every bell.</p>
     <p class="keys">Phone: left thumb moves, drag on the right side to look around.<br>Desktop: WASD or arrow keys move, drag the mouse to look, click or E to hide.</p>
-    <span class="go" id="startBtn">Tap to start</span>
-    <button class="go alt" id="continueBtn" type="button" hidden></button>
+    <button class="go" id="aboutClose" type="button">Got it</button>
   </div>
 </div>
 <div class="overlay" id="dayEnd" hidden>
