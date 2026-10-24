@@ -1,7 +1,8 @@
-// Hallway Skip — build step 3 prototype.
-// Step 1: one looping hallway, joystick, a hall monitor that chases, a crowd that thins, and the bell.
+// Hallway Skip — build step 4 prototype.
+// Step 1: hallway, joystick, a hall monitor that chases, a crowd that thins, and the bell.
 // Step 2: tap-to-interact and hiding spots: lockers, restrooms, classrooms (teacher and sub boot timers).
 // Step 3: security guard, the three-strike ladder, and the PA announcer.
+// Step 4: the six-period day, escalating days, hall teachers, save at the bell. Figure-8 floor plan.
 import * as THREE from "three";
 
 // =====================================================================================
@@ -9,9 +10,27 @@ import * as THREE from "three";
 // =====================================================================================
 const CFG = {
   periodsPerDay: 6,
-  passingSec: 25,                 // guess
-  skippingSec: 60,                // guess
+  passingSec: 25,                 // guess (day 1; see days below)
+  skippingSec: 60,                // guess (day 1; see days below)
   pointsPerPeriod: 100,           // earned across the skipping phase (~5/3 per second)
+
+  // Within-day curve: index = period - 1. Period 1 is easy, period 6 is very hard but possible.
+  monitorsPerPeriod: [1, 1, 2, 2, 2, 3],
+  guardsPerPeriod:   [0, 1, 1, 1, 1, 2],
+  teachersPerPeriod: [0, 0, 1, 1, 2, 3],   // teachers standing guard at their doors
+
+  // Across-days curve, kept separate so the two are easy to tune independently.
+  days: {
+    staffSpeedPerDay: 0.06,       // +6% staff speed per day after day 1...
+    staffVisionPerDay: 0.05,      // +5% vision range per day
+    staffNoticePerDay: 0.10,      // +10% how fast suspicion builds per day
+    maxMult: 1.6,                 // ...capped at this multiplier
+    passingSecPerDay: -2,         // passing periods get shorter (less crowd cover)...
+    minPassingSec: 15,
+    skippingSecPerDay: 5,         // ...and skipping periods get longer
+    maxSkippingSec: 90,
+    dayBonus: 250,                // points for surviving a whole day
+  },
 
   player: { speed: 4.3, radius: 0.35, turnRate: 12 },
   camera: {
@@ -27,7 +46,7 @@ const CFG = {
   joystick: { radiusPx: 60, deadZone: 0.12 },
 
   crowd: {
-    count: 50,
+    count: 60,
     speedMin: 1.0, speedMax: 1.8, radius: 0.3,
     leaveStartFrac: 0.12,         // during passing, students head into class between these
     leaveEndFrac: 0.92,           //   fractions of the passing period
@@ -68,8 +87,6 @@ const CFG = {
   },
 
   footsteps: { hearRange: 20, patrolInterval: 0.55, chaseInterval: 0.3, volume: 0.55 },
-  monitorsPerPeriod: [1, 1, 2, 2, 2, 3],   // within-day difficulty (expanded in build step 4)
-  guardsPerPeriod:   [0, 1, 1, 1, 1, 2],
 
   strikes: {
     max: 3,
@@ -79,12 +96,12 @@ const CFG = {
     officeLosesPeriodPoints: true,   // strike 2 costs you everything earned this period
     alert: { vision: 1.2, notice: 1.4, speed: 1.1 },   // after strike 2, staff stay this much sharper for the rest of the day
   },
-  backup: { range: 45, maxResponders: 2 },   // a guard's radio call pulls this many nearby staff toward you
+  backup: { range: 60, maxResponders: 2 },   // a radio call / yell pulls this many nearby staff toward you
   pa: { showSec: 4.5, sameKindCooldownSec: 12 },
   render: { maxPixelRatio: 1.75, coneRays: 28 },
 };
 
-// Staff are data: adding a type later (security guard, principal) is one entry here.
+// Staff are data: adding a type later (principal) is one entry here.
 const STAFF_TYPES = {
   hallMonitor: {
     name: "hall monitor",
@@ -92,6 +109,7 @@ const STAFF_TYPES = {
     visionRange: 9, visionHalfAngleDeg: 50,   // slow, wide vision cone
     sweepDeg: 25, sweepRate: 0.9,             // looks side to side while patrolling
     notice: 1.0,                              // how fast suspicion builds (multiplier)
+    routes: ["outer", "eight", "top", "bottom"],   // fixed patrol loops, handed out in this order
     vestColor: 0xe8c547, hatColor: 0x2c3e66, scale: 1.12,
     caughtLine: "\"You better get to class.\"",
   },
@@ -107,6 +125,17 @@ const STAFF_TYPES = {
     vestColor: 0x26364f, hatColor: 0x111111, scale: 1.2,
     caughtLine: "\"Let's go, chief. Walk with me.\"",
   },
+  hallTeacher: {
+    name: "teacher",
+    stationary: true,                          // stands at their classroom door
+    visionRange: 7.5, visionHalfAngleDeg: 45,
+    sweepDeg: 70, sweepRate: 0.5,              // slowly looks up and down the hall
+    notice: 0.9,
+    alarmCooldownSec: 9,                       // after yelling for backup, a breather before the next yell
+    catchRange: 1.3,                           // walk right past them and they'll grab you
+    vestColor: 0x8e5a9b, hatColor: null, scale: 1.08,
+    caughtLine: "\"Hall pass? No? Inside. Now.\"",
+  },
 };
 
 // The PA announcer. Placeholder jokes: Alexander will punch these up. {hall}, {n} and {d} get filled in.
@@ -114,43 +143,23 @@ const PA_LINES = {
   start:      ["Good morning, students. Please proceed to your first-period class.", "Reminder: hallways are for passing, not loitering."],
   guardOnDuty:["Security is now patrolling the halls. He has had his coffee.", "Attention: Officer Dale is on duty. Please do not make eye contact."],
   backup:     ["Security to the {hall}. Security to the {hall}.", "All available staff, please check the {hall}."],
+  teacherOut: ["Teachers, please stand at your doors during this period.", "Faculty reminder: hall duty is mandatory. Yes, Mr. Kowalski, you too."],
   strike1:    ["Attention staff: keep an eye out for a student in a gray hoodie.", "A reminder that skipping class is against school policy. Looking at you, gray hoodie."],
   strike2:    ["Will the student in the gray hoodie report to the main office. Oh. You're already here.", "Staff, please remain on high alert for the rest of the day."],
   lastStrike: ["One more and we're calling home.", "Gray hoodie, this is your final warning."],
   sweep:      ["Custodial reminder: restrooms are not study halls."],
-  daySurvived:["That concludes day {d}. Tomorrow's lunch: mystery tacos.", "Day {d} is over. Somehow nobody caught that kid."],
+  lastPeriod: ["Sixth period, everyone. Almost there. Some of you more than others."],
+  newDay:     ["Good morning! It's day {d}. Security has been, quote, 'beefed up.'", "Welcome to day {d}. Staff have been briefed about a certain hoodie."],
   runOver:    ["Gray hoodie, your parents are on line two."],
 };
-const HALL_NAMES = ["south hall", "east hall", "north hall", "west hall"];
-
-// Floor plan: a ring corridor around a block of classrooms (one floor, fixed layout).
-const LAYOUT = {
-  outerHalf: { x: 22, z: 13 },    // inside face of the outer walls
-  innerHalf: { x: 17, z: 8 },     // classroom block
-  lockerDepth: 0.3,
-  wallHeight: 3.2,
-  doorS: [7.5, 15.5, 23.5, 31.5, 49.5, 67.5, 75.5, 83.5, 91.5, 109.5],  // classroom doors, ring distance
-  entranceS: 19.5,
-  hideLockerS: [4, 26, 33, 42, 63, 70, 88, 95, 101, 117],   // lockers big enough to hide in
-  restroomS: [55, 112],
-};
-
-// Things pushed against the outer wall. Ring coordinates; each must sit within one straight hallway.
-const OBSTACLES = [
-  { name: "vending machine", s: 13.0, halfLen: 0.7, depth: 0.85, height: 2.0, color: 0xc0392b },
-  { name: "vending machine", s: 14.6, halfLen: 0.7, depth: 0.85, height: 2.0, color: 0x2e86c1 },
-  { name: "trophy case",     s: 49.5, halfLen: 1.4, depth: 0.7,  height: 1.9, color: 0x8e6b3e },
-  { name: "water fountain",  s: 104,  halfLen: 0.45, depth: 0.5, height: 1.0, color: 0xbfc9d1 },
-  { name: "bench",           s: 80,   halfLen: 1.3, depth: 0.55, height: 0.5, color: 0x7a5230 },
-];
 
 // Hiding spots are data: a new kind is one entry here (placement lives in LAYOUT).
 const SPOT_TYPES = {
-  locker:    { label: "Locker", side: "outer", halfW: 0.45, maxStaySec: 15,
+  locker:    { label: "Locker", halfW: 0.45, maxStaySec: 15,
                stayLine: "Cramped. Smells like old gym socks.", timeoutLine: "Too cramped! You tumble out." },
-  restroom:  { label: "Restroom", side: "outer", halfW: 0.75, maxStaySec: 45,
+  restroom:  { label: "Restroom", halfW: 0.75, maxStaySec: 45,
                stayLine: "Nobody questions a long bathroom break.", timeoutLine: "Someone's pounding on the stall door. Time to go." },
-  classroom: { label: "Room", side: "inner", halfW: 0.6 },   // stay time comes from who's teaching
+  classroom: { label: "Room", halfW: 0.6 },   // stay time comes from who's teaching
 };
 const TEACHER_TYPES = {
   teacher: { label: "Teacher", bootSec: 4, silhouette: 0x2b2f3a,
@@ -158,6 +167,55 @@ const TEACHER_TYPES = {
   sub:     { label: "Sub", bootSec: 14, silhouette: 0x3a7d44,
              stayLine: "The sub is reading a magazine. You're under a desk.", bootLine: "The sub finally looks up: \"Are you even in this class?\"" },
 };
+
+// Floor plan: a squared figure 8. An outer loop plus a main hall across the middle, around two classroom blocks.
+// Halls run node to node. "side" on a hall: +1 / -1 = which wall (+1 is the classroom side on the outer loop).
+const LAYOUT = {
+  outerHalf: { x: 22, z: 19.5 },  // inside face of the outer walls
+  hallHalf: 2.5,                  // half a hallway's width, wall to wall
+  lockerDepth: 0.3,
+  wallHeight: 3.2,
+  blocks: [ { x0: -17, z0: -14.5, x1: 17, z1: -2.5, color: 0xd9cdb0 },   // top classroom block (1xx rooms)
+            { x0: -17, z0: 2.5, x1: 17, z1: 14.5, color: 0xd5c6b5 } ], // bottom classroom block (2xx rooms)
+  nodes: { NW: [-19.5, -17], NE: [19.5, -17], W: [-19.5, 0], E: [19.5, 0], SW: [-19.5, 17], SE: [19.5, 17] },
+  halls: [
+    { name: "north hall", from: "NW", to: "NE" },
+    { name: "upper east hall", from: "NE", to: "E" },
+    { name: "lower east hall", from: "E", to: "SE" },
+    { name: "south hall", from: "SE", to: "SW" },
+    { name: "lower west hall", from: "SW", to: "W" },
+    { name: "upper west hall", from: "W", to: "NW" },
+    { name: "main hall", from: "W", to: "E" },
+  ],
+  routes: {   // hall-monitor patrol loops, as node lists
+    outer:  ["NW", "NE", "E", "SE", "SW", "W"],
+    top:    ["NW", "NE", "E", "W"],
+    bottom: ["W", "E", "SE", "SW"],
+    eight:  ["NW", "NE", "E", "W", "SW", "SE", "E", "W"],
+  },
+  entrance: { h: 3, t: 19.5 },
+  // classroom doors: hall index, distance along it, room number. Side defaults to the classroom wall.
+  doors: [
+    { h: 0, t: 9.75, room: 101 }, { h: 0, t: 19.5, room: 102 }, { h: 0, t: 29.25, room: 103 },
+    { h: 1, t: 8.5, room: 104 }, { h: 6, t: 29, side: -1, room: 105 }, { h: 6, t: 10, side: -1, room: 106 },
+    { h: 5, t: 8.5, room: 107 },
+    { h: 6, t: 14, side: 1, room: 201 }, { h: 6, t: 25, side: 1, room: 202 }, { h: 2, t: 8.5, room: 203 },
+    { h: 3, t: 9.75, room: 204 }, { h: 3, t: 19.5, room: 205 }, { h: 3, t: 29.25, room: 206 }, { h: 4, t: 8.5, room: 207 },
+  ],
+  hideLockers: [ { h: 0, t: 4 }, { h: 0, t: 14.5 }, { h: 0, t: 25 }, { h: 0, t: 35 }, { h: 1, t: 4 }, { h: 1, t: 13 },
+                 { h: 2, t: 4 }, { h: 3, t: 5 }, { h: 3, t: 27 }, { h: 3, t: 34 }, { h: 4, t: 4 }, { h: 4, t: 13 }, { h: 5, t: 4 } ],
+  restrooms: [ { h: 2, t: 12 }, { h: 5, t: 12 } ],
+};
+
+// Things pushed against a wall. Side defaults to the outer (locker) wall.
+const OBSTACLES = [
+  { name: "vending machine", h: 0, t: 18.7, halfLen: 0.7, depth: 0.85, height: 2.0, color: 0xc0392b },
+  { name: "vending machine", h: 0, t: 20.3, halfLen: 0.7, depth: 0.85, height: 2.0, color: 0x2e86c1 },
+  { name: "trophy case",     h: 6, t: 19.5, side: -1, halfLen: 1.4, depth: 0.7, height: 1.9, color: 0x8e6b3e },
+  { name: "water fountain",  h: 1, t: 8.5, halfLen: 0.45, depth: 0.5, height: 1.0, color: 0xbfc9d1 },
+  { name: "bench",           h: 3, t: 12, halfLen: 1.3, depth: 0.55, height: 0.5, color: 0x7a5230 },
+  { name: "bench",           h: 4, t: 8.5, halfLen: 1.3, depth: 0.55, height: 0.5, color: 0x7a5230 },
+];
 
 const SHIRT_COLORS = [0xe74c3c, 0x3498db, 0x2ecc71, 0x9b59b6, 0xf39c12, 0x1abc9c, 0xe84393, 0x34495e, 0xd35400, 0x16a085, 0xf1c40f, 0x6c5ce7];
 const SKIN_COLORS = [0xf1c27d, 0xe0ac69, 0xc68642, 0x8d5524, 0xffdbac, 0x5c3a21];
@@ -174,63 +232,111 @@ function lerpAngle(a, b, t) { return a + angDiff(a, b) * t; }
 const damp = (rate, dt) => 1 - Math.exp(-rate * dt);   // frame-rate independent smoothing
 
 // =====================================================================================
-// Ring corridor: positions along the hallway as (s = distance around the loop, lat = sideways offset)
+// Hall graph. A position in a hall is (h, t, lat): which hall, distance from its start, sideways offset.
 // Angles everywhere: heading a points along (sin a, cos a) in the x/z plane.
 // =====================================================================================
-const RX = (LAYOUT.innerHalf.x + LAYOUT.outerHalf.x) / 2;     // corridor centerline
-const RZ = (LAYOUT.innerHalf.z + LAYOUT.outerHalf.z) / 2;
-const INNER_LAT = LAYOUT.innerHalf.x - RX;                    // classroom wall (negative)
-const OUTER_LAT = LAYOUT.outerHalf.x - LAYOUT.lockerDepth - RX; // locker faces (positive)
-const SEGS = [
-  { x0: -RX, z0: RZ, dx: 1, dz: 0, len: 2 * RX, nx: 0, nz: 1 },
-  { x0: RX, z0: RZ, dx: 0, dz: -1, len: 2 * RZ, nx: 1, nz: 0 },
-  { x0: RX, z0: -RZ, dx: -1, dz: 0, len: 2 * RX, nx: 0, nz: -1 },
-  { x0: -RX, z0: -RZ, dx: 0, dz: 1, len: 2 * RZ, nx: -1, nz: 0 },
-];
-let PERIM = 0;
-for (const seg of SEGS) { seg.s0 = PERIM; PERIM += seg.len; }
-
-function segAt(s) { s = mod(s, PERIM); for (const seg of SEGS) if (s < seg.s0 + seg.len) return seg; return SEGS[3]; }
-function ringPos(s, lat, out = {}) {
-  s = mod(s, PERIM);
-  const seg = segAt(s), t = s - seg.s0;
-  out.x = seg.x0 + seg.dx * t + seg.nx * lat;
-  out.z = seg.z0 + seg.dz * t + seg.nz * lat;
+const NODE_IDS = Object.keys(LAYOUT.nodes);
+const NODES = NODE_IDS.map((id) => ({ id, x: LAYOUT.nodes[id][0], z: LAYOUT.nodes[id][1] }));
+const nodeIndex = (id) => NODE_IDS.indexOf(id);
+const inBlock = (x, z) => LAYOUT.blocks.some((b) => x > b.x0 && x < b.x1 && z > b.z0 && z < b.z1);
+const HALLS = LAYOUT.halls.map((def) => {
+  const a = nodeIndex(def.from), b = nodeIndex(def.to), A = NODES[a], B = NODES[b];
+  const len = Math.hypot(B.x - A.x, B.z - A.z), dx = (B.x - A.x) / len, dz = (B.z - A.z) / len;
+  const H = { name: def.name, a, b, ax: A.x, az: A.z, len, dx, dz, nx: -dz, nz: dx };
+  // what's on each wall: a classroom block, or the outer wall (with lockers)
+  const mx = A.x + dx * len / 2, mz = A.z + dz * len / 2;
+  H.sideType = {};
+  for (const side of [1, -1]) H.sideType[side] = inBlock(mx + H.nx * side * 3, mz + H.nz * side * 3) ? "block" : "outer";
+  H.outerSide = H.sideType[-1] === "outer" ? -1 : H.sideType[1] === "outer" ? 1 : 0;
+  return H;
+});
+// wall position (lat) on a side: classroom walls are flush; outer walls have lockers in front of them
+function wallLat(h, side) { return side * (LAYOUT.hallHalf - (HALLS[h].sideType[side] === "outer" ? LAYOUT.lockerDepth : 0)); }
+function hallPos(h, t, lat, out = {}) {
+  const H = HALLS[h];
+  out.x = H.ax + H.dx * t + H.nx * lat; out.z = H.az + H.dz * t + H.nz * lat;
   return out;
 }
-function ringProject(x, z) {
-  let best = { d: Infinity, s: 0, lat: 0 };
-  for (const seg of SEGS) {
-    const t = clamp((x - seg.x0) * seg.dx + (z - seg.z0) * seg.dz, 0, seg.len);
-    const cx = seg.x0 + seg.dx * t, cz = seg.z0 + seg.dz * t;
+function hallHeading(h, dir) { const H = HALLS[h]; return Math.atan2(H.dx * dir, H.dz * dir); }
+const wallRot = (h) => hallHeading(h, 1) - Math.PI / 2;   // box faces lie flat against the hall's walls
+function hallProject(x, z) {
+  let best = { d: Infinity, h: 0, t: 0, lat: 0 };
+  HALLS.forEach((H, h) => {
+    const t = clamp((x - H.ax) * H.dx + (z - H.az) * H.dz, 0, H.len);
+    const cx = H.ax + H.dx * t, cz = H.az + H.dz * t;
     const d = Math.hypot(x - cx, z - cz);
-    if (d < best.d) best = { d, s: seg.s0 + t, lat: (x - cx) * seg.nx + (z - cz) * seg.nz };
-  }
+    if (d < best.d) best = { d, h, t, lat: (x - cx) * H.nx + (z - cz) * H.nz };
+  });
   return best;
 }
-function ringDelta(a, b) { let d = mod(b - a, PERIM); if (d > PERIM / 2) d -= PERIM; return d; }
-function ringHeading(s, dir) { const seg = segAt(s); return Math.atan2(seg.dx * dir, seg.dz * dir); }
+// shortest paths between nodes (Floyd–Warshall; the graph is tiny)
+const NN = NODES.length, DIST = [], NEXT = [], HALL_BETWEEN = {};
+for (let i = 0; i < NN; i++) { DIST.push(Array(NN).fill(Infinity)); NEXT.push(Array(NN).fill(-1)); DIST[i][i] = 0; NEXT[i][i] = i; }
+HALLS.forEach((H, h) => {
+  DIST[H.a][H.b] = DIST[H.b][H.a] = H.len; NEXT[H.a][H.b] = H.b; NEXT[H.b][H.a] = H.a;
+  HALL_BETWEEN[H.a + "," + H.b] = HALL_BETWEEN[H.b + "," + H.a] = h;
+});
+for (let k = 0; k < NN; k++) for (let i = 0; i < NN; i++) for (let j = 0; j < NN; j++)
+  if (DIST[i][k] + DIST[k][j] < DIST[i][j]) { DIST[i][j] = DIST[i][k] + DIST[k][j]; NEXT[i][j] = NEXT[i][k]; }
+const NEIGHBORS = NODES.map((_, i) => HALLS.flatMap((H) => (H.a === i ? [H.b] : H.b === i ? [H.a] : [])));
+const hallBetween = (n1, n2) => HALL_BETWEEN[n1 + "," + n2];
+const hallEndT = (h, node) => (HALLS[h].a === node ? 0 : HALLS[h].len);
+const otherEnd = (h, node) => (HALLS[h].a === node ? HALLS[h].b : HALLS[h].a);
+// cheapest end of hall h to arrive through, coming from node n, to reach distance t along it
+function bestEnd(n, h, t) { const H = HALLS[h]; return DIST[n][H.a] + t <= DIST[n][H.b] + H.len - t ? H.a : H.b; }
+function costToPoint(n, h, t) { const H = HALLS[h]; return Math.min(DIST[n][H.a] + t, DIST[n][H.b] + H.len - t); }
+
+// Walkers: anything that follows the halls ({h, t, to}: walking along hall h toward node "to").
+// At each node, chooseNext(walker, node) picks the neighboring node to head for next.
+function walk(w, dist, chooseNext) {
+  for (let guard = 0; dist > 1e-6 && guard < 4; guard++) {
+    const endT = hallEndT(w.h, w.to), rem = Math.abs(endT - w.t);
+    if (dist < rem) { w.t += Math.sign(endT - w.t) * dist; return; }
+    dist -= rem;
+    const node = w.to, next = chooseNext(w, node);
+    w.from = node; w.h = hallBetween(node, next); w.t = hallEndT(w.h, node); w.to = next;
+  }
+}
+// pick a random way onward, not straight back the way we came (unless it's a dead end)
+function randomOnward(w, node) {
+  const opts = NEIGHBORS[node].filter((n) => n !== otherEnd(w.h, node));
+  return opts.length ? pick(opts) : otherEnd(w.h, node);
+}
+// walk toward a point (th, tt) in the hall network; returns true on arrival
+function walkTo(w, th, tt, dist) {
+  if (w.h === th) {
+    const d = tt - w.t;
+    w.to = d >= 0 ? HALLS[th].b : HALLS[th].a;
+    if (Math.abs(d) <= dist) { w.t = tt; return true; }
+    w.t += Math.sign(d) * dist; return false;
+  }
+  const H = HALLS[w.h];
+  w.to = w.t + costToPoint(H.a, th, tt) <= H.len - w.t + costToPoint(H.b, th, tt) ? H.a : H.b;
+  walk(w, dist, (_, node) => (node === HALLS[th].a || node === HALLS[th].b) ? otherEnd(th, node) : NEXT[node][bestEnd(node, th, tt)]);
+  return false;
+}
 
 // =====================================================================================
 // Collision world: axis-aligned boxes {x0, z0, x1, z1}
 // =====================================================================================
 const WALLS = [];
 {
-  const ox = LAYOUT.outerHalf.x - LAYOUT.lockerDepth, oz = LAYOUT.outerHalf.z - LAYOUT.lockerDepth;
-  const ix = LAYOUT.innerHalf.x, iz = LAYOUT.innerHalf.z, T = 2;
-  WALLS.push({ x0: -ix, z0: -iz, x1: ix, z1: iz });                        // classroom block
+  const ox = LAYOUT.outerHalf.x - LAYOUT.lockerDepth, oz = LAYOUT.outerHalf.z - LAYOUT.lockerDepth, T = 2;
+  for (const b of LAYOUT.blocks) WALLS.push({ x0: b.x0, z0: b.z0, x1: b.x1, z1: b.z1 });
   WALLS.push({ x0: -ox - T, z0: -oz - T, x1: ox + T, z1: -oz });           // north
   WALLS.push({ x0: -ox - T, z0: oz, x1: ox + T, z1: oz + T });             // south
   WALLS.push({ x0: -ox - T, z0: -oz - T, x1: -ox, z1: oz + T });           // west
   WALLS.push({ x0: ox, z0: -oz - T, x1: ox + T, z1: oz + T });             // east
   for (const ob of OBSTACLES) {
-    const a = ringPos(ob.s - ob.halfLen, OUTER_LAT - ob.depth), b = ringPos(ob.s + ob.halfLen, OUTER_LAT);
+    ob.side = ob.side ?? HALLS[ob.h].outerSide;
+    const wl = wallLat(ob.h, ob.side);
+    const a = hallPos(ob.h, ob.t - ob.halfLen, wl - ob.side * ob.depth), b = hallPos(ob.h, ob.t + ob.halfLen, wl);
     ob.box = { x0: Math.min(a.x, b.x), z0: Math.min(a.z, b.z), x1: Math.max(a.x, b.x), z1: Math.max(a.z, b.z) };
     WALLS.push(ob.box);
   }
 }
 
-// Distance along a ray to the first wall (Infinity if none within maxT).
+// Distance along a ray to the first wall (maxT if none within it).
 function raycast(ox, oz, dx, dz, maxT) {
   let best = maxT;
   for (const b of WALLS) {
@@ -283,6 +389,8 @@ function box(w, h, d, color, x, y, z) {
   const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), lambert(color));
   m.position.set(x, y, z); scene.add(m); return m;
 }
+// a box lying flat against a hall wall, centered at (h, t, lat)
+function wallBox(h, t, lat, w, hgt, d, color, y) { const p = hallPos(h, t, lat); const m = box(w, hgt, d, color, p.x, y, p.z); m.rotation.y = wallRot(h); return m; }
 
 // Floor: checker tiles via vertex colors.
 {
@@ -304,34 +412,37 @@ function box(w, h, d, color, x, y, z) {
 // Walls
 {
   const H = LAYOUT.wallHeight, ox = LAYOUT.outerHalf.x, oz = LAYOUT.outerHalf.z;
-  box(LAYOUT.innerHalf.x * 2, H, LAYOUT.innerHalf.z * 2, 0xd9cdb0, 0, H / 2, 0);
+  for (const b of LAYOUT.blocks) {
+    const w = b.x1 - b.x0, d = b.z1 - b.z0, cx = (b.x0 + b.x1) / 2, cz = (b.z0 + b.z1) / 2;
+    box(w, H, d, b.color, cx, H / 2, cz);
+    box(w + 0.02, 0.25, d + 0.02, 0x6b8cae, cx, 1.05, cz);   // stripe
+  }
   box(ox * 2 + 1, H, 0.5, 0xcfc5ad, 0, H / 2, -oz - 0.25);
   box(ox * 2 + 1, H, 0.5, 0xcfc5ad, 0, H / 2, oz + 0.25);
   box(0.5, H, oz * 2 + 1, 0xcfc5ad, -ox - 0.25, H / 2, 0);
   box(0.5, H, oz * 2 + 1, 0xcfc5ad, ox + 0.25, H / 2, 0);
-  // stripe along the classroom block
-  box(LAYOUT.innerHalf.x * 2 + 0.02, 0.25, LAYOUT.innerHalf.z * 2 + 0.02, 0x6b8cae, 0, 1.05, 0);
 }
 
-// Lockers along the outer walls (one instanced mesh), skipping obstacles and the entrance.
+// Lockers along the outer walls (one instanced mesh), skipping obstacles, hiding spots and the entrance.
 {
+  const near = (list, h, t, r) => list.some((o) => o.h === h && Math.abs(o.t - t) < (o.halfLen ?? 0) + r);
   const spacing = 0.62, positions = [];
-  for (let s = 0.4; s < PERIM; s += spacing) {
-    const seg = segAt(s), t = s - seg.s0;
-    if (t < 0.4 || t > seg.len - 0.4) continue;                                  // corners
-    if (Math.abs(ringDelta(s, LAYOUT.entranceS)) < 2.0) continue;                  // entrance doors
-    if (OBSTACLES.some((o) => Math.abs(ringDelta(s, o.s)) < o.halfLen + 0.35)) continue;
-    if (LAYOUT.hideLockerS.some((h) => Math.abs(ringDelta(s, h)) < 0.75)) continue;
-    if (LAYOUT.restroomS.some((h) => Math.abs(ringDelta(s, h)) < 1.0)) continue;
-    positions.push(s);
-  }
+  HALLS.forEach((H, h) => {
+    if (!H.outerSide) return;
+    for (let t = 0.4; t < H.len - 0.4; t += spacing) {
+      if (h === LAYOUT.entrance.h && Math.abs(t - LAYOUT.entrance.t) < 2.0) continue;
+      if (OBSTACLES.some((o) => o.h === h && o.side === H.outerSide && Math.abs(o.t - t) < o.halfLen + 0.35)) continue;
+      if (near(LAYOUT.hideLockers, h, t, 0.75) || near(LAYOUT.restrooms, h, t, 1.0)) continue;
+      positions.push({ h, t });
+    }
+  });
   const lockerGeo = new THREE.BoxGeometry(0.56, 2.0, LAYOUT.lockerDepth);
   const lockers = new THREE.InstancedMesh(lockerGeo, lambert(0xffffff), positions.length);
   const m = new THREE.Object3D(), c = new THREE.Color();
-  positions.forEach((s, i) => {
-    const p = ringPos(s, OUTER_LAT + LAYOUT.lockerDepth / 2);
+  positions.forEach(({ h, t }, i) => {
+    const side = HALLS[h].outerSide, p = hallPos(h, t, wallLat(h, side) + side * LAYOUT.lockerDepth / 2);
     m.position.set(p.x, 1.0, p.z);
-    m.rotation.y = ringHeading(s, 1) - Math.PI / 2;   // face lies flat against the wall
+    m.rotation.y = wallRot(h);
     m.updateMatrix(); lockers.setMatrixAt(i, m.matrix);
     lockers.setColorAt(i, c.setHex(i % 2 ? 0x3d6fb6 : 0x3563a8));
   });
@@ -343,48 +454,36 @@ function box(w, h, d, color, x, y, z) {
 // =====================================================================================
 const SPOTS = [];
 const tagsEl = document.getElementById("tags");
-function addSpot(kind, s, extra = {}) {
-  const T = SPOT_TYPES[kind], sign = T.side === "outer" ? 1 : -1;   // +1: wall is on the locker side
-  const wallLat = sign > 0 ? OUTER_LAT : INNER_LAT;
+function addSpot(kind, h, t, side, extra = {}) {
+  const T = SPOT_TYPES[kind], wl = wallLat(h, side);
   const tag = document.createElement("div"); tag.className = "itag"; tagsEl.appendChild(tag);
-  const sp = { kind, T, s, sign, wallLat, frontLat: wallLat - sign * 0.6, glow: [], used: false, tag, tagText: "", tagClass: "", ...extra };
+  const sp = { kind, T, h, t, side, wallLat: wl, frontLat: wl - side * 0.6, glow: [], used: false, tag, tagText: "", tagClass: "", ...extra };
   SPOTS.push(sp);
   return sp;
 }
-const wallRot = (s) => ringHeading(s, 1) - Math.PI / 2;   // box faces lie flat against the wall
 
-for (const s of LAYOUT.hideLockerS) {
-  const sp = addSpot("locker", s), h = wallRot(s);
-  const p = ringPos(s, OUTER_LAT + LAYOUT.lockerDepth / 2);
-  const m = box(0.9, 2.1, LAYOUT.lockerDepth, 0x7d9a86, p.x, 1.05, p.z); m.rotation.y = h;
-  sp.glow.push(m.material);
-  const v = ringPos(s, OUTER_LAT - 0.01);
-  for (let k = 0; k < 3; k++) { const sl = box(0.5, 0.035, 0.02, 0x2a3a30, v.x, 1.62 + k * 0.09, v.z); sl.rotation.y = h; }
+for (const { h, t } of LAYOUT.hideLockers) {
+  const side = HALLS[h].outerSide, wl = wallLat(h, side), sp = addSpot("locker", h, t, side);
+  sp.glow.push(wallBox(h, t, wl + side * LAYOUT.lockerDepth / 2, 0.9, 2.1, LAYOUT.lockerDepth, 0x7d9a86, 1.05).material);
+  for (let k = 0; k < 3; k++) wallBox(h, t, wl - side * 0.01, 0.5, 0.035, 0.02, 0x2a3a30, 1.62 + k * 0.09);
 }
-for (const s of LAYOUT.restroomS) {
-  const sp = addSpot("restroom", s, { nextSweep: 0 }), h = wallRot(s);
-  const p = ringPos(s, OUTER_LAT + LAYOUT.lockerDepth - 0.04);
-  const d = box(1.3, 2.25, 0.08, 0x3f9c9a, p.x, 1.125, p.z); d.rotation.y = h;
-  sp.glow.push(d.material);
-  const q = ringPos(s, OUTER_LAT + LAYOUT.lockerDepth - 0.09);
-  const plaque = box(0.42, 0.42, 0.03, 0xf4f4f4, q.x, 2.55, q.z); plaque.rotation.y = h;
-  const q2 = ringPos(s, OUTER_LAT + LAYOUT.lockerDepth - 0.11);
-  const fig = box(0.12, 0.2, 0.02, 0x3f9c9a, q2.x, 2.5, q2.z); fig.rotation.y = h;
-  const head = box(0.09, 0.09, 0.02, 0x3f9c9a, q2.x, 2.66, q2.z); head.rotation.y = h;
+for (const { h, t } of LAYOUT.restrooms) {
+  const side = HALLS[h].outerSide, wl = wallLat(h, side), sp = addSpot("restroom", h, t, side, { nextSweep: 0 });
+  sp.glow.push(wallBox(h, t, wl + side * (LAYOUT.lockerDepth - 0.04), 1.3, 2.25, 0.08, 0x3f9c9a, 1.125).material);
+  wallBox(h, t, wl + side * (LAYOUT.lockerDepth - 0.09), 0.42, 0.42, 0.03, 0xf4f4f4, 2.55);
+  wallBox(h, t, wl + side * (LAYOUT.lockerDepth - 0.11), 0.12, 0.2, 0.02, 0x3f9c9a, 2.5);
+  wallBox(h, t, wl + side * (LAYOUT.lockerDepth - 0.11), 0.09, 0.09, 0.02, 0x3f9c9a, 2.66);
 }
-LAYOUT.doorS.forEach((s, i) => {
-  const p = ringPos(s, INNER_LAT + 0.03), h = wallRot(s);
-  const door = box(1.2, 2.2, 0.08, 0x8b5a2b, p.x, 1.1, p.z); door.rotation.y = h;
-  const w = ringPos(s, INNER_LAT + 0.08);
-  const win = box(0.5, 0.6, 0.04, 0xa8d8ff, w.x, 1.55, w.z); win.rotation.y = h;
+for (const d of LAYOUT.doors) {
+  const H = HALLS[d.h], side = d.side ?? (H.sideType[1] === "block" ? 1 : -1), wl = wallLat(d.h, side);
+  const door = wallBox(d.h, d.t, wl - side * 0.03, 1.2, 2.2, 0.08, 0x8b5a2b, 1.1);
+  wallBox(d.h, d.t, wl - side * 0.08, 0.5, 0.6, 0.04, 0xa8d8ff, 1.55);
   // the tell: who's visible through the window, plus a sticky note on a sub's door
-  const w2 = ringPos(s, INNER_LAT + 0.105);
-  const sil = box(0.2, 0.3, 0.01, 0x2b2f3a, w2.x, 1.5, w2.z); sil.rotation.y = h;
-  const n = ringPos(s + 0.32, INNER_LAT + 0.09);
-  const note = box(0.2, 0.2, 0.02, 0xf7e463, n.x, 1.15, n.z); note.rotation.y = h;
-  const sp = addSpot("classroom", s, { room: 101 + i, teacher: "teacher", sil, note });
+  const sil = wallBox(d.h, d.t, wl - side * 0.105, 0.2, 0.3, 0.01, 0x2b2f3a, 1.5);
+  const note = wallBox(d.h, d.t + 0.32, wl - side * 0.09, 0.2, 0.2, 0.02, 0xf7e463, 1.15);
+  const sp = addSpot("classroom", d.h, d.t, side, { room: d.room, teacher: "teacher", sil, note });
   sp.glow.push(door.material);
-});
+}
 function rollSubs() {
   const rooms = SPOTS.filter((sp) => sp.kind === "classroom");
   const [lo, hi] = CFG.hiding.subsPerDay;
@@ -394,16 +493,19 @@ function rollSubs() {
   for (const sp of rooms) { sp.sil.material.color.setHex(TEACHER_TYPES[sp.teacher].silhouette); sp.note.visible = sp.teacher === "sub"; }
 }
 
-// Entrance doors, obstacles.
+// Entrance doors, obstacles, bulletin boards.
 {
-  const p = ringPos(LAYOUT.entranceS, OUTER_LAT + LAYOUT.lockerDepth - 0.02);
-  const d = box(2.6, 2.5, 0.08, 0x5d7c99, p.x, 1.25, p.z); d.rotation.y = ringHeading(LAYOUT.entranceS, 1) - Math.PI / 2;
-  const sign = ringPos(LAYOUT.entranceS, OUTER_LAT + LAYOUT.lockerDepth - 0.06);
-  const e = box(1.4, 0.3, 0.05, 0x2ecc71, sign.x, 2.75, sign.z); e.rotation.y = d.rotation.y;
+  const { h, t } = LAYOUT.entrance, side = HALLS[h].outerSide, wl = wallLat(h, side);
+  wallBox(h, t, wl + side * (LAYOUT.lockerDepth - 0.02), 2.6, 2.5, 0.08, 0x5d7c99, 1.25);
+  wallBox(h, t, wl + side * (LAYOUT.lockerDepth - 0.06), 1.4, 0.3, 0.05, 0x2ecc71, 2.75);
 }
 for (const ob of OBSTACLES) {
   const b = ob.box;
   box(b.x1 - b.x0, ob.height, b.z1 - b.z0, ob.color, (b.x0 + b.x1) / 2, ob.height / 2, (b.z0 + b.z1) / 2);
+}
+for (const t of [5, 19.5, 34]) {   // the main hall's bare walls get bulletin boards
+  wallBox(6, t, wallLat(6, 1) - 0.03, 2.2, 1.1, 0.05, 0xc49a6c, 1.7);
+  for (let k = 0; k < 4; k++) wallBox(6, t - 0.75 + k * 0.5, wallLat(6, 1) - 0.06, 0.32, 0.42, 0.02, pick([0xffffff, 0xfff1a8, 0xa8e6ff, 0xffc2d4]), 1.7 + (k % 2 ? 0.15 : -0.12));
 }
 
 // =====================================================================================
@@ -427,7 +529,7 @@ function makePerson({ body, skin = 0xf1c27d, scale = 1, hat = null, hood = null 
 // ---------- player ----------
 const player = {
   x: 0, z: 0, vx: 0, vz: 0, heading: 0,
-  hidden: null, hideT: 0, hideArmed: false, graceT: 0, pushSpot: null, pushT: 0,
+  hidden: null, hideT: 0, hideArmed: false, graceT: 0, invisT: 0, pushSpot: null, pushT: 0,
   mesh: makePerson({ body: 0x8a8f99, hood: 0x7b808a }),   // the gray hoodie
 };
 
@@ -438,12 +540,13 @@ const crowdHeads = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(0.21, 0
 crowdBodies.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 crowdHeads.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 scene.add(crowdBodies, crowdHeads);
+const DOOR_SPOTS = () => SPOTS.filter((sp) => sp.kind === "classroom");
 {
   const c = new THREE.Color();
   for (let i = 0; i < CFG.crowd.count; i++) {
     crowdBodies.setColorAt(i, c.setHex(pick(SHIRT_COLORS)));
     crowdHeads.setColorAt(i, c.setHex(pick(SKIN_COLORS)));
-    crowd.push({ s: 0, lat: 0, x: 0, z: 0, targetLat: 0, speed: 1, dir: 1, mode: "gone", leaveAt: 0, doorS: 0,
+    crowd.push({ h: 0, t: 0, to: 0, lat: 0, x: 0, z: 0, targetLat: 0, speed: 1, mode: "gone", leaveAt: 0, door: null,
       spawnAt: 0, retargetT: 0, bob: Math.random() * 10, heading: 0, scale: rand(0.88, 1.08) });
   }
 }
@@ -451,10 +554,13 @@ scene.add(crowdBodies, crowdHeads);
 // ---------- staff ----------
 const staff = [];
 const markersEl = document.getElementById("markers");
-function spawnStaff(typeKey, s) {
+function spawnStaff(typeKey, place) {
   const T = STAFF_TYPES[typeKey];
-  const p = ringPos(s, 0);
   const mesh = makePerson({ body: T.vestColor, skin: pick(SKIN_COLORS), scale: T.scale, hat: T.hatColor });
+  if (T.stationary) {   // a coffee mug, so teachers read differently from a distance
+    const mug = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.14, 6), lambert(0xffffff));
+    mug.position.set(0.3, 0.85, 0.2); mesh.add(mug);
+  }
   const RAYS = CFG.render.coneRays;
   const geo = new THREE.BufferGeometry();
   geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array((RAYS + 2) * 3), 3));
@@ -465,17 +571,48 @@ function spawnStaff(typeKey, s) {
   scene.add(cone);
   const alert = document.createElement("div"); alert.className = "alert"; markersEl.appendChild(alert);
   const edge = document.createElement("div"); edge.className = "edge"; markersEl.appendChild(edge);
-  const st = { type: T, x: p.x, z: p.z, s, dir: Math.random() < 0.5 ? 1 : -1, facing: 0, state: "patrol",
+  const st = { type: T, key: typeKey, x: 0, z: 0, h: place.h ?? 0, t: place.t ?? 0, to: place.to ?? 0, facing: 0, state: "patrol",
     suspicion: 0, lastX: 0, lastZ: 0, lastVX: 0, lastVZ: 0, searchT: 0, stepT: 0, sweep: Math.random() * 10,
-    tx: 0, tz: 0, pauseT: 0, bustSpot: null, chaseT: 0, windedT: 0, roamT: T.roamTurnSec ? rand(...T.roamTurnSec) : 0,
-    key: typeKey, mesh, cone, alert, edge };
-  st.facing = ringHeading(s, st.dir);
+    tx: 0, tz: 0, pauseT: 0, bustSpot: null, chaseT: 0, windedT: 0, alarmT: 0, calledBackup: false,
+    roamT: T.roamTurnSec ? rand(...T.roamTurnSec) : 0, route: place.route ?? null, ri: place.ri ?? 0, rstep: place.rstep ?? 1,
+    post: place.post ?? null, mesh, cone, alert, edge };
+  if (T.stationary) { st.x = place.x; st.z = place.z; st.facing = place.facing; st.state = "post"; }
+  else { hallPos(st.h, st.t, 0, st); st.facing = hallHeading(st.h, st.to === HALLS[st.h].b ? 1 : -1); }
   staff.push(st);
   return st;
 }
 function clearStaff() {
   for (const st of staff) { scene.remove(st.mesh); scene.remove(st.cone); st.cone.geometry.dispose(); st.alert.remove(); st.edge.remove(); }
   staff.length = 0;
+}
+// Where new staff start: on their route, as far from the kid as we can manage.
+function pickStaffPlace(typeKey) {
+  const T = STAFF_TYPES[typeKey];
+  if (T.stationary) {   // a teacher at a classroom door that has nobody posted yet
+    const taken = new Set(staff.filter((s) => s.post).map((s) => s.post));
+    const doors = DOOR_SPOTS().filter((sp) => !taken.has(sp));
+    doors.sort((a, b) => spotDist(b) - spotDist(a));
+    const sp = pick(doors.slice(0, Math.max(1, Math.ceil(doors.length / 2))));
+    const p = hallPos(sp.h, sp.t + 0.95, sp.wallLat - sp.side * 0.55);
+    return { post: sp, x: p.x, z: p.z, facing: Math.atan2(-sp.side * HALLS[sp.h].nx, -sp.side * HALLS[sp.h].nz) };
+  }
+  const n = staff.filter((s) => s.key === typeKey).length;
+  const routeName = T.routes ? T.routes[n % T.routes.length] : null;
+  let best = null, bestD = -1;
+  for (let k = 0; k < 12; k++) {
+    let place;
+    if (routeName) {
+      const R = LAYOUT.routes[routeName].map(nodeIndex), rstep = Math.random() < 0.5 ? 1 : -1, i = Math.floor(Math.random() * R.length);
+      const from = R[i], to = R[mod(i + rstep, R.length)], h = hallBetween(from, to);
+      place = { h, t: rand(0, HALLS[h].len), to, route: R, ri: mod(i + rstep, R.length), rstep };
+    } else {
+      const h = Math.floor(Math.random() * HALLS.length);
+      place = { h, t: rand(0, HALLS[h].len), to: Math.random() < 0.5 ? HALLS[h].a : HALLS[h].b };
+    }
+    const p = hallPos(place.h, place.t, 0), d = Math.hypot(p.x - player.x, p.z - player.z);
+    if (d > bestD) { bestD = d; best = place; }
+  }
+  return best;
 }
 
 // =====================================================================================
@@ -535,7 +672,7 @@ function playBlip(freqs, dur = 0.09, type = "square", vol = 0.08) {
 // =====================================================================================
 // Input: left-thumb joystick, right-side look drag, WASD + mouse drag
 // =====================================================================================
-const input = { x: 0, y: 0 };
+const input = { x: 0, y: 0, m: 0 };
 const keys = new Set();
 const stick = { id: null, ox: 0, oy: 0, x: 0, y: 0 };
 const look = { id: null, lastX: 0 };
@@ -607,7 +744,8 @@ function readInput() {
 // Game state
 // =====================================================================================
 const game = { state: "title", day: 1, period: 1, phase: "passing", phaseT: 0, score: 0, time: 0,
-  strikes: 0, highAlert: false, periodScore: 0, periodsSkipped: 0, sceneT: 0, sceneEnd: null };
+  strikes: 0, highAlert: false, periodScore: 0, periodsSkipped: 0, dayPeriodsSkipped: 0, sceneT: 0, sceneEnd: null,
+  lockerUses: 0, pendingOffice: false };
 const cam = { yaw: 0 };
 const $ = (id) => document.getElementById(id);
 const ui = { phase: $("phase"), label: $("phaseLabel"), timer: $("timer"), score: $("score"), uses: $("uses"), banner: $("banner"), fps: $("fps"),
@@ -620,31 +758,61 @@ function toast(text, sec = 1.8) {
   ui.toast.textContent = text; ui.toast.classList.add("show"); toastTimer = sec;
 }
 
-function resetGame() {
-  game.day = 1; game.period = 1; game.score = 0; game.time = 0;
-  game.strikes = 0; game.highAlert = false; game.periodScore = 0; game.periodsSkipped = 0;
-  player.invisT = 0; paLast = {};
-  // kid walks in from the entrance
-  const p = ringPos(LAYOUT.entranceS, OUTER_LAT - 0.8);
+// ---- difficulty: within-day tables (by period) and across-days multipliers (by day) ----
+const perPeriod = (table) => table[Math.min(game.period, table.length) - 1];
+function dayMult(perDay) { return Math.min(CFG.days.maxMult, 1 + perDay * (game.day - 1)); }
+function alertMult(k) { return game.highAlert ? CFG.strikes.alert[k] : 1; }
+function staffMult(k) {
+  const day = { speed: CFG.days.staffSpeedPerDay, vision: CFG.days.staffVisionPerDay, notice: CFG.days.staffNoticePerDay }[k];
+  return alertMult(k) * dayMult(day);
+}
+function phaseLen(phase = game.phase) {
+  const D = CFG.days, n = game.day - 1;
+  return phase === "passing" ? Math.max(D.minPassingSec, CFG.passingSec + D.passingSecPerDay * n)
+                             : Math.min(D.maxSkippingSec, CFG.skippingSec + D.skippingSecPerDay * n);
+}
+
+// ---- save at the bell, so a returning player lands at "Day 1, Period 4" ----
+const SAVE_KEY = "hallwaySkip.save.v1";
+function saveGame() {
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify({ day: game.day, period: game.period, score: Math.floor(game.score),
+    strikes: game.strikes, highAlert: game.highAlert, periodsSkipped: game.periodsSkipped })); } catch (e) { /* storage blocked: fine */ }
+}
+function loadSave() { try { const s = JSON.parse(localStorage.getItem(SAVE_KEY)); return s && s.day ? s : null; } catch (e) { return null; } }
+function clearSave() { try { localStorage.removeItem(SAVE_KEY); } catch (e) { /* fine */ } }
+
+// Kid walks in from the entrance; the hall is full of students already out and about.
+function morningSetup() {
+  const { h, t } = LAYOUT.entrance, side = HALLS[h].outerSide;
+  const p = hallPos(h, t, wallLat(h, side) - side * 0.8);
   player.x = p.x; player.z = p.z; player.vx = player.vz = 0;
-  player.heading = ringHeading(LAYOUT.entranceS, 1);
+  player.heading = hallHeading(h, -1);
   cam.yaw = player.heading; manualCamT = 0;
-  // full hallway: everyone already out and about
+  player.hidden = null; player.mesh.visible = true; player.graceT = 0; player.invisT = 0; player.pushT = 0; player.pushSpot = null;
+  ui.hide.hidden = true;
   for (const c of crowd) {
-    c.s = rand(0, PERIM);
-    if (Math.abs(ringDelta(c.s, LAYOUT.entranceS)) < 2.5) c.s += 4;
-    c.lat = c.targetLat = rand(INNER_LAT + 0.4, OUTER_LAT - 0.4);
-    const q = ringPos(c.s, c.lat); c.x = q.x; c.z = q.z;
-    c.speed = rand(CFG.crowd.speedMin, CFG.crowd.speedMax); c.dir = Math.random() < 0.5 ? 1 : -1;
+    c.h = Math.floor(Math.random() * HALLS.length); c.t = rand(0, HALLS[c.h].len);
+    if (c.h === h && Math.abs(c.t - t) < 2.5) c.t = (c.t + 5) % HALLS[h].len;
+    const [lo, hi] = latLimits(c.h, c.t);
+    c.lat = c.targetLat = rand(lo, hi);
+    c.to = Math.random() < 0.5 ? HALLS[c.h].a : HALLS[c.h].b;
+    hallPos(c.h, c.t, c.lat, c);
+    c.speed = rand(CFG.crowd.speedMin, CFG.crowd.speedMax);
     c.mode = "wander"; c.retargetT = rand(1, 4);
   }
   clearStaff();
-  player.hidden = null; player.mesh.visible = true; player.graceT = 0; player.pushT = 0; player.pushSpot = null;
-  ui.hide.hidden = true;
   resetSpotsForPeriod();
-  for (const sp of SPOTS) if (sp.kind === "restroom") sp.nextSweep = rand(12, CFG.hiding.restroomSweepEverySec);
+  for (const sp of SPOTS) if (sp.kind === "restroom") sp.nextSweep = game.time + rand(12, CFG.hiding.restroomSweepEverySec);
   rollSubs();
   startPassing(true);
+}
+
+function resetGame(save = null) {
+  game.day = save?.day ?? 1; game.period = save?.period ?? 1; game.score = save?.score ?? 0; game.time = 0;
+  game.strikes = save?.strikes ?? 0; game.highAlert = save?.highAlert ?? false;
+  game.periodScore = 0; game.periodsSkipped = save?.periodsSkipped ?? 0; game.dayPeriodsSkipped = 0;
+  paLast = {};
+  morningSetup();
 }
 function resetSpotsForPeriod() {
   game.lockerUses = CFG.hiding.lockerUsesPerPeriod;
@@ -652,23 +820,21 @@ function resetSpotsForPeriod() {
 }
 
 function startPassing(first) {
-  game.phase = "passing"; game.phaseT = 0;
-  const P = CFG.passingSec;
+  game.phase = "passing"; game.phaseT = 0; game.periodScore = 0;
+  const P = phaseLen("passing"), doors = DOOR_SPOTS();
   for (const c of crowd) {
     c.leaveAt = rand(CFG.crowd.leaveStartFrac, CFG.crowd.leaveEndFrac) * P;
-    c.doorS = pick(LAYOUT.doorS);
+    c.door = pick(doors);
     if (!first) { c.mode = "spawning"; c.spawnAt = rand(0, CFG.crowd.floodSpreadSec); c.speed = rand(CFG.crowd.speedMin, CFG.crowd.speedMax); }
   }
-  game.periodScore = 0;
-  // add staff for this period, far from the kid
-  const idx = Math.min(game.period, CFG.periodsPerDay) - 1;
-  const ps = ringProject(player.x, player.z).s;
-  for (const [key, table] of [["hallMonitor", CFG.monitorsPerPeriod], ["securityGuard", CFG.guardsPerPeriod]]) {
-    const want = table[Math.min(idx, table.length - 1)];
+  // staff for this period (the within-day curve); they stay on for the rest of the day
+  for (const [key, table, line] of [["hallMonitor", CFG.monitorsPerPeriod], ["securityGuard", CFG.guardsPerPeriod, "guardOnDuty"], ["hallTeacher", CFG.teachersPerPeriod, "teacherOut"]]) {
     let have = staff.filter((st) => st.key === key).length;
-    if (key === "securityGuard" && have < want) pa("guardOnDuty");
-    while (have < want) { spawnStaff(key, ps + PERIM / 2 + staff.length * 17); have++; }
+    const want = perPeriod(table);
+    if (have < want && line && game.state === "playing") pa(line);
+    while (have < want) { spawnStaff(key, pickStaffPlace(key)); have++; }
   }
+  if (game.period === CFG.periodsPerDay && !first) setTimeout(() => game.state === "playing" && pa("lastPeriod"), 2500);
 }
 
 function startSkipping() {
@@ -680,19 +846,40 @@ function startSkipping() {
 
 function periodSurvived() {
   playBell();
-  game.period++; game.periodsSkipped++;
+  game.periodsSkipped++; game.dayPeriodsSkipped++;
+  if (game.period >= CFG.periodsPerDay) { dayOver(); return; }
+  game.period++;
   resetSpotsForPeriod();
   if (player.hidden?.kind === "classroom") exitSpot(false, "Bell! You slip out with the class.");
-  if (game.period > CFG.periodsPerDay) {
-    banner(`DAY ${game.day} SURVIVED!<small>Day ${game.day + 1} starts now. New subs today.</small>`, 3);
-    pa("daySurvived", null, null, { d: game.day });
-    game.day++; game.period = 1;
-    game.highAlert = false;   // the office forgets about you overnight
-    rollSubs();
-  } else {
-    banner(`BELL! +${CFG.pointsPerPeriod}<small>Period ${game.period - 1} skipped. Blend into the crowd.</small>`);
-  }
+  banner(`BELL! +${CFG.pointsPerPeriod}<small>Period ${game.period - 1} skipped. Blend into the crowd.</small>`);
   startPassing(false);
+  saveGame();
+}
+
+// End of the day: a summary screen, then the next (harder) day starts in the morning.
+function dayOver() {
+  game.state = "dayEnd";
+  releaseControls();
+  ui.banner.classList.remove("show"); bannerTimer = 0;
+  if (player.hidden) exitSpot(false);
+  game.score += CFG.days.dayBonus;
+  const D = CFG.days, next = game.day + 1;
+  $("dayTitle").textContent = `DAY ${game.day} SURVIVED!`;
+  $("dayStats").innerHTML = `${game.dayPeriodsSkipped} periods skipped today · +${D.dayBonus} day bonus<br><b>Score ${Math.floor(game.score)}</b> · Strikes ${game.strikes}/${CFG.strikes.max}`;
+  const pass = Math.max(D.minPassingSec, CFG.passingSec + D.passingSecPerDay * (next - 1));
+  const skip = Math.min(D.maxSkippingSec, CFG.skippingSec + D.skippingSecPerDay * (next - 1));
+  $("dayNext").textContent = `Day ${next}: staff are faster and sharper. Passing ${pass}s, skipping ${skip}s.`;
+  $("dayEnd").hidden = false;
+  game.day = next; game.period = 1; game.highAlert = false; game.dayPeriodsSkipped = 0;
+  saveGame();
+}
+function startNextDay() {
+  $("dayEnd").hidden = true;
+  morningSetup();
+  game.state = "playing";
+  banner(`DAY ${game.day}<small>New day, same hoodie. New subs today.</small>`, 2.6);
+  setTimeout(() => game.state === "playing" && pa("newDay", null, null, { d: game.day }), 1500);
+  clock.getDelta();
 }
 
 function releaseControls() { stick.id = look.id = null; keys.clear(); stickBase.style.display = stickKnob.style.display = "none"; }
@@ -704,6 +891,7 @@ function caught(st) {
   playBlip([660, 520, 390, 260], 0.13, "sawtooth", 0.07);
   if (game.strikes >= CFG.strikes.max) {   // strike 3: run over
     game.state = "caught";
+    clearSave();
     pa("runOver");
     $("caughtText").innerHTML = `The ${st.type.name} walks you to the office. Your parents are on their way.<br>` +
       `<b>Score ${Math.floor(game.score)}</b> · Day ${game.day}, period ${game.period} · ${game.periodsSkipped} period${game.periodsSkipped === 1 ? "" : "s"} skipped`;
@@ -726,7 +914,8 @@ function caught(st) {
   pa(office ? "strike2" : "strike1");
   // everyone backs off
   for (const o of staff) {
-    if (o.state !== "patrol") { o.state = "return"; o.s = ringProject(o.x, o.z).s; }
+    if (o.type.stationary) o.state = "post";
+    else if (o.state !== "patrol") { o.state = "return"; setReturnPoint(o); }
     o.suspicion = 0; o.calledBackup = false; o.chaseT = 0; o.windedT = 0; o.pauseT = 0.8;
   }
   game.pendingOffice = office;
@@ -738,13 +927,14 @@ function endScene() {
   if (game.pendingOffice) {
     game.highAlert = true;
     // sent back out from the office, by the entrance
-    const p = ringPos(LAYOUT.entranceS, OUTER_LAT - 0.8);
-    player.x = p.x; player.z = p.z; player.heading = ringHeading(LAYOUT.entranceS, 1); cam.yaw = player.heading;
+    const { h, t } = LAYOUT.entrance, side = HALLS[h].outerSide, p = hallPos(h, t, wallLat(h, side) - side * 0.8);
+    player.x = p.x; player.z = p.z; player.heading = hallHeading(h, -1); cam.yaw = player.heading;
     banner("HIGH ALERT<small>Staff see farther and move faster for the rest of the day.</small>", 2.6);
   }
   if (game.strikes === CFG.strikes.max - 1) setTimeout(() => pa("lastStrike"), 4800);
   player.invisT = CFG.strikes.afterStrikeGraceSec;
   game.state = "playing";
+  saveGame();
   clock.getDelta();
 }
 function strikeDotsHtml() {
@@ -771,27 +961,39 @@ function pa(kind, text = null, sec = null, vars = {}) {
 function pause() {
   if (game.state !== "playing") return;
   game.state = "paused"; $("paused").hidden = false;
-  stick.id = look.id = null; keys.clear(); stickBase.style.display = stickKnob.style.display = "none";
+  releaseControls();
 }
-function onOverlayTap() {
+function startRun(save) {
+  resetGame(save);
+  $("title").hidden = true; $("caught").hidden = true;
+  game.state = "playing";
+  if (save) banner(`DAY ${game.day} · PERIOD ${game.period}<small>Welcome back. Strikes: ${game.strikes}/${CFG.strikes.max}</small>`, 2.6);
+  else banner("PASSING PERIOD<small>Blend in. When the bell rings, don't be in class.</small>");
+  setTimeout(() => game.state === "playing" && pa("start"), 1200);
+  tryFullscreenLandscape();
+  saveGame();
+}
+function onOverlayTap(e) {
   initAudio();
-  if (game.state === "title" || game.state === "caught") {
-    resetGame();
-    $("title").hidden = true; $("caught").hidden = true;
-    game.state = "playing";
-    banner("PASSING PERIOD<small>Blend in. When the bell rings, don't be in class.</small>");
-    setTimeout(() => game.state === "playing" && pa("start"), 1200);
-    tryFullscreenLandscape();
-  } else if (game.state === "paused") {
-    $("paused").hidden = true; game.state = "playing";
-  }
+  if (game.state === "title") startRun(e?.target?.id === "continueBtn" ? loadSave() : null);
+  else if (game.state === "caught") startRun(null);
+  else if (game.state === "paused") { $("paused").hidden = true; game.state = "playing"; }
+  else if (game.state === "dayEnd") startNextDay();
   clock.getDelta();
 }
-for (const id of ["title", "caught", "paused"]) $(id).addEventListener("click", onOverlayTap);
+for (const id of ["title", "caught", "paused", "dayEnd"]) $(id).addEventListener("click", onOverlayTap);
 $("strike").addEventListener("click", () => { if (game.sceneT > 0.8) endScene(); });
 $("hpLeave").addEventListener("click", () => { if (game.state === "playing") exitSpot(false); });
 window.addEventListener("blur", pause);
 document.addEventListener("visibilitychange", () => { if (document.hidden) pause(); });
+{
+  const s = loadSave();
+  if (s) {
+    $("continueBtn").textContent = `Continue: Day ${s.day}, Period ${s.period}`;
+    $("continueBtn").hidden = false;
+    $("startBtn").textContent = "New run";
+  }
+}
 
 function tryFullscreenLandscape() {
   if (!matchMedia("(pointer: coarse)").matches) return;
@@ -806,16 +1008,20 @@ function tryFullscreenLandscape() {
 // Update
 // =====================================================================================
 const tmp = {};
-function latLimits(s) {
-  let lo = INNER_LAT + 0.35, hi = OUTER_LAT - 0.35;
-  for (const ob of OBSTACLES) if (Math.abs(ringDelta(s, ob.s)) < ob.halfLen + 0.5) hi = Math.min(hi, OUTER_LAT - ob.depth - 0.35);
-  return [lo, hi];
+// how far sideways you can be in hall h at distance t (walls, lockers, obstacles)
+function latLimits(h, t) {
+  const lim = (side) => {
+    let v = Math.abs(wallLat(h, side)) - 0.35;
+    for (const ob of OBSTACLES) if (ob.h === h && ob.side === side && Math.abs(t - ob.t) < ob.halfLen + 0.5) v = Math.min(v, Math.abs(wallLat(h, side)) - ob.depth - 0.35);
+    return v;
+  };
+  return [-lim(-1), lim(1)];
 }
 
 function updatePlayer(dt) {
   readInput();
   player.graceT = Math.max(0, player.graceT - dt);
-  if (player.invisT > 0) { player.invisT -= dt; player.mesh.visible = player.invisT <= 0 || Math.sin(game.time * 22) > -0.3; }
+  if (player.invisT > 0) { player.invisT -= dt; player.mesh.visible = !player.hidden && (player.invisT <= 0 || Math.sin(game.time * 22) > -0.3); }
   if (player.hidden) { updateHiding(dt); return; }
   const f = { x: Math.sin(cam.yaw), z: Math.cos(cam.yaw) }, r = { x: -Math.cos(cam.yaw), z: Math.sin(cam.yaw) };
   const mx = r.x * input.x + f.x * input.y, mz = r.z * input.x + f.z * input.y;
@@ -842,33 +1048,47 @@ function updatePlayer(dt) {
 }
 
 function updateCrowd(dt) {
-  const P = CFG.passingSec;
   for (const c of crowd) {
     if (c.mode === "gone") continue;
     if (c.mode === "spawning") {
       if (game.phaseT < c.spawnAt) continue;
-      c.mode = "exiting"; c.s = c.doorS + rand(-0.4, 0.4); c.lat = INNER_LAT + 0.1; c.targetLat = rand(INNER_LAT + 0.5, OUTER_LAT - 0.5);
-      c.dir = Math.random() < 0.5 ? 1 : -1; c.doorS = pick(LAYOUT.doorS);
-      const q = ringPos(c.s, c.lat); c.x = q.x; c.z = q.z;
+      const d = c.door;
+      c.mode = "exiting"; c.h = d.h; c.t = d.t + rand(-0.4, 0.4); c.lat = d.wallLat;
+      const [lo, hi] = latLimits(c.h, c.t);
+      c.targetLat = rand(lo, hi);
+      c.to = Math.random() < 0.5 ? HALLS[c.h].a : HALLS[c.h].b;
+      c.door = pick(DOOR_SPOTS());
+      hallPos(c.h, c.t, c.lat, c);
     }
-    const [lo, hi] = latLimits(c.s);
     if (c.mode === "exiting") {
       c.lat += Math.sign(c.targetLat - c.lat) * c.speed * dt;
       if (Math.abs(c.targetLat - c.lat) < 0.15) c.mode = "wander";
     } else if (c.mode === "wander") {
-      c.s += c.dir * c.speed * dt;
+      const h0 = c.h;
+      walk(c, c.speed * dt, randomOnward);
       c.retargetT -= dt;
-      if (c.retargetT <= 0) { c.targetLat = rand(lo, hi); c.retargetT = rand(1.5, 4); if (Math.random() < 0.15) c.dir *= -1; }
+      if (c.retargetT <= 0 || c.h !== h0) {
+        const [lo, hi] = latLimits(c.h, c.t);
+        c.targetLat = rand(lo, hi); c.retargetT = rand(1.5, 4);
+        if (c.h === h0 && Math.random() < 0.12) c.to = otherEnd(c.h, c.to);   // change of heart
+      }
       c.lat += (c.targetLat - c.lat) * damp(1.5, dt);
       if (game.phase === "passing" && game.phaseT >= c.leaveAt) c.mode = "toClass";
     } else if (c.mode === "toClass") {
-      const ds = ringDelta(c.s, c.doorS);
-      if (Math.abs(ds) > 0.3) { c.s += Math.sign(ds) * Math.min(Math.abs(ds), c.speed * dt); c.dir = Math.sign(ds); c.lat += (Math.max(lo, c.lat - 0.5) - c.lat) * damp(1, dt); }
-      else { c.lat -= c.speed * dt; if (c.lat < INNER_LAT + 0.05) c.mode = "gone"; }
+      const d = c.door;
+      if (c.h !== d.h || Math.abs(c.t - d.t) > 0.05) {
+        walkTo(c, d.h, d.t, c.speed * dt);
+        const toward = c.h === d.h ? d.side * 1.2 : 0;   // drift toward the door's side of the hall
+        c.lat += (toward - c.lat) * damp(1, dt);
+      } else {
+        c.lat += Math.sign(d.wallLat) * c.speed * dt;
+        if (Math.abs(c.lat) > Math.abs(d.wallLat) - 0.05) c.mode = "gone";
+      }
     }
-    c.lat = c.mode === "toClass" || c.mode === "exiting" ? clamp(c.lat, INNER_LAT, hi) : clamp(c.lat, lo, hi);
-    ringPos(c.s, c.lat, tmp);
-    // smooth world position (also rounds off the ring's corners)
+    const [lo, hi] = latLimits(c.h, c.t);
+    c.lat = c.mode === "toClass" || c.mode === "exiting" ? clamp(c.lat, -LAYOUT.hallHalf, LAYOUT.hallHalf) : clamp(c.lat, lo, hi);
+    hallPos(c.h, c.t, c.lat, tmp);
+    // smooth world position (also rounds off corners and junctions)
     const k = damp(9, dt);
     const nx = c.x + (tmp.x - c.x) * k, nz = c.z + (tmp.z - c.z) * k;
     if (Math.hypot(nx - c.x, nz - c.z) > 1e-3) c.heading = lerpAngle(c.heading, Math.atan2(nx - c.x, nz - c.z), damp(8, dt));
@@ -905,14 +1125,55 @@ function moveToward(st, tx, tz, speed, dt) {
   st.facing = lerpAngle(st.facing, Math.atan2(dx, dz), damp(10, dt));
   return d;
 }
+// Head for a point anywhere in the school: straight there if it's in view, otherwise via the hall junctions.
+function navToward(st, tx, tz, speed, dt) {
+  if (lineOfSight(st.x, st.z, tx, tz)) return moveToward(st, tx, tz, speed, dt);
+  const me = hallProject(st.x, st.z), tg = hallProject(tx, tz);
+  if (me.h === tg.h) return moveToward(st, tx, tz, speed, dt);
+  const H = HALLS[me.h];
+  let n = me.t + costToPoint(H.a, tg.h, tg.t) <= H.len - me.t + costToPoint(H.b, tg.h, tg.t) ? H.a : H.b;
+  if (Math.hypot(NODES[n].x - st.x, NODES[n].z - st.z) < 0.9) {   // at the junction: on to the next one
+    const T = HALLS[tg.h];
+    if (n === T.a || n === T.b) return moveToward(st, tx, tz, speed, dt);
+    n = NEXT[n][bestEnd(n, tg.h, tg.t)];
+  }
+  moveToward(st, NODES[n].x, NODES[n].z, speed, dt);
+  return Infinity;
+}
+// after a chase, staff walk back to the nearest point of their hall and pick their patrol up again
+function setReturnPoint(st) {
+  const pr = hallProject(st.x, st.z);
+  st.h = pr.h; st.t = pr.t;
+  st.to = Math.random() < 0.5 ? HALLS[pr.h].a : HALLS[pr.h].b;
+  if (st.route) { const i = st.route.indexOf(st.to); if (i >= 0) st.ri = i; }
+}
 
 function canSeePlayer(st, rangeMult, needCone) {
   if (player.hidden) return { seen: false, d: Infinity };
   const T = st.type, dx = player.x - st.x, dz = player.z - st.z, d = Math.hypot(dx, dz);
   if (player.invisT > 0) return { seen: false, d };   // just served a strike: a moment to get away
-  if (d > T.visionRange * alertMult("vision") * rangeMult) return { seen: false, d };
+  if (d > T.visionRange * staffMult("vision") * rangeMult) return { seen: false, d };
   if (needCone && Math.abs(angDiff(st.facing, Math.atan2(dx, dz))) > (T.visionHalfAngleDeg * Math.PI) / 180) return { seen: false, d };
   return { seen: lineOfSight(st.x, st.z, player.x, player.z), d };
+}
+// suspicion builds faster up close, slower in a crowd and during passing periods
+function noticeRate(st, d, cover) {
+  const D = CFG.detection, T = st.type;
+  const closeness = Math.max(0, 1 - d / (T.visionRange * staffMult("vision")));
+  let rate = D.suspicionRate * T.notice * staffMult("notice") * (D.farRateFrac + (1 - D.farRateFrac) * closeness);
+  rate /= 1 + cover * CFG.crowd.coverPerStudent;
+  if (game.phase === "passing") rate /= D.passingBeatMult;
+  return rate;
+}
+
+function patrolChooser(st) {
+  if (!st.route) return randomOnward;
+  return (w, node) => {
+    const R = st.route;
+    if (node === R[st.ri]) st.ri = mod(st.ri + st.rstep, R.length);
+    const target = R[st.ri];
+    return target === node ? randomOnward(w, node) : NEXT[node][target];
+  };
 }
 
 function updateStaff(dt, cover) {
@@ -929,30 +1190,42 @@ function updateStaff(dt, cover) {
       continue;
     }
 
-    if (st.state === "patrol" || st.state === "return") {
+    if (st.state === "post") {
+      // a teacher at their door: doesn't chase, but yells for backup, and grabs you if you walk right past
+      const look = canSeePlayer(st, 1, true);
+      st.alarmT = Math.max(0, st.alarmT - dt);
+      if (look.seen) {
+        st.suspicion += noticeRate(st, look.d, cover) * dt;
+        if (look.d < T.catchRange && st.suspicion > 0.35 && player.graceT <= 0) { caught(st); return; }
+      } else st.suspicion = Math.max(0, st.suspicion - D.decayRate * dt);
+      if (st.suspicion >= 1 && st.alarmT <= 0) {
+        st.alarmT = T.alarmCooldownSec; st.suspicion = 0.5;
+        playBlip([620, 880, 620], 0.1, "square", 0.08);
+        toast("Teacher: \"HEY! Where's your hall pass?!\"", 2.2);
+        callBackup(st, false);
+      }
+      const base = st.post ? Math.atan2(-st.post.side * HALLS[st.post.h].nx, -st.post.side * HALLS[st.post.h].nz) : st.facing;
+      const want = st.suspicion > 0.05 ? Math.atan2(player.x - st.x, player.z - st.z) : base + Math.sin(st.sweep) * (T.sweepDeg * Math.PI / 180);
+      st.facing = lerpAngle(st.facing, want, damp(st.suspicion > 0.05 ? 5 : 2, dt));
+    } else if (st.state === "patrol" || st.state === "return") {
       const look = canSeePlayer(st, 1, true);
       if (look.seen) {
-        const closeness = Math.max(0, 1 - look.d / (T.visionRange * alertMult("vision")));
-        let rate = D.suspicionRate * T.notice * alertMult("notice") * (D.farRateFrac + (1 - D.farRateFrac) * closeness);
-        rate /= 1 + cover * CFG.crowd.coverPerStudent;
-        if (game.phase === "passing") rate /= D.passingBeatMult;
-        st.suspicion += rate * dt;
+        st.suspicion += noticeRate(st, look.d, cover) * dt;
         if (look.d < D.instantRange && game.phase === "skipping") st.suspicion = 1;
       } else st.suspicion = Math.max(0, st.suspicion - D.decayRate * dt);
 
       if (st.suspicion >= 1) { startChase(st); }
       else if (st.state === "return") {
-        speed = T.patrolSpeed;
-        const tgt = ringPos(st.s, 0);
-        if (moveToward(st, tgt.x, tgt.z, speed, dt) < 0.3) st.state = "patrol";
+        speed = T.patrolSpeed * staffMult("speed");
+        const tgt = hallPos(st.h, st.t, 0);
+        if (navToward(st, tgt.x, tgt.z, speed, dt) < 0.3) st.state = "patrol";
       } else {
-        // patrol loop; slow down and squint while suspicious
-        speed = T.patrolSpeed * alertMult("speed") * (st.suspicion > 0.05 ? D.suspiciousSlow : 1);
-        if (T.roamTurnSec) { st.roamT -= dt; if (st.roamT <= 0) { st.roamT = rand(...T.roamTurnSec); if (Math.random() < 0.6) st.dir *= -1; } }
-        st.s += st.dir * speed * dt;
-        const tgt = ringPos(st.s, 0);
-        st.x = tgt.x; st.z = tgt.z;
-        const base = ringHeading(st.s, st.dir);
+        // patrol (monitors: a fixed loop; guards: roaming); slow down and squint while suspicious
+        speed = T.patrolSpeed * staffMult("speed") * (st.suspicion > 0.05 ? D.suspiciousSlow : 1);
+        if (T.roamTurnSec) { st.roamT -= dt; if (st.roamT <= 0) { st.roamT = rand(...T.roamTurnSec); if (Math.random() < 0.6) st.to = otherEnd(st.h, st.to); } }
+        walk(st, speed * dt, patrolChooser(st));
+        hallPos(st.h, st.t, 0, st);
+        const base = hallHeading(st.h, st.to === HALLS[st.h].b ? 1 : -1);
         const want = st.suspicion > 0.05 ? Math.atan2(player.x - st.x, player.z - st.z) : base + Math.sin(st.sweep) * (T.sweepDeg * Math.PI / 180);
         st.facing = lerpAngle(st.facing, want, damp(st.suspicion > 0.05 ? 5 : 3, dt));
       }
@@ -963,7 +1236,7 @@ function updateStaff(dt, cover) {
         st.lastX = player.x; st.lastZ = player.z; st.lastVX = player.vx; st.lastVZ = player.vz;
         moveToward(st, player.x, player.z, speed, dt);
         if (look.d < D.catchRadius && player.graceT <= 0) { caught(st); return; }
-        if (T.callsBackup && !st.calledBackup) { st.calledBackup = true; callBackup(st); }
+        if (T.callsBackup && !st.calledBackup) { st.calledBackup = true; callBackup(st, true); }
       } else {
         st.state = "search"; st.searchT = 0;
         const g = { x: st.lastX + st.lastVX * D.predictSec, z: st.lastZ + st.lastVZ * D.predictSec };
@@ -972,9 +1245,9 @@ function updateStaff(dt, cover) {
     } else if (st.state === "bust") {
       // they saw you duck into a hiding spot: go yank you out
       speed = chaseSpeed(st, dt);
-      const sp = st.bustSpot, f = ringPos(sp.s, sp.frontLat);
+      const sp = st.bustSpot, f = spotFront(sp, {});
       if (!player.hidden && canSeePlayer(st, D.chaseSightRangeMult, false).seen) startChase(st);
-      else if (moveToward(st, f.x, f.z, speed, dt) < 0.75) {
+      else if (navToward(st, f.x, f.z, speed, dt) < 0.75) {
         if (player.hidden === sp) {
           const who = `The ${T.name}`;
           exitSpot(true, sp.kind === "locker" ? `${who} yanks the locker open: "I saw you go in there."`
@@ -986,13 +1259,12 @@ function updateStaff(dt, cover) {
     } else if (st.state === "search") {
       st.searchT += dt;
       speed = chaseSpeed(st, dt) * 0.8;
-      const reached = moveToward(st, st.searchT < 0.6 ? st.lastX : st.tx, st.searchT < 0.6 ? st.lastZ : st.tz, speed, dt) < 0.3;
+      const reached = navToward(st, st.searchT < 0.6 ? st.lastX : st.tx, st.searchT < 0.6 ? st.lastZ : st.tz, speed, dt) < 0.3;
       if (reached) { speed = 0; st.facing += Math.sin(game.time * 3) * dt * 2.5; }   // look around
       if (canSeePlayer(st, 1, true).seen) startChase(st);
       else if (st.searchT > D.searchSec) {
         st.state = "return"; st.suspicion = 0; st.calledBackup = false;
-        const pr = ringProject(st.x, st.z); st.s = pr.s;
-        st.dir = Math.random() < 0.5 ? 1 : -1;
+        setReturnPoint(st);
         playBlip([330, 260], 0.12, "triangle", 0.05);   // "hmph"
       }
     }
@@ -1010,7 +1282,7 @@ function updateStaff(dt, cover) {
   }
 }
 
-// Guards sprint faster than you, then get winded. Everyone moves a bit faster on high alert.
+// Guards sprint faster than you, then get winded. Everyone moves a bit faster on high alert and on later days.
 function chaseSpeed(st, dt) {
   const T = st.type;
   let v = T.chaseSpeed;
@@ -1018,23 +1290,21 @@ function chaseSpeed(st, dt) {
     if (st.windedT > 0) { st.windedT -= dt; v = T.windedSpeed; if (st.windedT <= 0) st.chaseT = 0; }
     else { st.chaseT += dt; if (st.chaseT > T.sprintSec) { st.windedT = T.windedSec; toast("The guard is winded! *huff* *huff*"); } }
   }
-  return v * alertMult("speed");
+  return v * staffMult("speed");
 }
-function alertMult(k) { return game.highAlert ? CFG.strikes.alert[k] : 1; }
 
-// A guard radios in: the nearest free staff head for your position, and the PA says where.
-function callBackup(caller) {
-  playBlip([1400, 1100, 1400], 0.05, "square", 0.05);   // radio chirp
-  const others = staff.filter((o) => o !== caller && o.state !== "chase" && o.state !== "bust")
+// A radio call (guard) or a yell (teacher): the nearest free staff head for your position.
+function callBackup(caller, announce) {
+  if (announce) playBlip([1400, 1100, 1400], 0.05, "square", 0.05);   // radio chirp
+  const others = staff.filter((o) => o !== caller && !o.type.stationary && o.state !== "chase" && o.state !== "bust")
     .map((o) => ({ o, d: Math.hypot(o.x - player.x, o.z - player.z) }))
     .filter((e) => e.d < CFG.backup.range).sort((a, b) => a.d - b.d).slice(0, CFG.backup.maxResponders);
   for (const { o, d } of others) {
     o.state = "search"; o.suspicion = 0.6;
-    o.searchT = -Math.min(14, d / (o.type.chaseSpeed * 0.8));   // time to get there before they give up
+    o.searchT = -Math.min(16, d / (o.type.chaseSpeed * 0.8));   // time to get there before they give up
     o.lastX = o.tx = player.x; o.lastZ = o.tz = player.z;
   }
-  const seg = SEGS.indexOf(segAt(ringProject(player.x, player.z).s));
-  pa("backup", null, null, { hall: HALL_NAMES[seg] });
+  if (announce) pa("backup", null, null, { hall: HALLS[hallProject(player.x, player.z).h].name });
 }
 
 function startChase(st) {
@@ -1044,9 +1314,11 @@ function startChase(st) {
 }
 
 const CONE_COLORS = { patrol: new THREE.Color(0xfff2a8), suspicious: new THREE.Color(0xffa94d), chase: new THREE.Color(0xff4d4d) };
+const isAlarmed = (st) => st.state === "chase" || st.state === "search" || st.state === "bust" ||
+  (st.state === "post" && st.alarmT > st.type.alarmCooldownSec - 3);
 function updateCone(st) {
   const T = st.type, RAYS = CFG.render.coneRays, half = (T.visionHalfAngleDeg * Math.PI) / 180;
-  const range = T.visionRange * alertMult("vision") * (st.state === "chase" ? CFG.detection.chaseSightRangeMult : 1);
+  const range = T.visionRange * staffMult("vision") * (st.state === "chase" ? CFG.detection.chaseSightRangeMult : 1);
   const pos = st.cone.geometry.attributes.position;
   pos.setXYZ(0, st.x, 0.03, st.z);
   for (let i = 0; i <= RAYS; i++) {
@@ -1055,7 +1327,7 @@ function updateCone(st) {
     pos.setXYZ(i + 1, st.x + dx * len, 0.03, st.z + dz * len);
   }
   pos.needsUpdate = true;
-  const key = st.state === "chase" || st.state === "search" || st.state === "bust" ? "chase" : st.suspicion > 0.05 ? "suspicious" : "patrol";
+  const key = isAlarmed(st) ? "chase" : st.suspicion > 0.05 ? "suspicious" : "patrol";
   st.cone.material.color.copy(CONE_COLORS[key]);
   st.cone.material.opacity = key === "patrol" ? 0.26 : 0.36;
 }
@@ -1075,12 +1347,13 @@ const proj = new THREE.Vector3();
 function updateMarkers() {
   const w = window.innerWidth, h = window.innerHeight;
   for (const st of staff) {
-    const chasing = st.state === "chase" || st.state === "search" || st.state === "bust";
+    const chasing = isAlarmed(st);
     const color = chasing ? "#ff4d4d" : st.suspicion > 0.05 ? "#ffa94d" : "#ffe066";
     proj.set(st.x, 2.0 * st.type.scale, st.z).applyMatrix4(camera.matrixWorldInverse);
     const behind = proj.z > -0.2;
     proj.set(st.x, 2.0 * st.type.scale, st.z).project(camera);
     const onScreen = !behind && Math.abs(proj.x) < 0.96 && Math.abs(proj.y) < 0.96;
+    const dist = Math.hypot(st.x - player.x, st.z - player.z);
     if (onScreen) {
       st.edge.style.display = "none";
       const txt = chasing ? "!" : st.suspicion > 0.05 ? "?" : "";
@@ -1090,6 +1363,8 @@ function updateMarkers() {
         st.alert.style.left = ((proj.x + 1) / 2) * w + "px"; st.alert.style.top = ((1 - proj.y) / 2) * h + "px";
         st.alert.style.opacity = chasing ? 1 : 0.4 + 0.6 * st.suspicion;
       }
+    } else if (st.type.stationary && dist > 18 && !chasing) {   // far-off teachers don't need arrows
+      st.alert.style.display = "none"; st.edge.style.display = "none";
     } else {
       st.alert.style.display = "none";
       const v = proj.set(st.x - camera.position.x, 0, st.z - camera.position.z);
@@ -1098,11 +1373,10 @@ function updateMarkers() {
       const a = Math.atan2(right, fwd);                     // 0 = straight ahead (top of screen)
       const sx = Math.sin(a), sy = -Math.cos(a), rx = w / 2 - 34, ry = h / 2 - 34;
       const k = Math.min(rx / Math.max(Math.abs(sx), 1e-4), ry / Math.max(Math.abs(sy), 1e-4));
-      const dist = Math.hypot(st.x - player.x, st.z - player.z);
       st.edge.style.display = "block";
       st.edge.style.left = w / 2 + sx * k - 13 + "px"; st.edge.style.top = h / 2 + sy * k - 12 + "px";
       st.edge.style.transform = `rotate(${a}rad)`;
-      st.edge.style.borderBottomColor = color;
+      st.edge.style.borderBottomColor = st.type.stationary && !chasing ? "#d9a6e6" : color;
       st.edge.style.opacity = chasing ? 1 : clamp(1.2 - dist / 25, 0.35, 1);
     }
   }
@@ -1110,8 +1384,7 @@ function updateMarkers() {
 
 let lastHud = "";
 function updateHud() {
-  const total = game.phase === "passing" ? CFG.passingSec : CFG.skippingSec;
-  const left = Math.max(0, Math.ceil(total - game.phaseT));
+  const left = Math.max(0, Math.ceil(phaseLen() - game.phaseT));
   const label = `DAY ${game.day} · PERIOD ${game.period} · ${game.phase === "passing" ? "PASSING" : "SKIPPING"}`;
   const key = label + left + Math.floor(game.score) + "|" + game.lockerUses + "|" + game.strikes + game.highAlert;
   if (key === lastHud) return;
@@ -1127,11 +1400,11 @@ function updateHud() {
 
 function update(dt) {
   game.time += dt; game.phaseT += dt;
-  if (game.phase === "passing" && game.phaseT >= CFG.passingSec) startSkipping();
+  if (game.phase === "passing" && game.phaseT >= phaseLen("passing")) startSkipping();
   else if (game.phase === "skipping") {
-    game.score += (CFG.pointsPerPeriod / CFG.skippingSec) * dt;
-    game.periodScore += (CFG.pointsPerPeriod / CFG.skippingSec) * dt;
-    if (game.phaseT >= CFG.skippingSec) periodSurvived();
+    const pts = (CFG.pointsPerPeriod / phaseLen("skipping")) * dt;
+    game.score += pts; game.periodScore += pts;
+    if (game.phaseT >= phaseLen("skipping")) { periodSurvived(); if (game.state !== "playing") return; }
   }
   updatePlayer(dt);
   updateRestrooms();
@@ -1145,9 +1418,10 @@ function update(dt) {
 function spotBlocked(sp) {   // why this spot can't be used right now ("" if it can)
   if (sp.kind === "locker") return game.lockerUses > 0 ? "" : "No locker uses left this period";
   if (sp.used) return sp.kind === "restroom" ? "You already hid in this restroom this period" : `Room ${sp.room} already kicked you out this period`;
+  if (sp.kind === "classroom" && staff.some((s) => s.post === sp)) return `Room ${sp.room}'s teacher is standing right there`;
   return "";
 }
-function spotFront(sp, out = {}) { return ringPos(sp.s, sp.frontLat, out); }
+function spotFront(sp, out = {}) { return hallPos(sp.h, sp.t, sp.frontLat, out); }
 function spotDist(sp) { spotFront(sp, tmp); return Math.hypot(tmp.x - player.x, tmp.z - player.z); }
 function nearestSpot() {
   let best = null, bd = CFG.interact.range;
@@ -1166,6 +1440,7 @@ function enterSpot(sp) {
   stick.x = stick.y = 0;
   // Did anyone see you go in?
   for (const st of staff) {
+    if (st.type.stationary) continue;
     const d = Math.hypot(st.x - f.x, st.z - f.z);
     if (!lineOfSight(st.x, st.z, f.x, f.z)) continue;
     if ((st.state === "chase" || st.state === "search") && d < st.type.visionRange * CFG.detection.chaseSightRangeMult) {
@@ -1184,10 +1459,10 @@ function exitSpot(booted, msg = "") {
   const sp = player.hidden;
   if (!sp) return;
   player.hidden = null; player.mesh.visible = true; player.pushT = 0;
-  const f = ringPos(sp.s, sp.frontLat - sp.sign * 0.1);
+  const f = hallPos(sp.h, sp.t, sp.frontLat - sp.side * 0.1);
   player.x = f.x; player.z = f.z;
-  const seg = segAt(sp.s);
-  player.heading = Math.atan2(-sp.sign * seg.nx, -sp.sign * seg.nz);   // facing out into the hall
+  const H = HALLS[sp.h];
+  player.heading = Math.atan2(-sp.side * H.nx, -sp.side * H.nz);   // facing out into the hall
   ui.hide.hidden = true;
   if (booted) {
     player.graceT = CFG.hiding.bootGraceSec;
@@ -1200,12 +1475,12 @@ function exitSpot(booted, msg = "") {
 }
 
 function checkWalkIn(mx, mz, dt) {
-  const pr = ringProject(player.x, player.z), seg = segAt(pr.s);
+  const pr = hallProject(player.x, player.z), H = HALLS[pr.h];
   let target = null;
   for (const sp of SPOTS) {
-    if (Math.abs(ringDelta(pr.s, sp.s)) > sp.T.halfW) continue;
+    if (sp.h !== pr.h || Math.abs(pr.t - sp.t) > sp.T.halfW) continue;
     if (Math.abs(sp.wallLat - pr.lat) > CFG.interact.walkInDist) continue;
-    if ((mx * seg.nx + mz * seg.nz) * sp.sign > 0.55) { target = sp; break; }   // pushing into the wall
+    if ((mx * H.nx + mz * H.nz) * sp.side > 0.55) { target = sp; break; }   // pushing into the wall
   }
   if (target && target === player.pushSpot) {
     player.pushT += dt;
@@ -1255,8 +1530,8 @@ function updateRestrooms() {
     // the nearest monitor who isn't busy comes to see who that was
     const f = spotFront(sp, {});
     let best = null, bd = Infinity;
-    for (const st of staff) { const d = Math.hypot(st.x - f.x, st.z - f.z); if (st.state !== "chase" && st.state !== "bust" && d < bd) { bd = d; best = st; } }
-    if (best) { best.state = "search"; best.searchT = -Math.min(12, bd / (best.type.chaseSpeed * 0.8)); best.lastX = best.tx = f.x; best.lastZ = best.tz = f.z; }
+    for (const st of staff) { const d = Math.hypot(st.x - f.x, st.z - f.z); if (!st.type.stationary && st.state !== "chase" && st.state !== "bust" && d < bd) { bd = d; best = st; } }
+    if (best) { best.state = "search"; best.searchT = -Math.min(16, bd / (best.type.chaseSpeed * 0.8)); best.lastX = best.tx = f.x; best.lastZ = best.tz = f.z; }
   }
 }
 
@@ -1268,7 +1543,7 @@ function handleTap(x, y) {
   let best = null, bd = CFG.interact.tapRadiusPx;
   for (const sp of SPOTS) {
     if (spotDist(sp) > CFG.interact.range) continue;
-    const p = ringPos(sp.s, sp.wallLat, tmp);
+    const p = hallPos(sp.h, sp.t, sp.wallLat, tmp);
     projA.set(p.x, 0.1, p.z).applyMatrix4(camera.matrixWorldInverse);
     if (projA.z > -0.2) continue;   // behind the camera
     projA.set(p.x, 0.1, p.z).project(camera); projB.set(p.x, 2.2, p.z).project(camera);
@@ -1286,14 +1561,14 @@ function updateSpotsUI() {
   const w = window.innerWidth, h = window.innerHeight, pulse = 0.3 + 0.22 * Math.sin(performance.now() / 160);
   for (const sp of SPOTS) {
     const d = player.hidden || game.state !== "playing" ? Infinity : spotDist(sp);
-    const blocked = spotBlocked(sp);
+    const blocked = d < CFG.interact.tagRange ? spotBlocked(sp) : "";
     const reach = d < CFG.interact.range && !blocked;
     glowColor.setRGB(1, 0.86, 0.5).multiplyScalar(reach ? pulse : 0);
     for (const m of sp.glow) m.emissive.copy(glowColor);
     // name tag
     let show = d < CFG.interact.tagRange;
     if (show) {
-      const p = ringPos(sp.s, sp.wallLat - sp.sign * 0.1, tmp);
+      const p = hallPos(sp.h, sp.t, sp.wallLat - sp.side * 0.1, tmp);
       projA.set(p.x, 2.5, p.z).applyMatrix4(camera.matrixWorldInverse);
       show = projA.z < -0.2;
       if (show) {
@@ -1307,7 +1582,7 @@ function updateSpotsUI() {
     let text, cls = "itag";
     if (sp.kind === "locker") text = blocked ? "Locker · none left" : "Locker";
     else if (sp.kind === "restroom") text = blocked ? "Restroom · used" : `Restroom · sweep in ${Math.max(0, Math.ceil(sp.nextSweep - game.time))}s`;
-    else { text = `Room ${sp.room} · ${TEACHER_TYPES[sp.teacher].label}${blocked ? " · used" : ""}`; if (sp.teacher === "sub") cls += " sub"; }
+    else { text = `Room ${sp.room} · ${TEACHER_TYPES[sp.teacher].label}${blocked ? (sp.used ? " · used" : " · guarded") : ""}`; if (sp.teacher === "sub") cls += " sub"; }
     if (blocked) cls += " off"; else if (reach) cls += " near";
     if (text !== sp.tagText) { sp.tag.textContent = text; sp.tagText = text; }
     if (cls !== sp.tagClass) { sp.tag.className = cls; sp.tagClass = cls; }
@@ -1349,17 +1624,30 @@ renderer.setAnimationLoop(() => {
 });
 
 // small read-only hook for automated playtests
-window.__hallwaySkip = { get state() { return { ...game, staff: staff.map((s) => ({ key: s.key, state: s.state, suspicion: s.suspicion, x: s.x, z: s.z, winded: s.windedT > 0 })), pa: $("pa").classList.contains("show") ? $("paText").textContent : null, crowdLeft: crowd.filter((c) => c.mode !== "gone").length,
+window.__hallwaySkip = { get state() { return { ...game,
+  staff: staff.map((s) => ({ key: s.key, state: s.state, suspicion: s.suspicion, x: s.x, z: s.z, h: s.h, winded: s.windedT > 0, alarm: s.alarmT })),
+  pa: $("pa").classList.contains("show") ? $("paText").textContent : null,
+  crowdLeft: crowd.filter((c) => c.mode !== "gone").length,
   player: { x: player.x, z: player.z, hidden: player.hidden ? `${player.hidden.kind}${player.hidden.room ? " " + player.hidden.room : ""}` : null, graceT: player.graceT },
-  spots: SPOTS.map((sp) => ({ kind: sp.kind, s: sp.s, room: sp.room, teacher: sp.teacher, blocked: spotBlocked(sp) })) }; }, CFG, STAFF_TYPES };
+  spots: SPOTS.map((sp) => ({ kind: sp.kind, h: sp.h, t: sp.t, room: sp.room, teacher: sp.teacher, blocked: spotBlocked(sp) })) }; }, CFG, STAFF_TYPES };
 if (debug) {   // test-only helpers (only with ?debug in the URL)
   Object.assign(window.__hallwaySkip, {
-    place(s, lat) { const p = ringPos(s, lat); player.x = p.x; player.z = p.z; },
-    spotFront(i) { const sp = SPOTS[i], f = spotFront(sp, {}); return { x: f.x, z: f.z, wallLat: sp.wallLat, frontLat: sp.frontLat, s: sp.s, sign: sp.sign }; },
-    faceSpot(i) { const sp = SPOTS[i], seg = segAt(sp.s); cam.yaw = player.heading = Math.atan2(sp.sign * seg.nx, sp.sign * seg.nz); manualCamT = 99; },
+    place(h, t, lat) { const p = hallPos(h, t, lat); player.x = p.x; player.z = p.z; },
+    inFrontOf(k, dist) { const st = staff[k]; player.x = st.x + Math.sin(st.facing) * dist; player.z = st.z + Math.cos(st.facing) * dist;
+      cam.yaw = player.heading = st.facing + Math.PI; manualCamT = 99; },
+    spotFront(i) { const sp = SPOTS[i], f = spotFront(sp, {}); return { x: f.x, z: f.z, h: sp.h, t: sp.t, wallLat: sp.wallLat, frontLat: sp.frontLat, side: sp.side }; },
+    faceSpot(i) { const sp = SPOTS[i], H = HALLS[sp.h]; cam.yaw = player.heading = Math.atan2(sp.side * H.nx, sp.side * H.nz); manualCamT = 99; },
+    faceHall(h, dir) { cam.yaw = player.heading = hallHeading(h, dir); manualCamT = 99; },
     staffTo(k, x, z, state) { const st = staff[k]; st.x = x; st.z = z; if (state) { st.state = state; st.suspicion = 1; } },
     setTime(t) { game.phaseT = t; },
     catchNow(k = 0) { caught(staff[k]); },
     sweepNow(i) { SPOTS[i].nextSweep = game.time; },
+    searchTo(k, x, z) { const st = staff[k]; st.state = "search"; st.searchT = -30; st.lastX = st.tx = x; st.lastZ = st.tz = z; },
+    nodes() { return NODES.map((n) => ({ id: n.id, x: n.x, z: n.z })); },
+    phaseLens() { return { passing: phaseLen("passing"), skipping: phaseLen("skipping") }; },
+    insideWalls() {   // how many people are standing inside a wall (should be 0)
+      const inWall = (x, z) => WALLS.some((b) => x > b.x0 + 0.05 && x < b.x1 - 0.05 && z > b.z0 + 0.05 && z < b.z1 - 0.05);
+      return { crowd: crowd.filter((c) => c.mode === "wander" && inWall(c.x, c.z)).length, staff: staff.filter((s) => inWall(s.x, s.z)).length };
+    },
   });
 }

@@ -7,6 +7,7 @@ Built from `Hallway_Skip_Game_Spec` v0.2. Done so far:
 - **Step 1:** one hallway, joystick, a hall monitor that chases, a crowd that thins out, and the bell.
 - **Step 2:** tap-to-interact and hiding spots. Green lockers (3 uses per period, 15 s each), two restrooms (45 s, but a monitor sweeps on a schedule), and classrooms (a teacher boots you in 4 s, a sub in 14 s; 1–2 subs per day, shown by a green window and a sticky note). If a chasing monitor sees you duck in, they yank you back out.
 - **Step 3:** a security guard (narrow, long vision; roams; sprints faster than you for about 5 s, then gets winded; radios for backup), the three-strike ladder (warning → the office, which costs this period's points and puts staff on high alert for the day → run over), and a PA announcer with placeholder lines in `PA_LINES`.
+- **Step 4:** a figure-8 floor plan (outer loop plus a main hall across the middle; monitors patrol different loops), the six-period day (more monitors, guards, and teachers at their doors as the day goes on), harder days (faster, sharper staff; shorter passing and longer skipping periods; `CFG.days`), an end-of-day screen with a bonus, and saving at every bell (Continue on the title screen).
 
 ## Controls
 
