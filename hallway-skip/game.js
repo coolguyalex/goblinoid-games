@@ -1,5 +1,6 @@
-// Hallway Skip — build step 1 prototype.
-// One looping hallway, joystick, a hall monitor that chases, a crowd that thins, and the bell.
+// Hallway Skip — build step 2 prototype.
+// Step 1: one looping hallway, joystick, a hall monitor that chases, a crowd that thins, and the bell.
+// Step 2: tap-to-interact and hiding spots: lockers, restrooms, classrooms (teacher and sub boot timers).
 import * as THREE from "three";
 
 // =====================================================================================
@@ -48,6 +49,23 @@ const CFG = {
     predictSec: 1.1,              // they guess where you went: last seen + velocity * this
   },
 
+  interact: {
+    range: 2.4,                   // how close you must be to tap or walk into a hiding spot
+    tapRadiusPx: 90,              // generous: fingers are imprecise and you're usually moving
+    tapMaxMovePx: 14, tapMaxMs: 350,   // a touch that moves less than this, this quickly, is a tap
+    walkInDist: 0.62,             // how close to the wall counts as "walking into" a spot
+    walkInPushSec: 0.18,          // push into it this long to enter
+    tagRange: 6.5,                // name tags show within this distance
+  },
+  hiding: {
+    lockerUsesPerPeriod: 3,       // shared by all lockers
+    restroomSweepEverySec: 35,    // a monitor sweeps each restroom about this often...
+    restroomSweepJitterSec: 8,    // ...give or take this much
+    subsPerDay: [1, 2],           // how many classrooms get a substitute each day (min, max)
+    bustPauseSec: 0.9,            // monitor pauses after yanking you out ("I saw you go in there")
+    bootGraceSec: 1.2,            // after being booted, you can't be caught for this long
+  },
+
   footsteps: { hearRange: 20, patrolInterval: 0.55, chaseInterval: 0.3, volume: 0.55 },
   monitorsPerPeriod: [1, 1, 2, 2, 2, 3],   // within-day difficulty (expanded in build step 4)
   render: { maxPixelRatio: 1.75, coneRays: 28 },
@@ -71,6 +89,8 @@ const LAYOUT = {
   wallHeight: 3.2,
   doorS: [7.5, 15.5, 23.5, 31.5, 49.5, 67.5, 75.5, 83.5, 91.5, 109.5],  // classroom doors, ring distance
   entranceS: 19.5,
+  hideLockerS: [4, 26, 33, 42, 63, 70, 88, 95, 101, 117],   // lockers big enough to hide in
+  restroomS: [55, 112],
 };
 
 // Things pushed against the outer wall. Ring coordinates; each must sit within one straight hallway.
@@ -81,6 +101,21 @@ const OBSTACLES = [
   { name: "water fountain",  s: 104,  halfLen: 0.45, depth: 0.5, height: 1.0, color: 0xbfc9d1 },
   { name: "bench",           s: 80,   halfLen: 1.3, depth: 0.55, height: 0.5, color: 0x7a5230 },
 ];
+
+// Hiding spots are data: a new kind is one entry here (placement lives in LAYOUT).
+const SPOT_TYPES = {
+  locker:    { label: "Locker", side: "outer", halfW: 0.45, maxStaySec: 15,
+               stayLine: "Cramped. Smells like old gym socks.", timeoutLine: "Too cramped! You tumble out." },
+  restroom:  { label: "Restroom", side: "outer", halfW: 0.75, maxStaySec: 45,
+               stayLine: "Nobody questions a long bathroom break.", timeoutLine: "Someone's pounding on the stall door. Time to go." },
+  classroom: { label: "Room", side: "inner", halfW: 0.6 },   // stay time comes from who's teaching
+};
+const TEACHER_TYPES = {
+  teacher: { label: "Teacher", bootSec: 4, silhouette: 0x2b2f3a,
+             stayLine: "\"Can I help you?\"", bootLine: "\"Nice try. Out.\"" },
+  sub:     { label: "Sub", bootSec: 14, silhouette: 0x3a7d44,
+             stayLine: "The sub is reading a magazine. You're under a desk.", bootLine: "The sub finally looks up: \"Are you even in this class?\"" },
+};
 
 const SHIRT_COLORS = [0xe74c3c, 0x3498db, 0x2ecc71, 0x9b59b6, 0xf39c12, 0x1abc9c, 0xe84393, 0x34495e, 0xd35400, 0x16a085, 0xf1c40f, 0x6c5ce7];
 const SKIN_COLORS = [0xf1c27d, 0xe0ac69, 0xc68642, 0x8d5524, 0xffdbac, 0x5c3a21];
@@ -244,6 +279,8 @@ function box(w, h, d, color, x, y, z) {
     if (t < 0.4 || t > seg.len - 0.4) continue;                                  // corners
     if (Math.abs(ringDelta(s, LAYOUT.entranceS)) < 2.0) continue;                  // entrance doors
     if (OBSTACLES.some((o) => Math.abs(ringDelta(s, o.s)) < o.halfLen + 0.35)) continue;
+    if (LAYOUT.hideLockerS.some((h) => Math.abs(ringDelta(s, h)) < 0.75)) continue;
+    if (LAYOUT.restroomS.some((h) => Math.abs(ringDelta(s, h)) < 1.0)) continue;
     positions.push(s);
   }
   const lockerGeo = new THREE.BoxGeometry(0.56, 2.0, LAYOUT.lockerDepth);
@@ -259,13 +296,63 @@ function box(w, h, d, color, x, y, z) {
   scene.add(lockers);
 }
 
-// Classroom doors with windows, entrance doors, obstacles.
-for (const s of LAYOUT.doorS) {
-  const p = ringPos(s, INNER_LAT + 0.03), h = ringHeading(s, 1) - Math.PI / 2;
+// =====================================================================================
+// Hiding spots: hide lockers, restrooms, classroom doors
+// =====================================================================================
+const SPOTS = [];
+const tagsEl = document.getElementById("tags");
+function addSpot(kind, s, extra = {}) {
+  const T = SPOT_TYPES[kind], sign = T.side === "outer" ? 1 : -1;   // +1: wall is on the locker side
+  const wallLat = sign > 0 ? OUTER_LAT : INNER_LAT;
+  const tag = document.createElement("div"); tag.className = "itag"; tagsEl.appendChild(tag);
+  const sp = { kind, T, s, sign, wallLat, frontLat: wallLat - sign * 0.6, glow: [], used: false, tag, tagText: "", tagClass: "", ...extra };
+  SPOTS.push(sp);
+  return sp;
+}
+const wallRot = (s) => ringHeading(s, 1) - Math.PI / 2;   // box faces lie flat against the wall
+
+for (const s of LAYOUT.hideLockerS) {
+  const sp = addSpot("locker", s), h = wallRot(s);
+  const p = ringPos(s, OUTER_LAT + LAYOUT.lockerDepth / 2);
+  const m = box(0.9, 2.1, LAYOUT.lockerDepth, 0x7d9a86, p.x, 1.05, p.z); m.rotation.y = h;
+  sp.glow.push(m.material);
+  const v = ringPos(s, OUTER_LAT - 0.01);
+  for (let k = 0; k < 3; k++) { const sl = box(0.5, 0.035, 0.02, 0x2a3a30, v.x, 1.62 + k * 0.09, v.z); sl.rotation.y = h; }
+}
+for (const s of LAYOUT.restroomS) {
+  const sp = addSpot("restroom", s, { nextSweep: 0 }), h = wallRot(s);
+  const p = ringPos(s, OUTER_LAT + LAYOUT.lockerDepth - 0.04);
+  const d = box(1.3, 2.25, 0.08, 0x3f9c9a, p.x, 1.125, p.z); d.rotation.y = h;
+  sp.glow.push(d.material);
+  const q = ringPos(s, OUTER_LAT + LAYOUT.lockerDepth - 0.09);
+  const plaque = box(0.42, 0.42, 0.03, 0xf4f4f4, q.x, 2.55, q.z); plaque.rotation.y = h;
+  const q2 = ringPos(s, OUTER_LAT + LAYOUT.lockerDepth - 0.11);
+  const fig = box(0.12, 0.2, 0.02, 0x3f9c9a, q2.x, 2.5, q2.z); fig.rotation.y = h;
+  const head = box(0.09, 0.09, 0.02, 0x3f9c9a, q2.x, 2.66, q2.z); head.rotation.y = h;
+}
+LAYOUT.doorS.forEach((s, i) => {
+  const p = ringPos(s, INNER_LAT + 0.03), h = wallRot(s);
   const door = box(1.2, 2.2, 0.08, 0x8b5a2b, p.x, 1.1, p.z); door.rotation.y = h;
   const w = ringPos(s, INNER_LAT + 0.08);
   const win = box(0.5, 0.6, 0.04, 0xa8d8ff, w.x, 1.55, w.z); win.rotation.y = h;
+  // the tell: who's visible through the window, plus a sticky note on a sub's door
+  const w2 = ringPos(s, INNER_LAT + 0.105);
+  const sil = box(0.2, 0.3, 0.01, 0x2b2f3a, w2.x, 1.5, w2.z); sil.rotation.y = h;
+  const n = ringPos(s + 0.32, INNER_LAT + 0.09);
+  const note = box(0.2, 0.2, 0.02, 0xf7e463, n.x, 1.15, n.z); note.rotation.y = h;
+  const sp = addSpot("classroom", s, { room: 101 + i, teacher: "teacher", sil, note });
+  sp.glow.push(door.material);
+});
+function rollSubs() {
+  const rooms = SPOTS.filter((sp) => sp.kind === "classroom");
+  const [lo, hi] = CFG.hiding.subsPerDay;
+  let n = lo + Math.floor(Math.random() * (hi - lo + 1));
+  for (const sp of rooms) sp.teacher = "teacher";
+  while (n > 0) { const sp = pick(rooms); if (sp.teacher !== "sub") { sp.teacher = "sub"; n--; } }
+  for (const sp of rooms) { sp.sil.material.color.setHex(TEACHER_TYPES[sp.teacher].silhouette); sp.note.visible = sp.teacher === "sub"; }
 }
+
+// Entrance doors, obstacles.
 {
   const p = ringPos(LAYOUT.entranceS, OUTER_LAT + LAYOUT.lockerDepth - 0.02);
   const d = box(2.6, 2.5, 0.08, 0x5d7c99, p.x, 1.25, p.z); d.rotation.y = ringHeading(LAYOUT.entranceS, 1) - Math.PI / 2;
@@ -298,6 +385,7 @@ function makePerson({ body, skin = 0xf1c27d, scale = 1, hat = null, hood = null 
 // ---------- player ----------
 const player = {
   x: 0, z: 0, vx: 0, vz: 0, heading: 0,
+  hidden: null, hideT: 0, hideArmed: false, graceT: 0, pushSpot: null, pushT: 0,
   mesh: makePerson({ body: 0x8a8f99, hood: 0x7b808a }),   // the gray hoodie
 };
 
@@ -337,7 +425,7 @@ function spawnStaff(typeKey, s) {
   const edge = document.createElement("div"); edge.className = "edge"; markersEl.appendChild(edge);
   const st = { type: T, x: p.x, z: p.z, s, dir: Math.random() < 0.5 ? 1 : -1, facing: 0, state: "patrol",
     suspicion: 0, lastX: 0, lastZ: 0, lastVX: 0, lastVZ: 0, searchT: 0, stepT: 0, sweep: Math.random() * 10,
-    tx: 0, tz: 0, mesh, cone, alert, edge };
+    tx: 0, tz: 0, pauseT: 0, bustSpot: null, mesh, cone, alert, edge };
   st.facing = ringHeading(s, st.dir);
   staff.push(st);
   return st;
@@ -412,8 +500,10 @@ let manualCamT = 0;
 const stickBase = document.getElementById("stickBase"), stickKnob = document.getElementById("stickKnob");
 const canvas = renderer.domElement;
 
+const taps = new Map();   // pointerId -> where/when it went down, to tell taps from drags
 canvas.addEventListener("pointerdown", (e) => {
   if (game.state !== "playing") return;
+  taps.set(e.pointerId, { x: e.clientX, y: e.clientY, t: performance.now(), moved: 0 });
   if (e.pointerType !== "mouse" && e.clientX < window.innerWidth * 0.5 && stick.id === null) {
     stick.id = e.pointerId; stick.ox = e.clientX; stick.oy = e.clientY; stick.x = stick.y = 0;
     stickBase.style.left = stickKnob.style.left = e.clientX + "px";
@@ -425,6 +515,8 @@ canvas.addEventListener("pointerdown", (e) => {
   try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* not supported for this pointer; fine */ }
 });
 canvas.addEventListener("pointermove", (e) => {
+  const tp = taps.get(e.pointerId);
+  if (tp) tp.moved = Math.max(tp.moved, Math.hypot(e.clientX - tp.x, e.clientY - tp.y));
   if (e.pointerId === stick.id) {
     const R = CFG.joystick.radiusPx;
     let dx = e.clientX - stick.ox, dy = e.clientY - stick.oy;
@@ -439,6 +531,9 @@ canvas.addEventListener("pointermove", (e) => {
   }
 });
 function endPointer(e) {
+  const tp = taps.get(e.pointerId); taps.delete(e.pointerId);
+  if (tp && e.type === "pointerup" && game.state === "playing" && tp.moved < CFG.interact.tapMaxMovePx &&
+      performance.now() - tp.t < CFG.interact.tapMaxMs) handleTap(e.clientX, e.clientY);
   if (e.pointerId === stick.id) { stick.id = null; stick.x = stick.y = 0; stickBase.style.display = stickKnob.style.display = "none"; }
   if (e.pointerId === look.id) look.id = null;
 }
@@ -448,6 +543,10 @@ window.addEventListener("keydown", (e) => {
   keys.add(e.key.toLowerCase());
   if ((e.key === " " || e.key === "Enter") && game.state !== "playing") { e.preventDefault(); onOverlayTap(); }
   if (e.key === "Escape" && game.state === "playing") pause();
+  if (e.key.toLowerCase() === "e" && game.state === "playing" && !e.repeat) {   // desktop: enter / leave
+    if (player.hidden) exitSpot(false);
+    else { const sp = nearestSpot(); if (sp) enterSpot(sp); }
+  }
 });
 window.addEventListener("keyup", (e) => keys.delete(e.key.toLowerCase()));
 
@@ -467,9 +566,15 @@ function readInput() {
 const game = { state: "title", day: 1, period: 1, phase: "passing", phaseT: 0, score: 0, time: 0 };
 const cam = { yaw: 0 };
 const $ = (id) => document.getElementById(id);
-const ui = { phase: $("phase"), label: $("phaseLabel"), timer: $("timer"), score: $("score"), banner: $("banner"), fps: $("fps") };
-let bannerTimer = 0;
+const ui = { phase: $("phase"), label: $("phaseLabel"), timer: $("timer"), score: $("score"), uses: $("uses"), banner: $("banner"), fps: $("fps"),
+  toast: $("toast"), hide: $("hidePanel"), hpTitle: $("hpTitle"), hpFill: $("hpFill"), hpLine: $("hpLine"), hpWarn: $("hpWarn") };
+let bannerTimer = 0, toastTimer = 0, lastToast = "", lastToastAt = -99;
 function banner(html, sec = 2.2) { ui.banner.innerHTML = html; ui.banner.classList.add("show"); bannerTimer = sec; }
+function toast(text, sec = 1.8) {
+  if (text === lastToast && game.time - lastToastAt < 2.5) return;   // don't spam the same cue
+  lastToast = text; lastToastAt = game.time;
+  ui.toast.textContent = text; ui.toast.classList.add("show"); toastTimer = sec;
+}
 
 function resetGame() {
   game.day = 1; game.period = 1; game.score = 0; game.time = 0;
@@ -488,7 +593,16 @@ function resetGame() {
     c.mode = "wander"; c.retargetT = rand(1, 4);
   }
   clearStaff();
+  player.hidden = null; player.mesh.visible = true; player.graceT = 0; player.pushT = 0; player.pushSpot = null;
+  ui.hide.hidden = true;
+  resetSpotsForPeriod();
+  for (const sp of SPOTS) if (sp.kind === "restroom") sp.nextSweep = rand(12, CFG.hiding.restroomSweepEverySec);
+  rollSubs();
   startPassing(true);
+}
+function resetSpotsForPeriod() {
+  game.lockerUses = CFG.hiding.lockerUsesPerPeriod;
+  for (const sp of SPOTS) sp.used = false;
 }
 
 function startPassing(first) {
@@ -515,9 +629,12 @@ function startSkipping() {
 function periodSurvived() {
   playBell();
   game.period++;
+  resetSpotsForPeriod();
+  if (player.hidden?.kind === "classroom") exitSpot(false, "Bell! You slip out with the class.");
   if (game.period > CFG.periodsPerDay) {
-    banner(`DAY ${game.day} SURVIVED!<small>Day ${game.day + 1} starts now.</small>`, 3);
+    banner(`DAY ${game.day} SURVIVED!<small>Day ${game.day + 1} starts now. New subs today.</small>`, 3);
     game.day++; game.period = 1;
+    rollSubs();
   } else {
     banner(`BELL! +${CFG.pointsPerPeriod}<small>Period ${game.period - 1} skipped. Blend into the crowd.</small>`);
   }
@@ -529,6 +646,7 @@ function caught(st) {
   playBlip([660, 520, 390, 260], 0.13, "sawtooth", 0.07);
   $("caughtText").textContent = `The hall monitor walks you back to class. Day ${game.day}, period ${game.period} · Score ${Math.floor(game.score)}`;
   $("caught").hidden = false;
+  ui.hide.hidden = true;
   stick.id = look.id = null; stickBase.style.display = stickKnob.style.display = "none";
 }
 
@@ -551,6 +669,7 @@ function onOverlayTap() {
   clock.getDelta();
 }
 for (const id of ["title", "caught", "paused"]) $(id).addEventListener("click", onOverlayTap);
+$("hpLeave").addEventListener("click", () => { if (game.state === "playing") exitSpot(false); });
 window.addEventListener("blur", pause);
 document.addEventListener("visibilitychange", () => { if (document.hidden) pause(); });
 
@@ -575,6 +694,8 @@ function latLimits(s) {
 
 function updatePlayer(dt) {
   readInput();
+  player.graceT = Math.max(0, player.graceT - dt);
+  if (player.hidden) { updateHiding(dt); return; }
   const f = { x: Math.sin(cam.yaw), z: Math.cos(cam.yaw) }, r = { x: -Math.cos(cam.yaw), z: Math.sin(cam.yaw) };
   const mx = r.x * input.x + f.x * input.y, mz = r.z * input.x + f.z * input.y;
   const sp = CFG.player.speed;
@@ -589,6 +710,7 @@ function updatePlayer(dt) {
   collide(player, CFG.player.radius);
   player.vx = (player.x - ox) / Math.max(dt, 1e-4); player.vz = (player.z - oz) / Math.max(dt, 1e-4);
   if (input.m > 0) player.heading = lerpAngle(player.heading, Math.atan2(mx, mz), damp(CFG.player.turnRate, dt));
+  checkWalkIn(mx, mz, dt);
   // camera swings back behind the kid while moving (not while backing up toward the camera)
   manualCamT -= dt;
   if (manualCamT <= 0 && input.m > 0 && input.y > -0.3) cam.yaw = lerpAngle(cam.yaw, player.heading, damp(CFG.camera.followRate * input.m, dt));
@@ -664,6 +786,7 @@ function moveToward(st, tx, tz, speed, dt) {
 }
 
 function canSeePlayer(st, rangeMult, needCone) {
+  if (player.hidden) return { seen: false, d: Infinity };
   const T = st.type, dx = player.x - st.x, dz = player.z - st.z, d = Math.hypot(dx, dz);
   if (d > T.visionRange * rangeMult) return { seen: false, d };
   if (needCone && Math.abs(angDiff(st.facing, Math.atan2(dx, dz))) > (T.visionHalfAngleDeg * Math.PI) / 180) return { seen: false, d };
@@ -676,6 +799,13 @@ function updateStaff(dt, cover) {
     const T = st.type;
     st.sweep += dt * T.sweepRate;
     let speed = 0;
+    if (st.pauseT > 0) {   // "I saw you go in there." — a beat before chasing
+      st.pauseT -= dt;
+      st.facing = lerpAngle(st.facing, Math.atan2(player.x - st.x, player.z - st.z), damp(8, dt));
+      st.mesh.position.set(st.x, 0, st.z); st.mesh.rotation.y = st.facing;
+      updateCone(st);
+      continue;
+    }
 
     if (st.state === "patrol" || st.state === "return") {
       const look = canSeePlayer(st, 1, true);
@@ -709,11 +839,24 @@ function updateStaff(dt, cover) {
       if (look.seen) {
         st.lastX = player.x; st.lastZ = player.z; st.lastVX = player.vx; st.lastVZ = player.vz;
         moveToward(st, player.x, player.z, speed, dt);
-        if (look.d < D.catchRadius) { caught(st); return; }
+        if (look.d < D.catchRadius && player.graceT <= 0) { caught(st); return; }
       } else {
         st.state = "search"; st.searchT = 0;
         const g = { x: st.lastX + st.lastVX * D.predictSec, z: st.lastZ + st.lastVZ * D.predictSec };
         collide(g, 0.4); st.tx = g.x; st.tz = g.z;
+      }
+    } else if (st.state === "bust") {
+      // they saw you duck into a hiding spot: go yank you out
+      speed = T.chaseSpeed;
+      const sp = st.bustSpot, f = ringPos(sp.s, sp.frontLat);
+      if (!player.hidden && canSeePlayer(st, D.chaseSightRangeMult, false).seen) startChase(st);
+      else if (moveToward(st, f.x, f.z, speed, dt) < 0.75) {
+        if (player.hidden === sp) {
+          exitSpot(true, sp.kind === "locker" ? "The hall monitor yanks the locker open: \"I saw you go in there.\""
+            : sp.kind === "restroom" ? "The hall monitor bangs on the stall: \"I saw you go in there.\""
+            : "The hall monitor leans in the door: \"That one's mine.\"");
+          startChase(st); st.pauseT = CFG.hiding.bustPauseSec;
+        } else { st.state = "search"; st.searchT = 0; st.lastX = st.tx = f.x; st.lastZ = st.tz = f.z; }
       }
     } else if (st.state === "search") {
       st.searchT += dt;
@@ -759,7 +902,7 @@ function updateCone(st) {
     pos.setXYZ(i + 1, st.x + dx * len, 0.03, st.z + dz * len);
   }
   pos.needsUpdate = true;
-  const key = st.state === "chase" || st.state === "search" ? "chase" : st.suspicion > 0.05 ? "suspicious" : "patrol";
+  const key = st.state === "chase" || st.state === "search" || st.state === "bust" ? "chase" : st.suspicion > 0.05 ? "suspicious" : "patrol";
   st.cone.material.color.copy(CONE_COLORS[key]);
   st.cone.material.opacity = key === "patrol" ? 0.26 : 0.36;
 }
@@ -779,7 +922,7 @@ const proj = new THREE.Vector3();
 function updateMarkers() {
   const w = window.innerWidth, h = window.innerHeight;
   for (const st of staff) {
-    const chasing = st.state === "chase" || st.state === "search";
+    const chasing = st.state === "chase" || st.state === "search" || st.state === "bust";
     const color = chasing ? "#ff4d4d" : st.suspicion > 0.05 ? "#ffa94d" : "#ffe066";
     proj.set(st.x, 2.0 * st.type.scale, st.z).applyMatrix4(camera.matrixWorldInverse);
     const behind = proj.z > -0.2;
@@ -817,13 +960,15 @@ function updateHud() {
   const total = game.phase === "passing" ? CFG.passingSec : CFG.skippingSec;
   const left = Math.max(0, Math.ceil(total - game.phaseT));
   const label = `DAY ${game.day} · PERIOD ${game.period} · ${game.phase === "passing" ? "PASSING" : "SKIPPING"}`;
-  const key = label + left + Math.floor(game.score);
+  const key = label + left + Math.floor(game.score) + "|" + game.lockerUses;
   if (key === lastHud) return;
   lastHud = key;
   ui.label.textContent = label;
   ui.timer.textContent = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
   ui.phase.className = game.phase;
   ui.score.textContent = Math.floor(game.score);
+  ui.uses.textContent = `LOCKERS ×${game.lockerUses}`;
+  ui.uses.classList.toggle("out", game.lockerUses === 0);
 }
 
 function update(dt) {
@@ -834,8 +979,183 @@ function update(dt) {
     if (game.phaseT >= CFG.skippingSec) periodSurvived();
   }
   updatePlayer(dt);
+  updateRestrooms();
   updateCrowd(dt);
   updateStaff(dt, crowdCoverCount());
+}
+
+// =====================================================================================
+// Hiding: entering, staying, getting booted
+// =====================================================================================
+function spotBlocked(sp) {   // why this spot can't be used right now ("" if it can)
+  if (sp.kind === "locker") return game.lockerUses > 0 ? "" : "No locker uses left this period";
+  if (sp.used) return sp.kind === "restroom" ? "You already hid in this restroom this period" : `Room ${sp.room} already kicked you out this period`;
+  return "";
+}
+function spotFront(sp, out = {}) { return ringPos(sp.s, sp.frontLat, out); }
+function spotDist(sp) { spotFront(sp, tmp); return Math.hypot(tmp.x - player.x, tmp.z - player.z); }
+function nearestSpot() {
+  let best = null, bd = CFG.interact.range;
+  for (const sp of SPOTS) { const d = spotDist(sp); if (d < bd) { bd = d; best = sp; } }
+  return best;
+}
+
+function enterSpot(sp) {
+  const why = spotBlocked(sp);
+  if (why) { toast(why); playBlip([180], 0.08, "square", 0.04); return false; }
+  if (sp.kind === "locker") game.lockerUses--; else sp.used = true;
+  const f = spotFront(sp, {});
+  player.hidden = sp; player.hideT = 0; player.hideArmed = false; player.pushT = 0; player.pushSpot = null;
+  player.x = f.x; player.z = f.z; player.vx = player.vz = 0;
+  player.mesh.visible = false;
+  stick.x = stick.y = 0;
+  // Did anyone see you go in?
+  for (const st of staff) {
+    const d = Math.hypot(st.x - f.x, st.z - f.z);
+    if (!lineOfSight(st.x, st.z, f.x, f.z)) continue;
+    if ((st.state === "chase" || st.state === "search") && d < st.type.visionRange * CFG.detection.chaseSightRangeMult) {
+      st.state = "bust"; st.bustSpot = sp;
+    } else if ((st.state === "patrol" || st.state === "return") && st.suspicion > 0.5 && d < st.type.visionRange) {
+      st.state = "search"; st.searchT = 0; st.lastX = st.tx = f.x; st.lastZ = st.tz = f.z;   // "...was that a kid?"
+    }
+  }
+  playBlip([260, 200], 0.07, "triangle", 0.07);
+  ui.hide.hidden = false;
+  updateHidePanel();
+  return true;
+}
+
+function exitSpot(booted, msg = "") {
+  const sp = player.hidden;
+  if (!sp) return;
+  player.hidden = null; player.mesh.visible = true; player.pushT = 0;
+  const f = ringPos(sp.s, sp.frontLat - sp.sign * 0.1);
+  player.x = f.x; player.z = f.z;
+  const seg = segAt(sp.s);
+  player.heading = Math.atan2(-sp.sign * seg.nx, -sp.sign * seg.nz);   // facing out into the hall
+  ui.hide.hidden = true;
+  if (booted) {
+    player.graceT = CFG.hiding.bootGraceSec;
+    banner(`BOOTED!<small>${msg}</small>`, 2.6);
+    playBlip([440, 330], 0.1, "sawtooth", 0.06);
+  } else {
+    if (msg) toast(msg);
+    playBlip([200, 260], 0.07, "triangle", 0.06);
+  }
+}
+
+function checkWalkIn(mx, mz, dt) {
+  const pr = ringProject(player.x, player.z), seg = segAt(pr.s);
+  let target = null;
+  for (const sp of SPOTS) {
+    if (Math.abs(ringDelta(pr.s, sp.s)) > sp.T.halfW) continue;
+    if (Math.abs(sp.wallLat - pr.lat) > CFG.interact.walkInDist) continue;
+    if ((mx * seg.nx + mz * seg.nz) * sp.sign > 0.55) { target = sp; break; }   // pushing into the wall
+  }
+  if (target && target === player.pushSpot) {
+    player.pushT += dt;
+    if (player.pushT >= CFG.interact.walkInPushSec) { player.pushT = 0; enterSpot(target); }
+  } else { player.pushSpot = target; player.pushT = 0; }
+}
+
+function hideLimit(sp) { return sp.kind === "classroom" ? TEACHER_TYPES[sp.teacher].bootSec : sp.T.maxStaySec; }
+function updateHiding(dt) {
+  const sp = player.hidden;
+  player.hideT += dt;
+  // leave by pushing the stick (after letting go of it once, so the push that got you in doesn't pop you out)
+  if (input.m === 0) player.hideArmed = true;
+  else if (player.hideArmed && input.m > 0.5) { exitSpot(false); return; }
+  if (player.hideT >= hideLimit(sp)) {
+    exitSpot(true, sp.kind === "classroom" ? TEACHER_TYPES[sp.teacher].bootLine : sp.T.timeoutLine);
+    return;
+  }
+  updateHidePanel();
+}
+
+function updateHidePanel() {
+  const sp = player.hidden; if (!sp) return;
+  const limit = hideLimit(sp), left = Math.max(0, limit - player.hideT);
+  const title = sp.kind === "classroom" ? `Room ${sp.room} · ${TEACHER_TYPES[sp.teacher].label}` : `In the ${sp.T.label.toLowerCase()}`;
+  const line = sp.kind === "classroom" ? TEACHER_TYPES[sp.teacher].stayLine : sp.T.stayLine;
+  let warn = "";
+  if (sp.kind === "restroom") {
+    const sweepIn = sp.nextSweep - game.time;
+    if (sweepIn < left) warn = `Sweep in ${Math.ceil(sweepIn)}s!`;
+  }
+  ui.hpTitle.textContent = title;
+  ui.hpLine.textContent = line;
+  ui.hpWarn.textContent = warn;
+  ui.hpFill.style.transform = `scaleX(${left / limit})`;
+  ui.hpFill.classList.toggle("low", left < 3);
+}
+
+function updateRestrooms() {
+  for (const sp of SPOTS) {
+    if (sp.kind !== "restroom" || game.time < sp.nextSweep) continue;
+    const J = CFG.hiding.restroomSweepJitterSec;
+    sp.nextSweep = game.time + CFG.hiding.restroomSweepEverySec + rand(-J, J);
+    if (player.hidden !== sp) continue;
+    exitSpot(true, "Restroom sweep! A monitor shoos everyone out.");
+    // the nearest monitor who isn't busy comes to see who that was
+    const f = spotFront(sp, {});
+    let best = null, bd = Infinity;
+    for (const st of staff) { const d = Math.hypot(st.x - f.x, st.z - f.z); if (st.state !== "chase" && st.state !== "bust" && d < bd) { bd = d; best = st; } }
+    if (best) { best.state = "search"; best.searchT = -Math.min(12, bd / (best.type.chaseSpeed * 0.8)); best.lastX = best.tx = f.x; best.lastZ = best.tz = f.z; }
+  }
+}
+
+// Tap on a world object: find the spot whose on-screen outline (a vertical line from floor to door top) is nearest the finger.
+const projA = new THREE.Vector3(), projB = new THREE.Vector3();
+function handleTap(x, y) {
+  if (player.hidden) return;
+  const w = window.innerWidth, h = window.innerHeight;
+  let best = null, bd = CFG.interact.tapRadiusPx;
+  for (const sp of SPOTS) {
+    if (spotDist(sp) > CFG.interact.range) continue;
+    const p = ringPos(sp.s, sp.wallLat, tmp);
+    projA.set(p.x, 0.1, p.z).applyMatrix4(camera.matrixWorldInverse);
+    if (projA.z > -0.2) continue;   // behind the camera
+    projA.set(p.x, 0.1, p.z).project(camera); projB.set(p.x, 2.2, p.z).project(camera);
+    const ax = (projA.x + 1) / 2 * w, ay = (1 - projA.y) / 2 * h, bx = (projB.x + 1) / 2 * w, by = (1 - projB.y) / 2 * h;
+    const vx = bx - ax, vy = by - ay, t = clamp(((x - ax) * vx + (y - ay) * vy) / (vx * vx + vy * vy || 1), 0, 1);
+    const d = Math.hypot(x - (ax + vx * t), y - (ay + vy * t));
+    if (d < bd) { bd = d; best = sp; }
+  }
+  if (best) enterSpot(best);
+}
+
+// Glow on spots within reach, and name tags above nearby ones.
+const glowColor = new THREE.Color();
+function updateSpotsUI() {
+  const w = window.innerWidth, h = window.innerHeight, pulse = 0.3 + 0.22 * Math.sin(performance.now() / 160);
+  for (const sp of SPOTS) {
+    const d = player.hidden || game.state !== "playing" ? Infinity : spotDist(sp);
+    const blocked = spotBlocked(sp);
+    const reach = d < CFG.interact.range && !blocked;
+    glowColor.setRGB(1, 0.86, 0.5).multiplyScalar(reach ? pulse : 0);
+    for (const m of sp.glow) m.emissive.copy(glowColor);
+    // name tag
+    let show = d < CFG.interact.tagRange;
+    if (show) {
+      const p = ringPos(sp.s, sp.wallLat - sp.sign * 0.1, tmp);
+      projA.set(p.x, 2.5, p.z).applyMatrix4(camera.matrixWorldInverse);
+      show = projA.z < -0.2;
+      if (show) {
+        projA.set(p.x, 2.5, p.z).project(camera);
+        show = Math.abs(projA.x) < 1 && Math.abs(projA.y) < 1;
+        sp.tag.style.left = ((projA.x + 1) / 2) * w + "px"; sp.tag.style.top = ((1 - projA.y) / 2) * h + "px";
+      }
+    }
+    sp.tag.style.display = show ? "block" : "none";
+    if (!show) continue;
+    let text, cls = "itag";
+    if (sp.kind === "locker") text = blocked ? "Locker · none left" : "Locker";
+    else if (sp.kind === "restroom") text = blocked ? "Restroom · used" : `Restroom · sweep in ${Math.max(0, Math.ceil(sp.nextSweep - game.time))}s`;
+    else { text = `Room ${sp.room} · ${TEACHER_TYPES[sp.teacher].label}${blocked ? " · used" : ""}`; if (sp.teacher === "sub") cls += " sub"; }
+    if (blocked) cls += " off"; else if (reach) cls += " near";
+    if (text !== sp.tagText) { sp.tag.textContent = text; sp.tagText = text; }
+    if (cls !== sp.tagClass) { sp.tag.className = cls; sp.tagClass = cls; }
+  }
 }
 
 // =====================================================================================
@@ -860,13 +1180,27 @@ renderer.setAnimationLoop(() => {
   const dt = Math.min(clock.getDelta(), 0.05);
   if (game.state === "playing") update(dt);
   if (bannerTimer > 0) { bannerTimer -= dt; if (bannerTimer <= 0) ui.banner.classList.remove("show"); }
+  if (toastTimer > 0) { toastTimer -= dt; if (toastTimer <= 0) ui.toast.classList.remove("show"); }
   drawCrowd();
   updateCamera(dt);
   updateMarkers();
+  updateSpotsUI();
   updateHud();
   renderer.render(scene, camera);
   if (debug) { fpsAcc += dt; fpsN++; if (fpsAcc > 0.5) { ui.fps.textContent = `${Math.round(fpsN / fpsAcc)} fps`; fpsAcc = fpsN = 0; } }
 });
 
 // small read-only hook for automated playtests
-window.__hallwaySkip = { get state() { return { ...game, staff: staff.map((s) => ({ state: s.state, suspicion: s.suspicion })), crowdLeft: crowd.filter((c) => c.mode !== "gone").length, player: { x: player.x, z: player.z } }; }, CFG, STAFF_TYPES };
+window.__hallwaySkip = { get state() { return { ...game, staff: staff.map((s) => ({ state: s.state, suspicion: s.suspicion })), crowdLeft: crowd.filter((c) => c.mode !== "gone").length,
+  player: { x: player.x, z: player.z, hidden: player.hidden ? `${player.hidden.kind}${player.hidden.room ? " " + player.hidden.room : ""}` : null, graceT: player.graceT },
+  spots: SPOTS.map((sp) => ({ kind: sp.kind, s: sp.s, room: sp.room, teacher: sp.teacher, blocked: spotBlocked(sp) })) }; }, CFG, STAFF_TYPES };
+if (debug) {   // test-only helpers (only with ?debug in the URL)
+  Object.assign(window.__hallwaySkip, {
+    place(s, lat) { const p = ringPos(s, lat); player.x = p.x; player.z = p.z; },
+    spotFront(i) { const sp = SPOTS[i], f = spotFront(sp, {}); return { x: f.x, z: f.z, wallLat: sp.wallLat, frontLat: sp.frontLat, s: sp.s, sign: sp.sign }; },
+    faceSpot(i) { const sp = SPOTS[i], seg = segAt(sp.s); cam.yaw = player.heading = Math.atan2(sp.sign * seg.nx, sp.sign * seg.nz); manualCamT = 99; },
+    staffTo(k, x, z, state) { const st = staff[k]; st.x = x; st.z = z; if (state) { st.state = state; st.suspicion = 1; } },
+    setTime(t) { game.phaseT = t; },
+    sweepNow(i) { SPOTS[i].nextSweep = game.time; },
+  });
+}

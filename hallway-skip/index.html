@@ -20,11 +20,40 @@
   #phase.passing .label { color: #9fe0ff; } #phase.skipping .label { color: #ffd36b; }
   #score { position: absolute; top: max(10px, env(safe-area-inset-top)); right: max(14px, env(safe-area-inset-right));
     font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; text-shadow: 0 2px 4px rgba(0,0,0,.6); }
+  #uses { position: absolute; top: calc(max(10px, env(safe-area-inset-top)) + 30px); right: max(14px, env(safe-area-inset-right));
+    font-size: 12px; font-weight: 800; letter-spacing: .08em; color: #b9e3c6; text-shadow: 0 2px 4px rgba(0,0,0,.6); }
+  #uses.out { color: #ff8f8f; }
   #fps { position: absolute; bottom: 6px; right: 8px; font: 11px ui-monospace, monospace; opacity: .7; }
   #banner { position: absolute; top: 28%; left: 0; right: 0; text-align: center; font-size: 30px; font-weight: 900;
     letter-spacing: .04em; text-shadow: 0 3px 8px rgba(0,0,0,.7); opacity: 0; transition: opacity .25s; padding: 0 16px; }
   #banner small { display: block; font-size: 15px; font-weight: 600; opacity: .9; margin-top: 4px; }
   #banner.show { opacity: 1; }
+
+  #toast { position: absolute; bottom: 18%; left: 50%; transform: translateX(-50%); padding: 7px 14px; border-radius: 10px;
+    background: rgba(20,24,36,.8); font-size: 14px; font-weight: 600; white-space: nowrap; opacity: 0; transition: opacity .2s; }
+  #toast.show { opacity: 1; }
+
+  /* name tags over hiding spots */
+  .itag { position: absolute; transform: translate(-50%, -100%); padding: 3px 9px; border-radius: 8px; white-space: nowrap;
+    background: rgba(20,24,36,.72); font-size: 12px; font-weight: 700; display: none; }
+  .itag.near { box-shadow: 0 0 0 2px #ffdc80; }
+  .itag.sub { color: #8ef0a0; }
+  .itag.off { opacity: .5; }
+
+  /* while hiding */
+  #hidePanel { position: fixed; inset: 0; pointer-events: none; background: radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,.6)); }
+  #hidePanel[hidden] { display: none; }
+  #hidePanel .box { position: absolute; left: 50%; bottom: max(14px, env(safe-area-inset-bottom)); transform: translateX(-50%);
+    width: min(360px, calc(100% - 32px)); text-align: center; padding: 10px 14px; border-radius: 14px; background: rgba(20,24,36,.82); }
+  #hpTitle { font-weight: 800; font-size: 16px; }
+  .hpBar { height: 6px; border-radius: 3px; background: rgba(255,255,255,.15); margin: 7px 0; overflow: hidden; }
+  #hpFill { height: 100%; background: #8ef0a0; transform-origin: left; }
+  #hpFill.low { background: #ff8f8f; }
+  #hpLine { font-size: 13px; opacity: .85; }
+  #hpWarn { font-size: 13px; font-weight: 800; color: #ffb36b; min-height: 0; }
+  #hpLeave { pointer-events: auto; margin-top: 8px; padding: 8px 22px; border: 0; border-radius: 999px; background: #ffd36b;
+    color: #1d2230; font: 800 14px system-ui, sans-serif; }
+  #hidePanel .hint { font-size: 11px; opacity: .6; margin-top: 5px; }
 
   /* staff markers: "?" / "!" above heads, arrows at screen edge when offscreen */
   .alert { position: absolute; transform: translate(-50%, -100%); font-size: 26px; font-weight: 900;
@@ -61,18 +90,32 @@
 <div id="hud">
   <div id="phase"><div class="label" id="phaseLabel">DAY 1 · PERIOD 1 · PASSING</div><div class="timer" id="timer">0:25</div></div>
   <div id="score">0</div>
+  <div id="uses">LOCKERS ×3</div>
   <div id="banner"></div>
+  <div id="tags"></div>
   <div id="markers"></div>
+  <div id="toast"></div>
   <div id="fps" hidden></div>
+</div>
+<div id="hidePanel" hidden>
+  <div class="box">
+    <div id="hpTitle"></div>
+    <div class="hpBar"><div id="hpFill"></div></div>
+    <div id="hpLine"></div>
+    <div id="hpWarn"></div>
+    <button id="hpLeave" type="button">Sneak out</button>
+    <div class="hint">or push the stick (E on desktop)</div>
+  </div>
 </div>
 <div id="stickBase"></div><div id="stickKnob"></div>
 
 <div class="overlay" id="title">
   <div>
-    <span class="tag">prototype · build step 1</span>
+    <span class="tag">prototype · build step 2</span>
     <h1>Hallway Skip</h1>
-    <p>Slip out with the crowd, then stay out of class until the next bell. Keep out of the hall monitor's cone. If you're spotted, break line of sight.</p>
-    <p class="keys">Phone: left thumb moves, drag on the right side to look around.<br>Desktop: WASD or arrow keys move, drag the mouse to look.</p>
+    <p>Slip out with the crowd, then stay out of class until the next bell. Keep out of the hall monitor's cone. If you're spotted, break line of sight, then hide.</p>
+    <p>Walk into (or tap) a green locker, a restroom, or a classroom door to hide. Subs take longer to notice you.</p>
+    <p class="keys">Phone: left thumb moves, drag on the right side to look around.<br>Desktop: WASD or arrow keys move, drag the mouse to look, click or E to hide.</p>
     <span class="go">Tap to start</span>
   </div>
 </div>
