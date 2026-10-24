@@ -1,4 +1,4 @@
-// Hallway Skip — build step 11 prototype.
+// Hallway Skip — build step 12 prototype.
 // Step 1: hallway, joystick, a hall monitor that chases, a crowd that thins, and the bell.
 // Step 2: tap-to-interact and hiding spots: lockers, restrooms, classrooms (teacher and sub boot timers).
 // Step 3: security guard, the three-strike ladder, and the PA announcer.
@@ -10,6 +10,7 @@
 // Step 9: humor pass (staff barks, squinting, caught-scene lines, excuses) and ad hooks (placeholder ads).
 // Step 10: thrown things hit people (points, more for staff, and a stun), two-stage paper airplane, step-on whoopee cushion, multi-slip banana.
 // Step 11: football (erratic bounces), stink bomb (science labs), spray paint graffiti (art rooms).
+// Step 12: raided rooms lock for a while, the principal's office (fake pass, master key), bigger gum trades.
 import * as THREE from "three";
 
 // =====================================================================================
@@ -108,6 +109,7 @@ const CFG = {
   rooms: {
     grabSec: 1.5,                 // grabbing an item off a desk eats this much of your hiding time (subs: see TEACHER_TYPES)
     hallItemLifeSec: 45,          // items lying in the halls vanish after this long (blinking at the end)
+    raidLockPeriods: 2,           // grab anything from a room and its door is locked for this many periods (no restock either)
   },
 
   // Short-term heat, 0-100: "they know it's me". Like a GTA wanted level.
@@ -141,7 +143,8 @@ const CFG = {
     count: 4,
     offerRange: 9,                // bubbles show within this distance (and line of sight)
     interactRange: 2.6,           // ...but you have to be this close to take them up on it
-    offers: [["highFive", 4], ["gumTrade", 2], ["fakePass", 1]],
+    offers: [["highFive", 3], ["gumTrade", 2]],   // fake passes now come from gum trades (and the principal's office)
+    gumTradePoints: 150,          // trading gum pays well, and it's the main way to get a fake pass
     highFivePoints: 75,           // "meeting a friend" risk bonus
     cooldownSec: 20,
   },
@@ -309,7 +312,10 @@ const ROOM_TYPES = {
   gym:       { label: "Gym", plaque: 0xe74c3c, loot: [["basketball", 4], ["football", 3], ["whoopee", 1]], count: [1, 2] },
   office:    { label: "Main office", plaque: 0x34495e, door: 0x4a3426, staff: "office", count: [2, 3],
                loot: [["wheelieChair", 2], ["whoopee", 2], ["basketball", 2], ["bananaPeel", 2]],
-               rarePrize: { points: 300, label: "Raid the confiscated-stuff drawer" } },   // once per day
+               // once-per-day specials: the confiscated drawer (points), a fake hall pass, and the master key
+               specials: { prize: { icon: "🗄️", label: "Raid the confiscated-stuff drawer", points: 300 },
+                           fakePass: { icon: "🎫", label: "Swipe a hall pass" },
+                           masterKey: { icon: "🔑", label: "Lift the master key" } } },
 };
 
 // Items are data. kind: "throw" (flick it), "ride" (flick to launch yourself), "instant" (tap to use).
@@ -338,6 +344,7 @@ const ITEM_TYPES = {
                    points: 60, cloudRadius: 2.3, cloudSec: 10, noiseRadius: 12,
                    perStudent: 15, perStaff: 60, studentGagSec: 0.8, staffGagSec: 1.4 },   // extra points for everyone who walks through it
   sprayPaint:    { label: "Spray paint", icon: "🎨", kind: "spray", uses: 3, points: 100, wallRange: 1.7, spawnWeight: 0 },   // art rooms only
+  masterKey:     { label: "Master key", icon: "🔑", kind: "key", uses: 3, spawnWeight: 0 },   // the principal's office only: opens locked or used doors
   wheelieChair:  { label: "Wheelie chair", icon: "🪑", kind: "ride", rideSpeed: 9.5, maxRideSec: 3, dazeSec: 1.5, leftoverSec: 3,
                    studentPoints: 40, spawnWeight: 1 },
   gum:           { label: "Gum", icon: "🍬", kind: "instant", points: 100, line: "You stick gum under the water fountain. Gross. +havoc", spawnWeight: 3 },
@@ -659,14 +666,17 @@ for (const d of LAYOUT.doors) {
   // the tell: who's visible through the window, plus a sticky note on a sub's door
   const sil = wallBox(d.h, d.t, wl - side * 0.105, 0.2, 0.3, 0.01, 0x2b2f3a, 1.5);
   const note = wallBox(d.h, d.t + 0.32, wl - side * 0.09, 0.2, 0.2, 0.02, 0xf7e463, 1.15);
-  const sp = addSpot("classroom", d.h, d.t, side, { room: d.room, roomType: d.type ?? "classroom", R, teacher: R.staff ?? "teacher", sil, note, loot: [], prizeTaken: false });
+  const lockSign = wallBox(d.h, d.t, wl - side * 0.1, 0.62, 0.22, 0.03, 0xc0392b, 1.92);   // "LOCKED" sign, shown while a room is locked
+  lockSign.visible = false;
+  const sp = addSpot("classroom", d.h, d.t, side, { room: d.room, roomType: d.type ?? "classroom", R, teacher: R.staff ?? "teacher", sil, note, loot: [],
+    taken: new Set(), raided: false, lockedUntil: 0, lockSign });
   sp.glow.push(door.material);
 }
 function rollSubs() {
   const rooms = SPOTS.filter((sp) => sp.kind === "classroom");
   const [lo, hi] = CFG.hiding.subsPerDay;
   let n = lo + Math.floor(Math.random() * (hi - lo + 1));
-  for (const sp of rooms) { sp.teacher = sp.R.staff ?? "teacher"; sp.prizeTaken = false; }
+  for (const sp of rooms) { sp.teacher = sp.R.staff ?? "teacher"; sp.taken.clear(); sp.raided = false; sp.lockedUntil = 0; }   // a new day: everything unlocked
   while (n > 0) { const sp = pick(rooms); if (sp.teacher === "teacher") { sp.teacher = "sub"; n--; } }
   for (const sp of rooms) { sp.sil.material.color.setHex(TEACHER_TYPES[sp.teacher].silhouette); sp.note.visible = sp.teacher === "sub"; }
 }
@@ -1013,10 +1023,15 @@ function resetSpotsForPeriod() {
   game.lockerUses = CFG.hiding.lockerUsesPerPeriod;
   for (const sp of SPOTS) {
     sp.used = false;
-    if (sp.kind === "classroom") {   // restock the desks
-      const [lo, hi] = sp.R.count, n = lo + Math.floor(Math.random() * (hi - lo + 1)) + (sp.teacher === "sub" ? 1 : 0);
-      sp.loot = Array.from({ length: n }, () => pickWeighted(sp.R.loot));
+    if (sp.kind === "classroom") {
+      // raided last period: locked for a while, and nothing gets restocked until it opens again
+      if (sp.raided) { sp.lockedUntil = game.period + CFG.rooms.raidLockPeriods - 1; sp.raided = false; }
+      if (!roomLocked(sp)) {   // restock the desks
+        const [lo, hi] = sp.R.count, n = lo + Math.floor(Math.random() * (hi - lo + 1)) + (sp.teacher === "sub" ? 1 : 0);
+        sp.loot = Array.from({ length: n }, () => pickWeighted(sp.R.loot));
+      }
       sp.lootVer = (sp.lootVer ?? 0) + 1;
+      sp.lockSign.visible = roomLocked(sp);
     }
   }
 }
@@ -1735,8 +1750,16 @@ function update(dt) {
 // =====================================================================================
 // Hiding: entering, staying, getting booted
 // =====================================================================================
+const roomLocked = (sp) => sp.kind === "classroom" && game.period <= sp.lockedUntil;
+const hasKey = () => game.hotbar.some((it) => it && it.key === "masterKey");
+// the master key opens doors that are locked or already used (not a teacher standing in the doorway)
+function keyOpens(sp) {
+  if (sp.kind === "classroom") return (roomLocked(sp) || sp.used) && !staff.some((s) => s.post === sp);
+  return sp.kind === "restroom" && sp.used;
+}
 function spotBlocked(sp) {   // why this spot can't be used right now ("" if it can)
   if (sp.kind === "locker") return game.lockerUses > 0 ? "" : "No locker uses left this period";
+  if (roomLocked(sp)) return `Room ${sp.room} is locked (you raided it)`;
   if (sp.used) return sp.kind === "restroom" ? "You already hid in this restroom this period" : `Room ${sp.room} already kicked you out this period`;
   if (sp.kind === "classroom" && staff.some((s) => s.post === sp)) return `Room ${sp.room}'s teacher is standing right there`;
   return "";
@@ -1751,7 +1774,11 @@ function nearestSpot() {
 
 function enterSpot(sp) {
   const why = spotBlocked(sp);
-  if (why) { toast(why); playBlip([180], 0.08, "square", 0.04); return false; }
+  if (why && keyOpens(sp) && hasKey()) {   // the master key
+    const i = game.hotbar.findIndex((it) => it && it.key === "masterKey");
+    consumeSlot(i); toast("🔑 The master key works.");
+    playBlip([1200, 900], 0.05, "square", 0.05);
+  } else if (why) { toast(why); playBlip([180], 0.08, "square", 0.04); return false; }
   if (sp.kind === "locker") game.lockerUses--; else sp.used = true;
   const f = spotFront(sp, {});
   player.hidden = sp; player.hideT = 0; player.hideArmed = false; player.pushT = 0; player.pushSpot = null;
@@ -1843,7 +1870,7 @@ function updateHidePanel() {
 // Rooms as shops: tap an item on the desk to grab it. It costs hiding time, and the teacher might call security.
 const lootEl = $("hpLoot");
 function renderLoot(sp) {
-  const key = sp.kind === "classroom" ? `${sp.room}:${sp.lootVer}:${sp.loot.length}:${sp.prizeTaken}` : "";
+  const key = sp.kind === "classroom" ? `${sp.room}:${sp.lootVer}:${sp.loot.length}:${[...sp.taken]}:${game.passShield}` : "";
   if (lootEl.dataset.key === key) return;
   lootEl.dataset.key = key; lootEl.innerHTML = "";
   if (sp.kind !== "classroom") return;
@@ -1854,10 +1881,12 @@ function renderLoot(sp) {
     b.addEventListener("click", () => grabLoot(i));
     lootEl.appendChild(b);
   });
-  if (sp.R.rarePrize && !sp.prizeTaken) {
+  for (const [id, X] of Object.entries(sp.R.specials ?? {})) {   // once-per-day specials (the principal's office)
+    if (sp.taken.has(id)) continue;
     const b = document.createElement("button"); b.type = "button"; b.className = "prize";
-    b.innerHTML = `🗄️ ${sp.R.rarePrize.label}<small>+${sp.R.rarePrize.points} · -${grab}s</small>`;
-    b.addEventListener("click", () => grabLoot("prize"));
+    const note = id === "prize" ? `+${X.points} · ` : id === "fakePass" && game.passShield ? "you have one · " : "";
+    b.innerHTML = `${X.icon} ${X.label}<small>${note}-${grab}s</small>`;
+    b.addEventListener("click", () => grabLoot(id));
     lootEl.appendChild(b);
   }
   if (!lootEl.children.length) lootEl.innerHTML = `<span class="none">Nothing left on the desks.</span>`;
@@ -1866,14 +1895,23 @@ function grabLoot(i) {
   const sp = player.hidden;
   if (!sp || sp.kind !== "classroom" || game.state !== "playing") return;
   const TT = TEACHER_TYPES[sp.teacher];
-  if (i === "prize") {
-    if (sp.prizeTaken) return;
-    sp.prizeTaken = true;
-    havoc("rarePrize", sp.R.rarePrize.points, "Confiscated stash!", { x: player.x, z: player.z });
+  if (typeof i === "string") {   // a special
+    if (sp.taken.has(i)) return;
+    if (i === "prize") havoc("rarePrize", sp.R.specials.prize.points, "Confiscated stash!", { x: player.x, z: player.z });
+    else if (i === "fakePass") {
+      if (game.passShield) { toast("You already have a fake pass."); return; }
+      game.passShield = true; popup("🎫 Fake pass! Your next catch doesn't count.", "item"); playBlip([523, 659, 784], 0.08, "triangle", 0.06);
+    } else if (i === "masterKey") {   // already have one: it's topped back up instead of taking a second slot
+      const k = game.hotbar.find((it) => it && it.key === "masterKey");
+      if (k) { k.uses = ITEM_TYPES.masterKey.uses; renderHotbar(); popup("🔑 Master key (topped up)", "item"); }
+      else if (!addItem("masterKey")) return;
+    }
+    sp.taken.add(i);
   } else {
     if (!addItem(sp.loot[i])) return;   // inventory full: nothing happens
     sp.loot.splice(i, 1);
   }
+  sp.raided = true;   // locked for a while from the next bell
   player.hideT += TT.grabSec ?? CFG.rooms.grabSec;
   if (Math.random() < TT.backfire) roomBackfire(sp);
   updateHidePanel();
@@ -1961,8 +1999,10 @@ function updateSpotsUI() {
     let text, cls = "itag";
     if (sp.kind === "locker") text = blocked ? "Locker · none left" : "Locker";
     else if (sp.kind === "restroom") text = blocked ? "Restroom · used" : `Restroom · sweep in ${Math.max(0, Math.ceil(sp.nextSweep - game.time))}s`;
-    else { text = `Room ${sp.room}${sp.R.label ? " · " + sp.R.label : ""} · ${TEACHER_TYPES[sp.teacher].label}${blocked ? (sp.used ? " · used" : " · guarded") : ""}`; if (sp.teacher === "sub") cls += " sub"; }
-    if (blocked) cls += " off"; else if (reach) cls += " near";
+    else { text = `Room ${sp.room}${sp.R.label ? " · " + sp.R.label : ""} · ${TEACHER_TYPES[sp.teacher].label}${blocked ? (roomLocked(sp) ? " · locked" : sp.used ? " · used" : " · guarded") : ""}`; if (sp.teacher === "sub") cls += " sub"; }
+    const keyOk = blocked && keyOpens(sp) && hasKey();
+    if (keyOk) text += " · 🔑";
+    if (blocked && !keyOk) cls += " off"; else if (reach) cls += " near";
     if (text !== sp.tagText) { sp.tag.textContent = text; sp.tagText = text; }
     if (cls !== sp.tagClass) { sp.tag.className = cls; sp.tagClass = cls; }
   }
@@ -2085,6 +2125,7 @@ function selectSlot(i) {
   if (game.aim?.slot === i) { cancelAim(); return; }
   const T = ITEM_TYPES[it.key];
   if (T.kind === "spray") { if (sprayPaint()) consumeSlot(i); return; }
+  if (T.kind === "key") { toast(`Master key: walk into a locked door to open it (${it.uses} use${it.uses === 1 ? "" : "s"} left)`, 2.4); return; }
   if (T.kind === "instant") { consumeSlot(i); toast(T.line); havoc(it.key, T.points, T.label, { x: player.x, z: player.z }); return; }
   game.aim = { slot: i, key: it.key, id: null, sx: 0, sy: 0, cx: 0, cy: 0 };
   $("aim").hidden = false;
@@ -2680,9 +2721,15 @@ function friendTap(c) {
   } else if (F.offer === "gumTrade") {
     const i = game.hotbar.findIndex((s) => s && s.key === "gum");
     if (i < 0) { toast("Friend: \"Got any gum?\" (Bring them gum to trade.)"); return; }
-    const got = pickWeighted(Object.entries(ITEM_TYPES).filter(([k]) => k !== "gum").map(([k, T]) => [k, T.spawnWeight]));
-    game.hotbar[i] = { key: got, uses: ITEM_TYPES[got].uses ?? 1 }; renderHotbar();
-    popup(`Traded gum for ${ITEM_TYPES[got].icon} ${ITEM_TYPES[got].label}`, "item"); playBlip([660, 990], 0.06, "triangle", 0.06);
+    addScore(R.gumTradePoints, "Gum trade!", "item");
+    if (!game.passShield) {   // the main way to get a fake pass
+      consumeSlot(i); game.passShield = true;
+      popup("🎫 They slip you a fake pass! Your next catch doesn't count.", "item"); playBlip([523, 659, 784], 0.08, "triangle", 0.06);
+    } else {
+      const got = pickWeighted(Object.entries(ITEM_TYPES).filter(([k]) => k !== "gum").map(([k, T]) => [k, T.spawnWeight]));
+      game.hotbar[i] = { key: got, uses: ITEM_TYPES[got].uses ?? 1 }; renderHotbar();
+      popup(`Traded gum for ${ITEM_TYPES[got].icon} ${ITEM_TYPES[got].label}`, "item"); playBlip([660, 990], 0.06, "triangle", 0.06);
+    }
   } else if (F.offer === "fakePass") {
     if (game.passShield) { toast("You already have a fake pass."); return; }
     game.passShield = true; popup("🎫 Fake pass! Your next catch doesn't count.", "item"); playBlip([523, 659, 784], 0.08, "triangle", 0.06);
@@ -2864,6 +2911,11 @@ if (debug) {   // a small test panel for phone playtests (only with ?debug in th
       c.to = Math.random() < 0.5 ? HALLS[c.h].a : HALLS[c.h].b; c.speed = 0.3; hallPos(c.h, c.t, c.lat, c); n++;
     }
   });
+  add("Go to main office", () => {
+    const sp = SPOTS.find((x) => x.roomType === "office"), f = spotFront(sp, {}), H = HALLS[sp.h];
+    if (player.hidden) exitSpot(false);
+    player.x = f.x; player.z = f.z; cam.yaw = player.heading = Math.atan2(sp.side * H.nx, sp.side * H.nz); manualCamT = 1;
+  });
   add("Friend here", () => {
     const c = crowd.find((k) => k.friend && k.mode !== "gone") ?? crowd.find((k) => k.friend);
     c.mode = "wander"; c.slipT = 0; c.friend.cd = 0; c.leaveAt = 999; c.x = player.x + Math.sin(player.heading) * 1.6; c.z = player.z + Math.cos(player.heading) * 1.6;
@@ -2917,7 +2969,12 @@ if (debug) {   // test-only helpers (only with ?debug in the URL)
       st.to = dirSign > 0 ? HALLS[pr.h].b : HALLS[pr.h].a; hallPos(st.h, st.t, 0, st); st.facing = hallHeading(st.h, dirSign); },
     crowdNear(r) { return crowd.filter((c) => isActive(c) && Math.hypot(c.x - player.x, c.z - player.z) < r).map((c) => ({ i: crowd.indexOf(c), x: c.x, z: c.z, slipT: c.slipT })); },
     crowdTo(i, x, z) { const c = crowd[i]; const pr = hallProject(x, z); c.mode = "wander"; c.slipT = 0; c.leaveAt = 999; c.h = pr.h; c.t = pr.t; c.lat = c.targetLat = pr.lat; c.retargetT = 99; c.speed = 0.0001; c.x = x; c.z = z; },
-    roomInfo() { return SPOTS.filter((sp) => sp.kind === "classroom").map((sp) => ({ room: sp.room, type: sp.roomType, teacher: sp.teacher, loot: [...sp.loot], i: SPOTS.indexOf(sp) })); },
+    roomInfo() { return SPOTS.filter((sp) => sp.kind === "classroom").map((sp) => ({ room: sp.room, type: sp.roomType, teacher: sp.teacher, loot: [...sp.loot], i: SPOTS.indexOf(sp),
+      locked: roomLocked(sp), lockedUntil: sp.lockedUntil, taken: [...sp.taken], blocked: spotBlocked(sp), sign: sp.lockSign.visible })); },
+    enter(i) { return enterSpot(SPOTS[i]); },
+    leave() { exitSpot(false); },
+    grab(i) { grabLoot(i); },
+    unpost() { for (const st of staff) if (st.post) st.post = null; },
     hideT() { return player.hideT; },
     friends() { return crowd.filter((c) => c.friend).map((c) => ({ offer: c.friend.offer, cd: c.friend.cd, x: c.x, z: c.z, mode: c.mode, i: crowd.indexOf(c) })); },
     friendTo(i, offer) { const c = crowd[i]; c.friend.offer = offer; c.friend.cd = 0; c.slipT = 0; c.mode = "wander"; c.x = player.x + 1.5; c.z = player.z; const pr = hallProject(c.x, c.z); c.h = pr.h; c.t = pr.t; c.lat = pr.lat; c.leaveAt = 999; },
