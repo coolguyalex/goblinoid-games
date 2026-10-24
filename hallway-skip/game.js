@@ -1,4 +1,4 @@
-// Hallway Skip — build step 8 prototype.
+// Hallway Skip — build step 9 prototype.
 // Step 1: hallway, joystick, a hall monitor that chases, a crowd that thins, and the bell.
 // Step 2: tap-to-interact and hiding spots: lockers, restrooms, classrooms (teacher and sub boot timers).
 // Step 3: security guard, the three-strike ladder, and the PA announcer.
@@ -7,6 +7,7 @@
 // Step 6: rooms as shops (loot tables by room type, grabbing costs boot time, teachers can call security) and despawn timers.
 // Step 7: heat ("they know it's me") and the persistent security level ("they know something happened").
 // Step 8: the principal, friends and passing-period mini-games, and full risk scoring.
+// Step 9: humor pass (staff barks, squinting, caught-scene lines, excuses) and ad hooks (placeholder ads).
 import * as THREE from "three";
 
 // =====================================================================================
@@ -151,6 +152,18 @@ const CFG = {
     hidingNearRadius: 4, hidingNearPerSec: 8,   // hiding with staff this close: points per second, per staff member
   },
 
+  // Ads. No ad network is wired up yet: "placeholder" shows a fake ad screen so the flow can be tested.
+  // Interstitial at most once per day, only between days or after a strike, never mid-run. Rewarded ads are always optional.
+  ads: {
+    enabled: true,
+    provider: "placeholder",      // swap for a real network in Ads.show() (check its child-directed policy first)
+    interstitialsPerDay: 1,
+    placeholderSec: 4,
+    forgeNotePerDay: 1,           // rewarded: erase a strike
+    fakePassPerDay: 1,            // rewarded: start tomorrow with a fake pass
+  },
+  barkSec: 1.8, barkCooldownSec: 3,   // staff speech bubbles
+
   footsteps: { hearRange: 20, patrolInterval: 0.55, chaseInterval: 0.3, volume: 0.55 },
 
   strikes: {
@@ -233,6 +246,34 @@ const PA_LINES = {
   securityUp: ["We've had reports of... noises. All staff, stay alert.", "Whoever is responsible for the whoopee cushions: we will find you."],
   lastDay:    ["This is your principal speaking. Today, the hoodie goes down.", "Lockdown drill. Just kidding. Unless...?"],
 };
+
+// ---- Humor tables. Placeholder jokes: Alexander will punch these up. ----
+const BARKS = {   // speech bubbles over staff heads
+  hallMonitor:   { suspicious: ["Hmm?", "Is that...?", "*squints*"], chase: ["HEY!", "Walking! WALKING!", "Stop right there!"],
+                   search: ["Where'd you go...", "I know you're here."], giveUp: ["Kids these days.", "Must've been nothing."],
+                   slip: ["WHOA—", "My back!"], bust: ["I SAW that.", "Nice try."] },
+  securityGuard: { suspicious: ["...", "Movement."], chase: ["Code gray hoodie!", "Freeze!"], search: ["Come out, come out..."],
+                   giveUp: ["Copy. Lost visual."], slip: ["Man down!"], winded: ["*wheeze*", "Gimme... a sec..."], bust: ["Gotcha."] },
+  hallTeacher:   { suspicious: ["Excuse me?"], alarm: ["HALL PASS!", "Excuse me?!", "SECURITY!"] },
+  principal:     { suspicious: ["Mm-hm."], chase: ["YOUNG PERSON!", "MY OFFICE!"], search: ["Hiding won't help."],
+                   giveUp: ["This isn't over."], slip: ["Who put this here?!"], bust: ["Out. Now."] },
+};
+const CAUGHT_LINES = {   // strike 1, by who caught you
+  hallMonitor:   ["\"You better get to class.\"", "\"Pass? No? Didn't think so.\"", "\"I'm writing this down. In pen.\""],
+  securityGuard: ["\"Let's go, chief. Walk with me.\"", "\"I used to be fast like you.\"", "\"You have the right to remain in class.\""],
+  hallTeacher:   ["\"Hall pass? No? Inside. Now.\"", "\"I will be emailing your parents. In ALL CAPS.\""],
+  principal:     ["\"My office. Now.\"", "\"We've been expecting you.\""],
+};
+const OFFICE_RANTS = [
+  "The vice principal yells for a solid minute about \"respect for the institution.\"",
+  "The vice principal holds up your attendance record and just... sighs.",
+  "The vice principal says \"disappointed\" eleven times. You counted.",
+  "The vice principal shows you a chart. It's mostly you.",
+];
+const EXCUSES = ["My dog ate my schedule.", "I was looking for the nurse. The nurse was also looking for me.", "I'm on the hall decorating committee.",
+  "Is this not the way to band?", "My locker ate my homework. And my shoe.", "I'm new. Since September.", "I was told to deliver this... nothing."];
+const RUN_OVER_LINES = ["Your parents are on their way.", "Your mom is in the parking lot. She's doing the slow walk.", "They're calling it a \"conversation about choices.\""];
+const LUNCHES = ["mystery tacos.", "rectangle pizza.", "the meatloaf (again).", "\"breakfast for lunch.\"", "chicken nuggets of uncertain origin.", "soup?"];
 
 // Hiding spots are data: a new kind is one entry here (placement lives in LAYOUT).
 const SPOT_TYPES = {
@@ -632,6 +673,7 @@ function makePerson({ body, skin = 0xf1c27d, scale = 1, hat = null, hood = null 
   head.position.y = 1.32; g.add(head);
   const eyes = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.06, 0.05), lambert(0x222222));
   eyes.position.set(0, 1.36, 0.2); g.add(eyes);           // shows which way they face (+z)
+  g.userData.eyes = eyes;
   if (hood) { const hd = new THREE.Mesh(new THREE.IcosahedronGeometry(0.25, 0), lambert(hood)); hd.position.set(0, 1.36, -0.08); hd.scale.set(1, 1, 0.9); g.add(hd); }
   if (hat) { const ht = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.1, 0.48), lambert(hat)); ht.position.set(0, 1.52, 0.05); g.add(ht); }
   g.scale.setScalar(scale);
@@ -688,18 +730,19 @@ function spawnStaff(typeKey, place) {
   scene.add(cone);
   const alert = document.createElement("div"); alert.className = "alert"; markersEl.appendChild(alert);
   const edge = document.createElement("div"); edge.className = "edge"; markersEl.appendChild(edge);
+  const bubble = document.createElement("div"); bubble.className = "bark"; markersEl.appendChild(bubble);
   const st = { type: T, key: typeKey, x: 0, z: 0, h: place.h ?? 0, t: place.t ?? 0, to: place.to ?? 0, facing: 0, state: "patrol",
     suspicion: 0, lastX: 0, lastZ: 0, lastVX: 0, lastVZ: 0, searchT: 0, stepT: 0, sweep: Math.random() * 10,
     tx: 0, tz: 0, pauseT: 0, bustSpot: null, chaseT: 0, windedT: 0, alarmT: 0, calledBackup: false, stunT: 0, distractT: 0, dX: 0, dZ: 0,
     roamT: T.roamTurnSec ? rand(...T.roamTurnSec) : 0, route: place.route ?? null, ri: place.ri ?? 0, rstep: place.rstep ?? 1,
-    post: place.post ?? null, mesh, cone, alert, edge };
+    post: place.post ?? null, mesh, cone, alert, edge, bubble, barkUntil: 0, barkAt: -99, wasSus: false };
   if (T.stationary) { st.x = place.x; st.z = place.z; st.facing = place.facing; st.state = "post"; }
   else { hallPos(st.h, st.t, 0, st); st.facing = hallHeading(st.h, st.to === HALLS[st.h].b ? 1 : -1); }
   staff.push(st);
   return st;
 }
 function clearStaff() {
-  for (const st of staff) { scene.remove(st.mesh); scene.remove(st.cone); st.cone.geometry.dispose(); st.alert.remove(); st.edge.remove(); }
+  for (const st of staff) { scene.remove(st.mesh); scene.remove(st.cone); st.cone.geometry.dispose(); st.alert.remove(); st.edge.remove(); st.bubble.remove(); }
   staff.length = 0;
 }
 // Where new staff start: on their route, as far from the kid as we can manage.
@@ -939,7 +982,7 @@ function resetGame(save = null) {
   game.periodScore = 0; game.periodsSkipped = save?.periodsSkipped ?? 0; game.dayPeriodsSkipped = 0;
   game.security = save?.security ?? 0; game.lastDay = save?.lastDay ?? false; game.heat = game.heatPending = 0;
   game.unseenT = 0; game.nearMissT = 0; game.passShield = false;
-  paLast = {};
+  paLast = {}; Ads.newDay();
   morningSetup();
 }
 function resetSpotsForPeriod() {
@@ -1004,7 +1047,7 @@ function dayOver() {
   game.score += CFG.days.dayBonus;
   const D = CFG.days, next = game.day + 1;
   $("dayTitle").textContent = `DAY ${game.day} SURVIVED!`;
-  $("dayStats").innerHTML = `${game.dayPeriodsSkipped} periods skipped today · +${D.dayBonus} day bonus<br><b>Score ${Math.floor(game.score)}</b> · Strikes ${game.strikes}/${CFG.strikes.max}`;
+  $("dayStats").innerHTML = `${game.dayPeriodsSkipped} periods skipped today · +${D.dayBonus} day bonus<br><b>Score ${Math.floor(game.score)}</b> · Strikes ${game.strikes}/${CFG.strikes.max}<br><small>Tomorrow's lunch: ${pick(LUNCHES)}</small>`;
   const pass = Math.max(D.minPassingSec, CFG.passingSec + D.passingSecPerDay * (next - 1));
   const skip = Math.min(D.maxSkippingSec, CFG.skippingSec + D.skippingSecPerDay * (next - 1));
   const S = CFG.security, before = Math.round(game.security);
@@ -1013,6 +1056,7 @@ function dayOver() {
   $("dayNext").innerHTML = tomorrowLast
     ? `<b class="warn">School alert maxed out. Tomorrow is your LAST DAY.</b> ${S.lastDayPeriods} periods, ${S.lastDayScoreMult}× points, every staff member on duty.`
     : `Day ${next}: staff are faster and sharper. Passing ${pass}s, skipping ${skip}s. School alert ${before}% → ${Math.round(game.security)}% overnight.`;
+  $("dayPassBtn").hidden = !Ads.canRewarded("fakePass") || game.passShield;
   $("dayEnd").hidden = false;
   game.day = next; game.period = 1; game.highAlert = false; game.dayPeriodsSkipped = 0; game.lastDay = tomorrowLast;
   game.heat = game.heatPending = 0;
@@ -1030,6 +1074,7 @@ function lastDaySurvived() {
 }
 function startNextDay() {
   $("dayEnd").hidden = true;
+  Ads.newDay();
   morningSetup();
   game.state = "playing";
   if (game.lastDay) {
@@ -1063,7 +1108,7 @@ function caught(st) {
     clearSave();
     pa("runOver");
     $("caughtTitle").textContent = "Run over!";
-    $("caughtText").innerHTML = `The ${st.type.name} walks you to the office. Your parents are on their way.<br>` +
+    $("caughtText").innerHTML = `The ${st.type.name} walks you to the office. ${pick(RUN_OVER_LINES)}<br>` +
       `<b>Score ${Math.floor(game.score)}</b> · Day ${game.day}, period ${game.period} · ${game.periodsSkipped} period${game.periodsSkipped === 1 ? "" : "s"} skipped`;
     $("caught").hidden = false;
     return;
@@ -1074,10 +1119,14 @@ function caught(st) {
   const lost = office && CFG.strikes.officeLosesPeriodPoints ? Math.floor(game.periodScore) : 0;
   $("strikeTitle").textContent = office ? "STRIKE 2 · THE OFFICE" : "STRIKE 1 · WARNING";
   $("strikeLine").textContent = office
-    ? "The vice principal yells at you for a solid minute. Staff will be watching you for the rest of the day."
-    : `The ${st.type.name} catches you. ${st.type.caughtLine}`;
+    ? `${pick(OFFICE_RANTS)} Staff will be watching you for the rest of the day.`
+    : `The ${st.type.name} catches you. ${pick(CAUGHT_LINES[st.key] ?? [st.type.caughtLine])}`;
+  $("strikeExcuse").textContent = `Your excuse: "${pick(EXCUSES)}" It does not work.`;
   $("strikeSub").textContent = office ? (lost ? `-${lost} points (this period's skipping)` : "") : "One more and you're going to the office.";
   $("strikeDots").innerHTML = strikeDotsHtml();
+  const canForge = Ads.canRewarded("forgeNote");
+  $("forgeBtn").hidden = !canForge;
+  if (canForge) game.sceneEnd += 3.5;   // a little longer, so there's time to decide
   $("strike").className = "overlay " + (office ? "office" : "warning");
   $("strike").hidden = false;
   if (office) { game.score -= lost; game.periodScore = 0; }
@@ -1104,8 +1153,9 @@ function shoo(st, line = null) {
   player.invisT = 2.0;
 }
 
-function endScene() {
+function endScene(skipAd = false) {
   if (game.state !== "scene") return;
+  if (!skipAd && Ads.canInterstitial()) { $("strike").hidden = true; Ads.interstitial(() => { game.state = "scene"; endScene(true); }); return; }
   $("strike").hidden = true;
   if (game.pendingOffice) {
     game.highAlert = true;
@@ -1166,12 +1216,28 @@ function onOverlayTap(e) {
   }
   else if (game.state === "caught") startRun(null);
   else if (game.state === "paused") { $("paused").hidden = true; game.state = "playing"; }
-  else if (game.state === "dayEnd") startNextDay();
+  else if (game.state === "dayEnd") {
+    if (Ads.canInterstitial()) Ads.interstitial(() => startNextDay());
+    else startNextDay();
+  }
   clock.getDelta();
 }
 for (const id of ["title", "caught", "paused", "dayEnd"]) $(id).addEventListener("click", onOverlayTap);
 for (const id of ["aboutClose", "aboutX"]) $(id).addEventListener("click", () => { $("about").hidden = true; });
-$("strike").addEventListener("click", () => { if (game.sceneT > 0.8) endScene(); });
+$("strike").addEventListener("click", (e) => { if (e.target.id !== "forgeBtn" && game.sceneT > 0.8) endScene(); });
+$("forgeBtn").addEventListener("click", (e) => {
+  e.stopPropagation();
+  Ads.rewarded("forgeNote", () => {   // reward: the strike never happened
+    game.strikes = Math.max(0, game.strikes - 1); game.pendingOffice = false;
+    toast("Forged note accepted. That strike never happened.", 2.6);
+    game.state = "scene"; endScene(true);
+  }, () => { game.state = "scene"; endScene(true); });
+});
+$("dayPassBtn").addEventListener("click", (e) => {
+  e.stopPropagation();
+  Ads.rewarded("fakePass", () => { game.passShield = true; $("dayPassBtn").hidden = true; toast("🎫 You'll start tomorrow with a fake pass."); game.state = "dayEnd"; },
+    () => { game.state = "dayEnd"; });
+});
 $("hpLeave").addEventListener("click", () => { if (game.state === "playing") exitSpot(false); });
 window.addEventListener("blur", pause);
 document.addEventListener("visibilitychange", () => { if (document.hidden) pause(); });
@@ -1408,6 +1474,7 @@ function updateStaff(dt, cover) {
         st.alarmT = T.alarmCooldownSec; st.suspicion = 0.5;
         playBlip([620, 880, 620], 0.1, "square", 0.08);
         toast("Teacher: \"HEY! Where's your hall pass?!\"", 2.2);
+        bark(st, "alarm", true);
         callBackup(st, false);
       }
       const base = st.post ? Math.atan2(-st.post.side * HALLS[st.post.h].nx, -st.post.side * HALLS[st.post.h].nz) : st.facing;
@@ -1444,7 +1511,7 @@ function updateStaff(dt, cover) {
         if (look.d < D.catchRadius && player.graceT <= 0) { caught(st); return; }
         if (T.callsBackup && !st.calledBackup) { st.calledBackup = true; callBackup(st, true); }
       } else {
-        st.state = "search"; st.searchT = 0;
+        st.state = "search"; st.searchT = 0; bark(st, "search");
         const g = { x: st.lastX + st.lastVX * D.predictSec, z: st.lastZ + st.lastVZ * D.predictSec };
         collide(g, 0.4); st.tx = g.x; st.tz = g.z;
       }
@@ -1459,7 +1526,7 @@ function updateStaff(dt, cover) {
           exitSpot(true, sp.kind === "locker" ? `${who} yanks the locker open: "I saw you go in there."`
             : sp.kind === "restroom" ? `${who} bangs on the stall: "I saw you go in there."`
             : `${who} leans in the door: "That one's mine."`);
-          startChase(st); st.pauseT = CFG.hiding.bustPauseSec;
+          startChase(st); st.pauseT = CFG.hiding.bustPauseSec; bark(st, "bust", true);
         } else { st.state = "search"; st.searchT = 0; st.lastX = st.tx = f.x; st.lastZ = st.tz = f.z; }
       }
     } else if (st.state === "search") {
@@ -1472,6 +1539,7 @@ function updateStaff(dt, cover) {
         st.state = "return"; st.suspicion = 0; st.calledBackup = false;
         setReturnPoint(st);
         playBlip([330, 260], 0.12, "triangle", 0.05);   // "hmph"
+        bark(st, "giveUp");
       }
     }
 
@@ -1484,8 +1552,19 @@ function updateStaff(dt, cover) {
     if (st.state !== "chase" && st.state !== "bust" && st.state !== "search") st.chaseT = Math.max(0, st.chaseT - dt);
     st.mesh.position.set(st.x, speed > 0.2 ? Math.abs(Math.sin(game.time * (st.state === "chase" ? 12 : 7))) * 0.06 : 0, st.z);
     st.mesh.rotation.y = st.facing;
+    // the squint: suspicious staff narrow their eyes and lean in
+    const squint = st.suspicion > 0.05 && !isAlarmed(st);
+    st.mesh.userData.eyes.scale.y = squint ? 0.3 : 1; st.mesh.rotation.x = squint ? 0.12 : 0;
+    if (squint && !st.wasSus) bark(st, "suspicious");
+    st.wasSus = squint;
     updateCone(st);
   }
+}
+function bark(st, kind, force = false) {
+  const lines = BARKS[st.key]?.[kind];
+  if (!lines || (!force && game.time - st.barkAt < CFG.barkCooldownSec)) return;
+  st.barkAt = game.time; st.barkUntil = performance.now() + CFG.barkSec * 1000;
+  st.bubble.textContent = pick(lines);
 }
 
 // Guards sprint faster than you, then get winded. Everyone moves a bit faster on high alert and on later days.
@@ -1494,7 +1573,7 @@ function chaseSpeed(st, dt) {
   let v = T.chaseSpeed;
   if (T.sprintSec) {
     if (st.windedT > 0) { st.windedT -= dt; v = T.windedSpeed; if (st.windedT <= 0) st.chaseT = 0; }
-    else { st.chaseT += dt; if (st.chaseT > T.sprintSec) { st.windedT = T.windedSec; toast("The guard is winded! *huff* *huff*"); } }
+    else { st.chaseT += dt; if (st.chaseT > T.sprintSec) { st.windedT = T.windedSec; toast("The guard is winded! *huff* *huff*"); bark(st, "winded", true); } }
   }
   return v * staffMult("speed");
 }
@@ -1514,7 +1593,7 @@ function callBackup(caller, announce) {
 }
 
 function startChase(st) {
-  if (st.state !== "chase") { playBlip([520, 780], 0.1, "square", 0.08); addHeat(CFG.heat.seenRunning); }   // "Hey!"
+  if (st.state !== "chase") { playBlip([520, 780], 0.1, "square", 0.08); addHeat(CFG.heat.seenRunning); bark(st, "chase"); }   // "Hey!"
   st.state = "chase"; st.suspicion = 1;
   st.lastX = player.x; st.lastZ = player.z;
 }
@@ -1560,6 +1639,9 @@ function updateMarkers() {
     proj.set(st.x, 2.0 * st.type.scale, st.z).project(camera);
     const onScreen = !behind && Math.abs(proj.x) < 0.96 && Math.abs(proj.y) < 0.96;
     const dist = Math.hypot(st.x - player.x, st.z - player.z);
+    const barking = performance.now() < st.barkUntil;
+    st.bubble.style.display = onScreen && barking ? "block" : "none";
+    if (onScreen && barking) { st.bubble.style.left = ((proj.x + 1) / 2) * w + "px"; st.bubble.style.top = ((1 - proj.y) / 2) * h - 30 + "px"; }
     if (onScreen) {
       st.edge.style.display = "none";
       const txt = chasing ? "!" : st.suspicion > 0.05 ? "?" : "";
@@ -2156,7 +2238,7 @@ function trapCheck(o) {
   const T = o.T;
   for (const st of staff) {
     if (st.type.stationary || st.stunT > 0 || Math.hypot(st.x - o.x, st.z - o.z) > 0.55) continue;
-    st.stunT = T.slipStaffSec;
+    st.stunT = T.slipStaffSec; bark(st, "slip", true);
     if (st.state === "chase" || st.state === "bust") { st.state = "search"; st.searchT = 0; st.lastX = st.tx = player.x; st.lastZ = st.tz = player.z; }
     playBlip([700, 300], 0.12, "sawtooth", 0.07);
     havoc("bananaStaff", T.staffPoints, `Wipeout! The ${st.type.name} slips`, { x: o.x, z: o.z, loud: true });
@@ -2404,6 +2486,43 @@ function catchPlane(o) {
 }
 
 // =====================================================================================
+// Ads. Placeholder provider for now: shows a fake ad screen. A real network (for example Google's H5 Games Ads
+// adBreak API) plugs into show(). Rules from the spec: interstitial at most once per day, only between days or
+// after a strike, never mid-run; rewarded ads (forge a note, fake pass) are always optional.
+// =====================================================================================
+const Ads = {
+  interstitialsToday: 0, rewardedToday: {},
+  newDay() { this.interstitialsToday = 0; this.rewardedToday = {}; },
+  canInterstitial() { return CFG.ads.enabled && this.interstitialsToday < CFG.ads.interstitialsPerDay; },
+  canRewarded(kind) { return CFG.ads.enabled && (this.rewardedToday[kind] ?? 0) < (CFG.ads[kind + "PerDay"] ?? 0); },
+  interstitial(done) { this.interstitialsToday++; this.show("interstitial", () => done()); },
+  rewarded(kind, onReward, onSkip) {
+    this.rewardedToday[kind] = (this.rewardedToday[kind] ?? 0) + 1;
+    this.show("rewarded", (finished) => (finished ? onReward() : onSkip?.()));
+  },
+  show(kind, done) {   // placeholder: a countdown screen. Rewarded ads only pay out if you sit through them.
+    const prev = game.state;
+    game.state = "ad"; releaseControls();
+    const el = $("ad"), close = $("adClose"), count = $("adCount");
+    $("adKind").textContent = kind === "rewarded" ? "rewarded ad (placeholder)" : "ad break (placeholder)";
+    el.hidden = false; close.hidden = true;
+    let left = CFG.ads.placeholderSec;
+    count.textContent = `${left}...`;
+    const tick = setInterval(() => {
+      left--;
+      if (left > 0) { count.textContent = `${left}...`; return; }
+      clearInterval(tick); count.textContent = kind === "rewarded" ? "Reward unlocked!" : "";
+      close.hidden = false;
+    }, 1000);
+    const finish = (finished) => { clearInterval(tick); el.hidden = true; close.onclick = skip.onclick = null; game.state = prev; done(finished); clock.getDelta(); };
+    const skip = $("adSkip");
+    skip.hidden = kind !== "rewarded";
+    close.onclick = () => finish(true);
+    skip.onclick = () => finish(false);
+  },
+};
+
+// =====================================================================================
 // Main loop
 // =====================================================================================
 function resize() {
@@ -2470,6 +2589,8 @@ if (debug) {   // test-only helpers (only with ?debug in the URL)
     setUnseen(t) { game.unseenT = t; },
     spawnPrincipal() { ensurePrincipal(true); return staff.findIndex((s) => s.key === "principal"); },
     forcePlane() { game.nextPlaneT = 0; },
+    barks() { return staff.map((s) => (performance.now() < s.barkUntil ? s.bubble.textContent : null)); },
+    ads() { return { interstitialsToday: Ads.interstitialsToday, rewardedToday: { ...Ads.rewardedToday } }; },
     setHeat(h, s) { if (h != null) { game.heat = h; game.heatPending = 0; } if (s != null) game.security = s; },
     heat() { return { heat: game.heat, pending: game.heatPending, security: game.security, lastDay: game.lastDay }; },
     objects() { return objects.map((o) => ({ key: o.key, state: o.state, x: o.x, y: o.y, z: o.z, bounces: o.bounces, life: o.life })); },

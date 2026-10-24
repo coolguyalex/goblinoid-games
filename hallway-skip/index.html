@@ -27,6 +27,11 @@
     font-size: 12px; font-weight: 900; letter-spacing: .06em; color: #ffe066; text-shadow: 0 2px 4px rgba(0,0,0,.7); }
   #passIcon { position: absolute; top: max(8px, env(safe-area-inset-top)); left: calc(max(14px, env(safe-area-inset-left)) + 70px); font-size: 18px; }
   #passIcon[hidden] { display: none; }
+  .bark { position: absolute; transform: translate(-50%, -100%); padding: 4px 9px; border-radius: 12px; background: #fff; color: #1d2230;
+    font: 800 13px system-ui, sans-serif; white-space: nowrap; display: none; box-shadow: 0 2px 6px rgba(0,0,0,.35); }
+  .bark::after { content: ""; position: absolute; left: 50%; bottom: -6px; margin-left: -6px; border: 6px solid transparent; border-bottom: 0; border-top-color: #fff; }
+  #ad { z-index: 7; background: rgba(8, 10, 16, .96); }
+  #ad h1 { color: #9fe0ff; }
   .fbubble { position: absolute; transform: translate(-50%, -100%); pointer-events: auto; border: 0; border-radius: 16px; padding: 5px 10px;
     background: rgba(255,255,255,.92); color: #1d2230; font: 800 18px system-ui, sans-serif; display: none; cursor: pointer;
     box-shadow: 0 2px 6px rgba(0,0,0,.4); animation: bob 1s ease-in-out infinite; }
@@ -203,7 +208,7 @@
 
 <div class="overlay" id="title">
   <div>
-    <span class="tag">prototype · build step 8</span>
+    <span class="tag">prototype · build step 9</span>
     <h1>Hallway Skip</h1>
     <p>Skip class. Don't get caught.</p>
     <div class="buttons">
@@ -234,7 +239,10 @@
     <h1 id="dayTitle"></h1>
     <p id="dayStats"></p>
     <p id="dayNext" class="keys"></p>
-    <span class="go">Tap for the next day</span>
+    <div class="buttons">
+      <span class="go">Tap for the next day</span>
+      <button class="go alt" id="dayPassBtn" type="button" hidden>🎫 Watch an ad: start tomorrow with a fake pass</button>
+    </div>
   </div>
 </div>
 <div class="overlay" id="caught" hidden>
@@ -250,6 +258,17 @@
     <div id="strikeDots"></div>
     <p id="strikeLine"></p>
     <p id="strikeSub"></p>
+    <p id="strikeExcuse" class="keys"></p>
+    <div class="buttons"><button class="go alt" id="forgeBtn" type="button" hidden>📝 Forge a note (watch an ad): erase this strike</button></div>
+  </div>
+</div>
+<div class="overlay" id="ad" hidden>
+  <div>
+    <span class="tag" id="adKind">ad break</span>
+    <h1>Your ad here</h1>
+    <p>This is a placeholder. A real ad network plugs in here later.</p>
+    <p id="adCount"></p>
+    <div class="buttons"><button class="go" id="adClose" type="button" hidden>Continue</button><button class="go ghost" id="adSkip" type="button" hidden>Skip (no reward)</button></div>
   </div>
 </div>
 <div class="overlay" id="paused" hidden>
