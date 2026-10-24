@@ -1,4 +1,4 @@
-// Hallway Skip — build step 9 prototype.
+// Hallway Skip — build step 10 prototype.
 // Step 1: hallway, joystick, a hall monitor that chases, a crowd that thins, and the bell.
 // Step 2: tap-to-interact and hiding spots: lockers, restrooms, classrooms (teacher and sub boot timers).
 // Step 3: security guard, the three-strike ladder, and the PA announcer.
@@ -8,6 +8,7 @@
 // Step 7: heat ("they know it's me") and the persistent security level ("they know something happened").
 // Step 8: the principal, friends and passing-period mini-games, and full risk scoring.
 // Step 9: humor pass (staff barks, squinting, caught-scene lines, excuses) and ad hooks (placeholder ads).
+// Step 10: thrown things hit people (points, more for staff, and a stun), two-stage paper airplane, step-on whoopee cushion, multi-slip banana.
 import * as THREE from "three";
 
 // =====================================================================================
@@ -304,16 +305,23 @@ const ROOM_TYPES = {
 };
 
 // Items are data. kind: "throw" (flick it), "ride" (flick to launch yourself), "instant" (tap to use).
+// hit: what happens when it hits someone. Hitting staff always pays more. Stun "flinch" = a stagger, "fall" = flat on the floor.
 const ITEM_TYPES = {
   paperAirplane: { label: "Paper airplane", icon: "✈️", kind: "throw", speed: [6, 11], pitchDeg: 8, gravity: 1.2, glide: true,
-                   perStudent: 10, crowdLandBonus: 50, crowdLandCount: 3, spawnWeight: 3 },
-  spitball:      { label: "Spitball", icon: "🫧", kind: "throw", uses: 3, speed: [12, 18], pitchDeg: 4, gravity: 6, hitPoints: 25, spawnWeight: 4 },
+                   // two-stage flight: soars over heads (fly-over points), then drops to head height (can hit people)
+                   cruiseY: 2.55, highSec: [0.45, 1.3], lowY: 1.35, sinkRate: 0.75, drag: 0.25,
+                   perStudent: 10, crowdLandBonus: 50, crowdLandCount: 3, spawnWeight: 3,
+                   hit: { student: 20, staff: 80, studentSec: 0.5, staffSec: 0.7, style: "flinch" } },
+  spitball:      { label: "Spitball", icon: "🫧", kind: "throw", uses: 3, speed: [12, 18], pitchDeg: 4, gravity: 6, spawnWeight: 4,
+                   hit: { student: 25, staff: 75, studentSec: 0.4, staffSec: 0.8, style: "flinch" } },
   bananaPeel:    { label: "Banana peel", icon: "🍌", kind: "throw", speed: [3, 8], pitchDeg: 35, gravity: 9.8, lifeSec: 40,
+                   afterSlipSec: 10, maxSlips: 5,   // stays down after the first slip so others can slip too
                    slipStaffSec: 2.5, slipStudentSec: 1.0, slipPlayerSec: 0.8, staffPoints: 150, studentPoints: 30, spawnWeight: 2 },
   whoopee:       { label: "Whoopee cushion", icon: "💨", kind: "throw", recoverable: true, speed: [3, 8], pitchDeg: 35, gravity: 9.8,
-                   noiseRadius: 14, lifeSec: 20, points: 50, spawnWeight: 2 },
+                   noiseRadius: 14, lifeSec: 20, points: 50, spawnWeight: 2 },   // goes off when someone steps on it (you too)
   basketball:    { label: "Basketball", icon: "🏀", kind: "throw", recoverable: true, speed: [5, 11], pitchDeg: 30, gravity: 9.8,
-                   bounces: [6, 8], restitution: 0.72, noiseRadius: 10, lingerSec: 5, bouncePoints: 5, spawnWeight: 2 },
+                   bounces: [6, 8], restitution: 0.72, noiseRadius: 10, lingerSec: 5, bouncePoints: 5, spawnWeight: 2,
+                   hit: { student: 35, staff: 140, studentSec: 1.0, staffSec: 1.8, style: "fall", minSpeed: 2 } },
   wheelieChair:  { label: "Wheelie chair", icon: "🪑", kind: "ride", rideSpeed: 9.5, maxRideSec: 3, dazeSec: 1.5, leftoverSec: 3,
                    studentPoints: 40, spawnWeight: 1 },
   gum:           { label: "Gum", icon: "🍬", kind: "instant", points: 100, line: "You stick gum under the water fountain. Gross. +havoc", spawnWeight: 3 },
@@ -1366,7 +1374,7 @@ function drawCrowd() {
   crowd.forEach((c, i) => {
     const hidden = c.mode === "gone" || c.mode === "spawning";
     crowdMatrix.position.set(c.x, hidden ? -10 : Math.abs(Math.sin(game.time * 8 + c.bob)) * 0.05, c.z);
-    crowdMatrix.rotation.set(c.slipT > 0 ? 1.35 : 0, c.heading, 0, "YXZ");
+    crowdMatrix.rotation.set(c.slipT <= 0 ? 0 : c.stunStyle === "flinch" ? 0.3 + Math.sin(game.time * 16) * 0.15 : 1.35, c.heading, 0, "YXZ");
     crowdMatrix.scale.setScalar(hidden ? 0.0001 : c.scale);
     crowdMatrix.updateMatrix();
     crowdBodies.setMatrixAt(i, crowdMatrix.matrix);
@@ -1448,9 +1456,10 @@ function updateStaff(dt, cover) {
     st.sweep += dt * T.sweepRate;
     let speed = 0;
     st.distractT = Math.max(0, st.distractT - dt);
-    if (st.stunT > 0) {   // slipped on a banana peel
+    if (st.stunT > 0) {   // slipped on a banana peel (flat on the floor), or hit by something (staggering)
       st.stunT -= dt;
-      st.mesh.rotation.z = st.stunT > 0 ? 1.3 : 0; st.mesh.position.set(st.x, 0, st.z);
+      st.mesh.rotation.z = st.stunT <= 0 ? 0 : st.stunStyle === "flinch" ? Math.sin(game.time * 16) * 0.28 : 1.3;
+      st.mesh.position.set(st.x, 0, st.z);
       st.cone.visible = st.stunT <= 0;
       continue;
     }
@@ -2082,38 +2091,47 @@ function launchVel(T, L) {
   return { vx: L.dx * Math.cos(p) * sp, vy: Math.sin(p) * sp, vz: L.dz * Math.cos(p) * sp };
 }
 const THROW_Y = 1.3;
-function release(a) {
-  const T = ITEM_TYPES[a.key], L = flickLaunch(a);
+function release(a, L = flickLaunch(a)) {
+  const T = ITEM_TYPES[a.key];
   player.heading = Math.atan2(L.dx, L.dz);
   consumeSlot(a.slot);
   cancelAim();
   if (T.kind === "ride") { startRide(L); return; }
   const o = spawnObject(a.key, "flying", player.x + L.dx * 0.45, THROW_Y, player.z + L.dz * 0.45, launchVel(T, L));
   if (T.bounces) o.maxBounces = Math.floor(rand(T.bounces[0], T.bounces[1] + 1));
+  if (a.key === "paperAirplane") initPlane(o, L.power);
   playBlip([300, 520], 0.06, "triangle", 0.05);   // whoosh
 }
 
 const ARC_N = 30;
-const arc = new THREE.Points(new THREE.BufferGeometry().setAttribute("position", new THREE.BufferAttribute(new Float32Array(ARC_N * 3), 3)),
-  new THREE.PointsMaterial({ color: 0xffe066, size: 0.26, transparent: true, opacity: 0.95, depthTest: false }));
+const arc = new THREE.Points(new THREE.BufferGeometry()
+    .setAttribute("position", new THREE.BufferAttribute(new Float32Array(ARC_N * 3), 3))
+    .setAttribute("color", new THREE.BufferAttribute(new Float32Array(ARC_N * 3), 3)),
+  new THREE.PointsMaterial({ vertexColors: true, size: 9, sizeAttenuation: false, transparent: true, opacity: 0.95, depthTest: false }));
+// arc colors: yellow normally; for the paper airplane, blue while it's up high (safe), orange once it's low enough to hit someone
+const ARC_YELLOW = new THREE.Color(0xffe066), ARC_HIGH = new THREE.Color(0x35c8ff), ARC_LOW = new THREE.Color(0xff6a1a);
 arc.visible = false; arc.renderOrder = 5; arc.frustumCulled = false; scene.add(arc);
 function updateAimPreview() {
   const a = game.aim;
   if (!a || a.id === null || Math.hypot(a.cx - a.sx, a.cy - a.sy) < CFG.items.minFlickPx) { arc.visible = false; return; }
-  const T = ITEM_TYPES[a.key], L = flickLaunch(a), pos = arc.geometry.attributes.position, step = 0.04;
+  const T = ITEM_TYPES[a.key], L = flickLaunch(a), pos = arc.geometry.attributes.position, col = arc.geometry.attributes.color, step = 0.04;
   const sim = { x: player.x + L.dx * 0.45, y: T.kind === "ride" ? 0.1 : THROW_Y, z: player.z + L.dz * 0.45, vx: 0, vy: 0, vz: 0 };
   if (T.kind === "ride") { sim.vx = L.dx * T.rideSpeed; sim.vz = L.dz * T.rideSpeed; } else Object.assign(sim, launchVel(T, L));
+  const plane = a.key === "paperAirplane";
+  if (plane) initPlane(sim, L.power);
+  const every = plane ? 6 : 4;   // the plane flies farther, so space its dots out more
   let i = 0, stopped = false;
-  for (let k = 0; k < 120 && i < ARC_N; k++) {
+  for (let k = 0; k < 200 && i < ARC_N; k++) {
     if (!stopped) {
-      if (T.kind !== "ride") { sim.vy -= T.gravity * step; if (T.glide) sim.vy = Math.max(sim.vy, -0.9); }
+      if (plane) planeStep(sim, step);
+      else if (T.kind !== "ride") { sim.vy -= T.gravity * step; if (T.glide) sim.vy = Math.max(sim.vy, -0.9); }
       const nx = sim.x + sim.vx * step, nz = sim.z + sim.vz * step;
       if (!lineOfSight(sim.x, sim.z, nx, nz) || sim.y + sim.vy * step < 0.05) stopped = true;
       else { sim.x = nx; sim.z = nz; sim.y += sim.vy * step; }
     }
-    if (k % 4 === 0) pos.setXYZ(i++, sim.x, sim.y, sim.z);
+    if (k % every === 0) { pos.setXYZ(i, sim.x, sim.y, sim.z); (plane ? (sim.stage === 1 ? ARC_HIGH : ARC_LOW) : ARC_YELLOW).toArray(col.array, i * 3); i++; }
   }
-  pos.needsUpdate = true; arc.visible = true;
+  pos.needsUpdate = true; col.needsUpdate = true; arc.visible = true;
 }
 
 // ---- physics and effects ----
@@ -2147,29 +2165,81 @@ function drawObjects() {
     o.mesh.position.set(o.x, o.y, o.z);
     if (o.state === "flying") o.mesh.rotation.y = Math.atan2(o.vx, o.vz);
     if (o.state === "pickup") { o.spin += 0.02; o.mesh.rotation.y = o.spin; o.mesh.position.y = o.y + 0.1 + Math.sin(o.spin * 2) * 0.05; }
-    const fading = (o.state === "pickup" || o.state === "resting") && o.life < CFG.items.blinkSec;
+    const fading = (o.state === "pickup" || o.state === "resting" || o.state === "trap") && o.life < CFG.items.blinkSec;
     o.mesh.visible = !(fading && Math.sin(o.life * 18) < 0);
     const reach = pickable(o) && game.state === "playing" && !player.hidden && Math.hypot(o.x - player.x, o.z - player.z) < CFG.items.pickupRange;
     o.ring.material.opacity = reach ? pulse : pickable(o) ? 0.12 : 0;
     o.ring.position.set(o.x, 0.03, o.z);
   }
 }
+// ---- thrown things hitting people: points (staff pay more) and a stun ----
+function stunStaff(st, sec, style) {
+  st.stunT = Math.max(st.stunT, sec); st.stunStyle = style;
+  if (st.state === "chase" || st.state === "bust") { st.state = "search"; st.searchT = 0; st.lastX = st.tx = player.x; st.lastZ = st.tz = player.z; }
+}
+// who: a staff member or a student. Returns true if it counted (each thing hits each person once).
+function hitPerson(o, who, isStaff) {
+  const Hh = o.T.hit;
+  o.hitSet ??= new Set();
+  if (o.hitSet.has(who)) return false;
+  o.hitSet.add(who);
+  if (isStaff) {
+    stunStaff(who, Hh.staffSec, Hh.style);
+    // a stagger leaves them looking your way; a fall gives you time to get away
+    if (Hh.style === "flinch") { who.suspicion = Math.max(who.suspicion, 0.6); who.distractT = 1.5; who.dX = player.x; who.dZ = player.z; }
+    bark(who, "slip", true);
+    playBlip([700, 300], 0.1, "sawtooth", 0.07);
+    havoc(o.key + "Staff", Hh.staff, `${o.T.label} hits the ${who.type.name}!`, { x: o.x, z: o.z, loud: Hh.style === "fall" });
+  } else {
+    who.slipT = Math.max(who.slipT, Hh.studentSec); who.stunStyle = Hh.style;
+    havoc(o.key + "Student", Hh.student, o.key === "spitball" ? "Spitball! Ew!" : `${o.T.label} hits a kid!`, { x: o.x, z: o.z });
+  }
+  return true;
+}
+// first person within reach of a thrown thing (students: r, staff: r + 0.05), or null
+function personHit(o, r, maxY) {
+  if (o.y > maxY) return null;
+  for (const st of staff) if (!(o.hitSet?.has(st)) && Math.hypot(st.x - o.x, st.z - o.z) < r + 0.05) return { who: st, isStaff: true };
+  for (const c of crowd) if (isActive(c) && !(o.hitSet?.has(c)) && Math.hypot(c.x - o.x, c.z - o.z) < r) return { who: c, isStaff: false };
+  return null;
+}
+
+// The paper airplane's two-stage flight (not realistic on purpose): it climbs and soars over heads,
+// then drops to head height and glides low, where it can hit people. Shared by the real flight and the arc preview.
+function initPlane(o, power) { const T = ITEM_TYPES.paperAirplane; o.stage = 1; o.stageT = T.highSec[0] + (T.highSec[1] - T.highSec[0]) * power; }
+function planeStep(o, dt) {
+  const T = ITEM_TYPES.paperAirplane;
+  o.stageT -= dt;
+  if (o.stage === 1 && o.stageT <= 0) o.stage = 2;
+  if (o.stage === 1) o.vy = (T.cruiseY - o.y) * 4;
+  else if (o.stage === 2) o.vy = o.y > T.lowY + 0.12 ? -3.2 : -T.sinkRate;
+  else o.vy = -2.5;   // stage 3: hit a wall, falling
+  const k = Math.exp(-T.drag * dt); o.vx *= k; o.vz *= k;
+}
+
 function flyObject(o, dt) {
   const T = o.T;
-  o.vy -= T.gravity * dt;
-  if (T.glide) o.vy = Math.max(o.vy, -0.9);
-  if (wallBounce(o, dt, T.bounces ? 0.8 : 0.15)) { if (T.bounces) bounceNoise(o); else if (T.glide) o.vy = Math.min(o.vy, -2.5); }
+  const plane = o.key === "paperAirplane" && !o.wild;
+  if (plane) planeStep(o, dt);
+  else { o.vy -= T.gravity * dt; if (T.glide) o.vy = Math.max(o.vy, -0.9); }
+  if (wallBounce(o, dt, T.bounces ? 0.8 : 0.15)) {
+    if (T.bounces) bounceNoise(o);
+    else if (plane) o.stage = 3;
+    else if (T.glide) o.vy = Math.min(o.vy, -2.5);
+  }
   o.x += o.vx * dt; o.z += o.vz * dt; o.y += o.vy * dt;
   if (o.y > LAYOUT.wallHeight - 0.2) { o.y = LAYOUT.wallHeight - 0.2; o.vy = -Math.abs(o.vy) * 0.5; }
-  if (o.key === "paperAirplane") { for (const c of crowd) if (isActive(c) && Math.hypot(c.x - o.x, c.z - o.z) < 1.3) o.flown.add(c); }
+  if (plane) {
+    if (o.y > 2.0) { for (const c of crowd) if (isActive(c) && Math.hypot(c.x - o.x, c.z - o.z) < 1.3) o.flown.add(c); }   // high: flying over
+    else if (o.stage >= 2) { const p = personHit(o, 0.5, 1.9); if (p) { hitPerson(o, p.who, p.isStaff); landObject(o); return; } }   // low: can hit
+  }
   if (o.key === "spitball") {
-    for (const c of crowd) if (isActive(c) && o.y < 1.7 && Math.hypot(c.x - o.x, c.z - o.z) < 0.45) {
-      c.slipT = 0.35; havoc("spitball", T.hitPoints, "Spitball! Ew!", { x: o.x, z: o.z }); removeObject(o); return;
-    }
-    for (const st of staff) if (o.y < 2.1 && Math.hypot(st.x - o.x, st.z - o.z) < 0.5) {   // bad idea
-      popup(`You hit the ${st.type.name}...`, "bad"); st.suspicion = Math.max(st.suspicion, 0.9);
-      st.distractT = 1.5; st.dX = player.x; st.dZ = player.z; removeObject(o); return;
-    }
+    const p = personHit(o, 0.45, 2.1);
+    if (p) { hitPerson(o, p.who, p.isStaff); removeObject(o); return; }
+  }
+  if (o.key === "basketball" && Math.hypot(o.vx, o.vz) > T.hit.minSpeed) {
+    const p = personHit(o, 0.5, 1.6);
+    if (p && hitPerson(o, p.who, p.isStaff)) { o.vx *= -0.35; o.vz *= -0.35; bounceNoise(o); }   // bounces off them and keeps going
   }
   const r = REST_Y[o.key] ?? 0.04;
   if (o.y <= r) {
@@ -2188,12 +2258,12 @@ function landObject(o) {
       const crowdLand = near >= T.crowdLandCount;
       if (o.wild) { o.state = "spent"; o.life = 1.5; break; }
       if (n) havoc("paperAirplane", n * T.perStudent + (crowdLand ? T.crowdLandBonus : 0), `Airplane over ${n} kid${n === 1 ? "" : "s"}${crowdLand ? " · crowd landing!" : ""}`, { x: o.x, z: o.z });
-      else popup("The airplane lands. Nobody notices.", "meh");
+      else if (!o.hitSet?.size) popup("The airplane lands. Nobody notices.", "meh");
       o.state = "spent"; o.life = 1.5; break;
     }
     case "spitball": o.state = "spent"; o.life = 0.4; break;
     case "bananaPeel": o.state = "trap"; o.life = T.lifeSec; o.mesh.rotation.y = Math.random() * 6; break;
-    case "whoopee": o.state = "resting"; o.life = T.lifeSec; cushionNoise(o); break;
+    case "whoopee": o.state = "resting"; o.life = T.lifeSec; o.armedAt = o.age + 0.4; break;   // waits for someone to step on it
     case "basketball": o.state = "rolling"; break;
     default: o.state = "resting"; o.life = 10;
   }
@@ -2203,6 +2273,10 @@ function rollObject(o, dt) {
   wallBounce(o, dt, 0.7);
   o.x += o.vx * dt; o.z += o.vz * dt; o.y = REST_Y[o.key] ?? 0.04;
   o.mesh.rotation.x += Math.hypot(o.vx, o.vz) * dt * 4;
+  if (o.T.hit && Math.hypot(o.vx, o.vz) > o.T.hit.minSpeed) {   // a fast-rolling ball still knocks people over
+    const p = personHit(o, 0.5, 1);
+    if (p && hitPerson(o, p.who, p.isStaff)) { o.vx *= -0.35; o.vz *= -0.35; }
+  }
   if (Math.hypot(o.vx, o.vz) < 0.25) { o.state = "resting"; o.life = o.T.lingerSec; }
 }
 function bounceNoise(o) {
@@ -2211,17 +2285,23 @@ function bounceNoise(o) {
   game.score += pts; popup(`+${pts} bounce`, "small");
   makeNoise(o.x, o.z, o.T.noiseRadius, false, o);
 }
-function cushionNoise(o) {
+function cushionNoise(o, who) {
   if (o.noiseCD > 0) return;
   o.noiseCD = 3;
   playBlip([95, 70, 110, 60], 0.09, "sawtooth", 0.1);   // pfffft
-  havoc("whoopee", o.T.points, "PFFFT!", { x: o.x, z: o.z, loud: true });
+  const label = who === "player" ? "PFFFT! You sat on your own cushion" : who?.type ? `PFFFT! The ${who.type.name} steps on it` : "PFFFT! A kid steps on it";
+  havoc("whoopee", o.T.points, label, { x: o.x, z: o.z, loud: true });
+  if (who?.type) bark(who, "slip", true);
   makeNoise(o.x, o.z, o.T.noiseRadius, true, o);
 }
+// Goes off when anyone steps on it: staff, a student, or you (then the staff come to see who it was).
 function stepOnCushion(o) {
-  if (o.age < 1 || o.noiseCD > 0) return;
+  if (o.age < (o.armedAt ?? 1) || o.noiseCD > 0) return;
   const on = (x, z, r) => Math.hypot(x - o.x, z - o.z) < r;
-  if (crowd.some((c) => isActive(c) && on(c.x, c.z, 0.5)) || staff.some((s) => on(s.x, s.z, 0.55)) || (!player.hidden && on(player.x, player.z, 0.45))) cushionNoise(o);
+  const st = staff.find((s) => on(s.x, s.z, 0.55));
+  if (st) { cushionNoise(o, st); return; }
+  if (crowd.some((c) => isActive(c) && on(c.x, c.z, 0.5))) { cushionNoise(o, null); return; }
+  if (!player.hidden && on(player.x, player.z, 0.45)) cushionNoise(o, "player");
 }
 // A noise: staff nearby either come to investigate (pull) or just turn and look.
 function makeNoise(x, z, radius, pull) {
@@ -2234,24 +2314,33 @@ function makeNoise(x, z, radius, pull) {
     } else { st.distractT = 2.2; st.dX = x; st.dZ = z; }
   }
 }
+// Anyone who steps on it slips (each person once). It stays down after the first slip, then vanishes
+// afterSlipSec later or after maxSlips slips, whichever comes first.
 function trapCheck(o) {
   const T = o.T;
+  o.hitSet ??= new Set();
+  const slipped = (who) => {
+    o.hitSet.add(who);
+    if (++o.slips === 1) o.life = Math.min(o.life, T.afterSlipSec);
+    if (o.slips >= T.maxSlips) removeObject(o);
+    return o.dead;
+  };
   for (const st of staff) {
-    if (st.type.stationary || st.stunT > 0 || Math.hypot(st.x - o.x, st.z - o.z) > 0.55) continue;
-    st.stunT = T.slipStaffSec; bark(st, "slip", true);
-    if (st.state === "chase" || st.state === "bust") { st.state = "search"; st.searchT = 0; st.lastX = st.tx = player.x; st.lastZ = st.tz = player.z; }
+    if (st.type.stationary || st.stunT > 0 || o.hitSet.has(st) || Math.hypot(st.x - o.x, st.z - o.z) > 0.55) continue;
+    stunStaff(st, T.slipStaffSec, "fall"); bark(st, "slip", true);
     playBlip([700, 300], 0.12, "sawtooth", 0.07);
     havoc("bananaStaff", T.staffPoints, `Wipeout! The ${st.type.name} slips`, { x: o.x, z: o.z, loud: true });
-    removeObject(o); return;
+    if (slipped(st)) return;
   }
   for (const c of crowd) {
-    if (!isActive(c) || c.slipT > 0 || Math.hypot(c.x - o.x, c.z - o.z) > 0.45) continue;
-    c.slipT = T.slipStudentSec;
+    if (!isActive(c) || c.slipT > 0 || o.hitSet.has(c) || Math.hypot(c.x - o.x, c.z - o.z) > 0.45) continue;
+    c.slipT = T.slipStudentSec; c.stunStyle = "fall";
     havoc("bananaStudent", T.studentPoints, "A kid slips!", { x: o.x, z: o.z });
-    if (++o.slips >= 2) { removeObject(o); return; }
+    if (slipped(c)) return;
   }
-  if (o.age > 1.2 && !player.hidden && !player.ride && player.slipT <= 0 && Math.hypot(player.x - o.x, player.z - o.z) < 0.45) {
-    player.slipT = T.slipPlayerSec; toast("You slipped on your own banana peel!"); removeObject(o);
+  if (o.age > 1.2 && !player.hidden && !player.ride && player.slipT <= 0 && !o.hitSet.has(player) && Math.hypot(player.x - o.x, player.z - o.z) < 0.45) {
+    player.slipT = T.slipPlayerSec; toast("You slipped on your own banana peel!");
+    slipped(player);
   }
 }
 
@@ -2274,7 +2363,7 @@ function updateRide(dt) {
   for (const st of staff) if (Math.hypot(st.x - player.x, st.z - player.z) < 0.8) { endRide(true); caught(st); return; }   // straight into staff: caught
   for (const c of crowd) {
     if (!isActive(c) || Math.hypot(c.x - player.x, c.z - player.z) > 0.6) continue;
-    c.slipT = 1.2; havoc("chairStudent", T.studentPoints, "Chair vs. student!", { x: c.x, z: c.z, loud: true });
+    c.slipT = 1.2; c.stunStyle = "fall"; havoc("chairStudent", T.studentPoints, "Chair vs. student!", { x: c.x, z: c.z, loud: true });
     endRide(true); return;
   }
   if (moved < want * 0.5 || R.t > T.maxRideSec) { endRide(true); return; }
@@ -2588,6 +2677,28 @@ if (debug) {   // a small test panel for phone playtests (only with ?debug in th
   add("School alert 100%", () => { game.security = 100; });
   add("Get a strike", () => { const st = staff.find((s) => !s.type.stationary) ?? staff[0], ph = game.phase; game.phase = "skipping"; caught(st); game.phase = ph; });
   add("Principal", () => { ensurePrincipal(true); });
+  // a spot a few meters ahead of the kid, in the hall
+  const ahead = (d) => { const x = player.x + Math.sin(player.heading) * d, z = player.z + Math.cos(player.heading) * d; const g = { x, z }; collide(g, 0.4); return g; };
+  add("Staff ahead (back turned)", () => {
+    const st = staff.find((s) => !s.type.stationary);
+    const g = ahead(6), pr = hallProject(g.x, g.z), H = HALLS[pr.h];
+    st.h = pr.h; st.t = pr.t; st.state = "patrol"; st.suspicion = 0; st.stunT = 0; st.pauseT = 0;
+    // walk away from the kid
+    const toA = Math.hypot(NODES[H.a].x - player.x, NODES[H.a].z - player.z), toB = Math.hypot(NODES[H.b].x - player.x, NODES[H.b].z - player.z);
+    st.to = toA > toB ? H.a : H.b;
+    if (st.route) { const i = st.route.indexOf(st.to); if (i >= 0) st.ri = i; }
+    hallPos(st.h, st.t, 0, st); st.facing = hallHeading(st.h, st.to === H.b ? 1 : -1);
+    player.invisT = Math.max(player.invisT, 1);
+  });
+  add("Kids ahead", () => {
+    let n = 0;
+    for (const c of crowd) {
+      if (c.friend || n >= 8) continue;
+      const g = ahead(4 + (n % 4) * 2.2), pr = hallProject(g.x, g.z), [lo, hi] = latLimits(pr.h, pr.t);
+      c.mode = "wander"; c.slipT = 0; c.leaveAt = 999; c.h = pr.h; c.t = pr.t; c.lat = c.targetLat = clamp(pr.lat + rand(-1, 1), lo, hi); c.retargetT = 99;
+      c.to = Math.random() < 0.5 ? HALLS[c.h].a : HALLS[c.h].b; c.speed = 0.3; hallPos(c.h, c.t, c.lat, c); n++;
+    }
+  });
   add("Friend here", () => {
     const c = crowd.find((k) => k.friend && k.mode !== "gone") ?? crowd.find((k) => k.friend);
     c.mode = "wander"; c.slipT = 0; c.friend.cd = 0; c.leaveAt = 999; c.x = player.x + Math.sin(player.heading) * 1.6; c.z = player.z + Math.cos(player.heading) * 1.6;
@@ -2617,6 +2728,21 @@ if (debug) {   // test-only helpers (only with ?debug in the URL)
     catchNow(k = 0) { caught(staff[k]); },
     sweepNow(i) { SPOTS[i].nextSweep = game.time; },
     give(key, uses) { return addItem(key, uses); },
+    // throw an item from the hotbar: yaw = world heading, power 0..1
+    throwAt(key, power, yaw) {
+      if (!game.hotbar.some((x) => x && x.key === key)) addItem(key);
+      const slot = game.hotbar.findIndex((x) => x && x.key === key);
+      game.aim = { slot, key }; release(game.aim, { dx: Math.sin(yaw), dz: Math.cos(yaw), power });
+      return objects.length ? objects[objects.length - 1].id : null;
+    },
+    obj(id) { const o = objects.find((x) => x.id === id); return o ? { state: o.state, x: o.x, y: o.y, z: o.z, stage: o.stage, slips: o.slips, life: o.life, hits: o.hitSet?.size ?? 0, flown: o.flown.size, dead: !!o.dead } : null; },
+    heading() { return player.heading; },
+    clearCrowd() { for (const c of crowd) c.mode = "gone"; },
+    // put staff k at (x, z) on patrol, facing away along the hall
+    staffAt(k, x, z, dirSign = 1) { const st = staff[k], pr = hallProject(x, z); st.h = pr.h; st.t = pr.t; st.state = "patrol"; st.suspicion = 0; st.stunT = 0; st.pauseT = 0;
+      st.to = dirSign > 0 ? HALLS[pr.h].b : HALLS[pr.h].a; hallPos(st.h, st.t, 0, st); st.facing = hallHeading(st.h, dirSign); },
+    crowdNear(r) { return crowd.filter((c) => isActive(c) && Math.hypot(c.x - player.x, c.z - player.z) < r).map((c) => ({ i: crowd.indexOf(c), x: c.x, z: c.z, slipT: c.slipT })); },
+    crowdTo(i, x, z) { const c = crowd[i]; const pr = hallProject(x, z); c.mode = "wander"; c.slipT = 0; c.leaveAt = 999; c.h = pr.h; c.t = pr.t; c.lat = c.targetLat = pr.lat; c.retargetT = 99; c.speed = 0.0001; c.x = x; c.z = z; },
     roomInfo() { return SPOTS.filter((sp) => sp.kind === "classroom").map((sp) => ({ room: sp.room, type: sp.roomType, teacher: sp.teacher, loot: [...sp.loot], i: SPOTS.indexOf(sp) })); },
     hideT() { return player.hideT; },
     friends() { return crowd.filter((c) => c.friend).map((c) => ({ offer: c.friend.offer, cd: c.friend.cd, x: c.x, z: c.z, mode: c.mode, i: crowd.indexOf(c) })); },
