@@ -1,4 +1,4 @@
-// Hallway Skip — build step 7 prototype.
+// Hallway Skip — build step 8 prototype.
 // Step 1: hallway, joystick, a hall monitor that chases, a crowd that thins, and the bell.
 // Step 2: tap-to-interact and hiding spots: lockers, restrooms, classrooms (teacher and sub boot timers).
 // Step 3: security guard, the three-strike ladder, and the PA announcer.
@@ -6,6 +6,7 @@
 // Step 5: four-slot hotbar, tap-then-flick throwing with an arc preview, and the first seven items.
 // Step 6: rooms as shops (loot tables by room type, grabbing costs boot time, teachers can call security) and despawn timers.
 // Step 7: heat ("they know it's me") and the persistent security level ("they know something happened").
+// Step 8: the principal, friends and passing-period mini-games, and full risk scoring.
 import * as THREE from "three";
 
 // =====================================================================================
@@ -132,6 +133,24 @@ const CFG = {
     lastDayScoreMult: 2,
   },
 
+  // Friends in the crowd raise a hand during passing periods: tap their bubble.
+  friends: {
+    count: 4,
+    offerRange: 9,                // bubbles show within this distance (and line of sight)
+    interactRange: 2.6,           // ...but you have to be this close to take them up on it
+    offers: [["highFive", 4], ["gumTrade", 2], ["fakePass", 1]],
+    highFivePoints: 75,           // "meeting a friend" risk bonus
+    cooldownSec: 20,
+  },
+  airplanes: { everySec: [5, 10], catchRadius: 1.1, catchPoints: 10 },   // kids throwing paper airplanes during passing
+  // Risk scoring. One score number; these multiply it or add flat bonuses.
+  scoring: {
+    streakStepSec: 15, streakStep: 0.25, streakMax: 3,   // unseen streak: +0.25x per 15 s nobody has eyes on you, up to 3x
+    nearMissRadius: 2.2,          // a staff member this close who DOESN'T see you...
+    nearMissSec: 5, nearMissMult: 2, nearMissCooldownSec: 8,   // ...doubles your points for 5 s
+    hidingNearRadius: 4, hidingNearPerSec: 8,   // hiding with staff this close: points per second, per staff member
+  },
+
   footsteps: { hearRange: 20, patrolInterval: 0.55, chaseInterval: 0.3, volume: 0.55 },
 
   strikes: {
@@ -171,6 +190,17 @@ const STAFF_TYPES = {
     vestColor: 0x26364f, hatColor: 0x111111, scale: 1.2,
     caughtLine: "\"Let's go, chief. Walk with me.\"",
   },
+  principal: {
+    name: "principal",
+    patrolSpeed: 1.7, chaseSpeed: 3.5,        // slow...
+    visionRange: 14, visionHalfAngleDeg: 40,  // ...but sees far
+    sweepDeg: 30, sweepRate: 0.5,
+    roamTurnSec: [10, 20],
+    notice: 1.5,
+    callsBackup: true, backupAll: true,       // spotting you summons every staff member
+    vestColor: 0x3b3f4a, hatColor: null, scale: 1.22,
+    caughtLine: "\"My office. Now.\"",
+  },
   hallTeacher: {
     name: "teacher",
     stationary: true,                          // stands at their classroom door
@@ -197,6 +227,8 @@ const PA_LINES = {
   lastPeriod: ["Sixth period, everyone. Almost there. Some of you more than others."],
   newDay:     ["Good morning! It's day {d}. Security has been, quote, 'beefed up.'", "Welcome to day {d}. Staff have been briefed about a certain hoodie."],
   runOver:    ["Gray hoodie, your parents are on line two."],
+  principalOut: ["This is Principal Hargrove. I will personally be walking the halls today.", "Good news, students: your principal is joining you in the hallways. Bad news: so is your principal."],
+  principalSpots: ["ALL STAFF. I HAVE EYES ON THE HOODIE. {hall}.", "Everyone to the {hall}. Now."],
   heatHigh:   ["Attention staff: you may now detain students in the halls between classes.", "Staff, eyes open during passing periods. You know who you're looking for."],
   securityUp: ["We've had reports of... noises. All staff, stay alert.", "Whoever is responsible for the whoopee cushions: we will find you."],
   lastDay:    ["This is your principal speaking. Today, the hoodie goes down.", "Lockdown drill. Just kidding. Unless...?"],
@@ -638,6 +670,10 @@ const markersEl = document.getElementById("markers");
 function spawnStaff(typeKey, place) {
   const T = STAFF_TYPES[typeKey];
   const mesh = makePerson({ body: T.vestColor, skin: pick(SKIN_COLORS), scale: T.scale, hat: T.hatColor });
+  if (typeKey === "principal") {   // a red tie
+    const tie = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.4, 0.04), lambert(0xc0392b));
+    tie.position.set(0, 0.85, 0.3); mesh.add(tie);
+  }
   if (T.stationary) {   // a coffee mug, so teachers read differently from a distance
     const mug = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.14, 6), lambert(0xffffff));
     mug.position.set(0.3, 0.85, 0.2); mesh.add(mug);
@@ -827,7 +863,8 @@ function readInput() {
 // =====================================================================================
 const game = { state: "title", day: 1, period: 1, phase: "passing", phaseT: 0, score: 0, time: 0,
   strikes: 0, highAlert: false, periodScore: 0, periodsSkipped: 0, dayPeriodsSkipped: 0, sceneT: 0, sceneEnd: null,
-  lockerUses: 0, pendingOffice: false, hotbar: [], aim: null, havocCount: {}, heat: 0, heatPending: 0, security: 0, lastDay: false };
+  lockerUses: 0, pendingOffice: false, hotbar: [], aim: null, havocCount: {}, heat: 0, heatPending: 0, security: 0, lastDay: false,
+  unseenT: 0, nearMissT: 0, passShield: false, nextPlaneT: 0, nerveAcc: 0 };
 const cam = { yaw: 0 };
 const $ = (id) => document.getElementById(id);
 const ui = { phase: $("phase"), label: $("phaseLabel"), timer: $("timer"), score: $("score"), uses: $("uses"), banner: $("banner"), fps: $("fps"),
@@ -892,6 +929,8 @@ function morningSetup() {
   resetSpotsForPeriod();
   for (const sp of SPOTS) if (sp.kind === "restroom") sp.nextSweep = game.time + rand(12, CFG.hiding.restroomSweepEverySec);
   startPassing(true);
+  if (game.strikes >= 2) ensurePrincipal(false);
+  for (const c of crowd) if (c.friend) c.friend.cd = rand(0, 6);
 }
 
 function resetGame(save = null) {
@@ -899,6 +938,7 @@ function resetGame(save = null) {
   game.strikes = save?.strikes ?? 0; game.highAlert = save?.highAlert ?? false;
   game.periodScore = 0; game.periodsSkipped = save?.periodsSkipped ?? 0; game.dayPeriodsSkipped = 0;
   game.security = save?.security ?? 0; game.lastDay = save?.lastDay ?? false; game.heat = game.heatPending = 0;
+  game.unseenT = 0; game.nearMissT = 0; game.passShield = false;
   paLast = {};
   morningSetup();
 }
@@ -916,7 +956,7 @@ function resetSpotsForPeriod() {
 
 function startPassing(first) {
   game.phase = "passing"; game.phaseT = 0; game.periodScore = 0;
-  game.havocCount = {};
+  game.havocCount = {}; game.nextPlaneT = rand(...CFG.airplanes.everySec);
   spawnHallItems();
   const P = phaseLen("passing"), doors = DOOR_SPOTS();
   for (const c of crowd) {
@@ -1008,6 +1048,12 @@ function caught(st) {
   cancelAim();
   if (player.ride) endRide(false);
   if (game.phase === "passing" && game.heat < CFG.heat.passingCatchAt && !game.lastDay) { shoo(st); return; }
+  game.unseenT = 0;
+  if (game.passShield) {   // the fake pass: one free get-out
+    game.passShield = false;
+    shoo(st, `You flash the fake pass. The ${st.type.name} squints at it... "Fine. Go."`);
+    return;
+  }
   game.strikes++;
   ui.hide.hidden = true;
   releaseControls();
@@ -1046,10 +1092,10 @@ function caught(st) {
 }
 
 // Caught during a passing period while heat is low: no strike, just "get to class!" and a little heat.
-function shoo(st) {
-  toast(`The ${st.type.name}: "Get to class!" (No strike: heat is low during passing.)`, 2.6);
+function shoo(st, line = null) {
+  toast(line ?? `The ${st.type.name}: "Get to class!" (No strike: heat is low during passing.)`, 2.6);
   playBlip([520, 390], 0.1, "triangle", 0.07);
-  addHeat(CFG.heat.shooHeat);
+  if (!line) addHeat(CFG.heat.shooHeat);
   for (const o of staff) {
     if (o.type.stationary) { o.suspicion = 0; o.alarmT = Math.max(o.alarmT, 3); continue; }
     if (o.state !== "patrol") { o.state = "return"; setReturnPoint(o); }
@@ -1066,7 +1112,8 @@ function endScene() {
     // sent back out from the office, by the entrance
     const { h, t } = LAYOUT.entrance, side = HALLS[h].outerSide, p = hallPos(h, t, wallLat(h, side) - side * 0.8);
     player.x = p.x; player.z = p.z; player.heading = hallHeading(h, -1); cam.yaw = player.heading;
-    banner("HIGH ALERT<small>Staff see farther and move faster for the rest of the day.</small>", 2.6);
+    banner("HIGH ALERT<small>Staff see farther and move faster for the rest of the day. The principal is in the halls.</small>", 2.8);
+    ensurePrincipal(true);
   }
   if (game.strikes === CFG.strikes.max - 1) setTimeout(() => pa("lastStrike"), 4800);
   player.invisT = CFG.strikes.afterStrikeGraceSec;
@@ -1457,13 +1504,13 @@ function callBackup(caller, announce) {
   if (announce) playBlip([1400, 1100, 1400], 0.05, "square", 0.05);   // radio chirp
   const others = staff.filter((o) => o !== caller && !o.type.stationary && o.state !== "chase" && o.state !== "bust")
     .map((o) => ({ o, d: Math.hypot(o.x - player.x, o.z - player.z) }))
-    .filter((e) => e.d < CFG.backup.range).sort((a, b) => a.d - b.d).slice(0, CFG.backup.maxResponders);
+    .filter((e) => caller.type.backupAll || e.d < CFG.backup.range).sort((a, b) => a.d - b.d).slice(0, caller.type.backupAll ? 99 : CFG.backup.maxResponders);
   for (const { o, d } of others) {
     o.state = "search"; o.suspicion = 0.6;
     o.searchT = -Math.min(16, d / (o.type.chaseSpeed * 0.8));   // time to get there before they give up
     o.lastX = o.tx = player.x; o.lastZ = o.tz = player.z;
   }
-  if (announce) pa("backup", null, null, { hall: HALLS[hallProject(player.x, player.z).h].name });
+  if (announce) pa(caller.type.backupAll ? "principalSpots" : "backup", null, null, { hall: HALLS[hallProject(player.x, player.z).h].name });
 }
 
 function startChase(st) {
@@ -1546,7 +1593,8 @@ function updateHud() {
   const left = Math.max(0, Math.ceil(phaseLen() - game.phaseT));
   const label = `DAY ${game.day} · PERIOD ${game.period} · ${game.phase === "passing" ? "PASSING" : "SKIPPING"}`;
   const label2 = game.lastDay ? label.replace(`DAY ${game.day}`, "LAST DAY") : label;
-  const key = label2 + left + Math.floor(game.score) + "|" + game.lockerUses + "|" + game.strikes + game.highAlert + "|" + Math.round(game.heat) + "|" + Math.round(game.security);
+  const multTxt = [streakMult() > 1 ? `STREAK ×${streakMult()}` : "", game.nearMissT > 0 ? "NEAR MISS ×2" : "", game.lastDay ? "LAST DAY ×2" : ""].filter(Boolean).join(" · ");
+  const key = multTxt + game.passShield + label2 + left + Math.floor(game.score) + "|" + game.lockerUses + "|" + game.strikes + game.highAlert + "|" + Math.round(game.heat) + "|" + Math.round(game.security);
   if (key === lastHud) return;
   lastHud = key;
   ui.label.textContent = label2;
@@ -1557,6 +1605,8 @@ function updateHud() {
   ui.score.textContent = Math.floor(game.score);
   ui.uses.textContent = `LOCKERS ×${game.lockerUses}`;
   ui.uses.classList.toggle("out", game.lockerUses === 0);
+  $("mult").textContent = multTxt;
+  $("passIcon").hidden = !game.passShield;
   $("strikes").innerHTML = strikeDotsHtml() + (game.highAlert ? `<b>HIGH ALERT</b>` : "");
 }
 
@@ -1564,7 +1614,7 @@ function update(dt) {
   game.time += dt; game.phaseT += dt;
   if (game.phase === "passing" && game.phaseT >= phaseLen("passing")) startSkipping();
   else if (game.phase === "skipping") {
-    const pts = (CFG.pointsPerPeriod / phaseLen("skipping")) * dt * scoreMult();
+    const pts = (CFG.pointsPerPeriod / phaseLen("skipping")) * dt * scoreMult() * streakMult();
     game.score += pts; game.periodScore += pts;
     if (game.phaseT >= phaseLen("skipping")) { periodSurvived(); if (game.state !== "playing") return; }
   }
@@ -1572,7 +1622,7 @@ function update(dt) {
   updateRestrooms();
   updateCrowd(dt);
   updateStaff(dt, crowdCoverCount());
-  if (game.state === "playing") { updateObjects(dt); updateHeat(dt); }
+  if (game.state === "playing") { updateObjects(dt); updateHeat(dt); updateRisk(dt); updateFriends(dt); updateAirplanes(dt); }
 }
 
 // =====================================================================================
@@ -1756,6 +1806,11 @@ const projA = new THREE.Vector3(), projB = new THREE.Vector3();
 function handleTap(x, y) {
   if (player.hidden) return;
   if (tryTapPickup(x, y)) return;
+  for (const o of objects) {   // tap a paper airplane in flight to catch it
+    if (!o.wild || o.state !== "flying" || Math.hypot(o.x - player.x, o.z - player.z) > 3) continue;
+    projA.set(o.x, o.y, o.z).project(camera);
+    if (Math.hypot(x - ((projA.x + 1) / 2) * window.innerWidth, y - ((1 - projA.y) / 2) * window.innerHeight) < CFG.interact.tapRadiusPx) { catchPlane(o); return; }
+  }
   const w = window.innerWidth, h = window.innerHeight;
   let best = null, bd = CFG.interact.tapRadiusPx;
   for (const sp of SPOTS) {
@@ -2049,6 +2104,7 @@ function landObject(o) {
     case "paperAirplane": {
       const n = o.flown.size, near = crowd.filter((c) => isActive(c) && Math.hypot(c.x - o.x, c.z - o.z) < 2.5).length;
       const crowdLand = near >= T.crowdLandCount;
+      if (o.wild) { o.state = "spent"; o.life = 1.5; break; }
       if (n) havoc("paperAirplane", n * T.perStudent + (crowdLand ? T.crowdLandBonus : 0), `Airplane over ${n} kid${n === 1 ? "" : "s"}${crowdLand ? " · crowd landing!" : ""}`, { x: o.x, z: o.z });
       else popup("The airplane lands. Nobody notices.", "meh");
       o.state = "spent"; o.life = 1.5; break;
@@ -2177,7 +2233,8 @@ function tryTapPickup(x, y) {
 }
 
 // ---- havoc: flat points for mischief, worth less each time you repeat it in a period ----
-function scoreMult() { return game.lastDay ? CFG.security.lastDayScoreMult : 1; }
+function scoreMult() { return (game.lastDay ? CFG.security.lastDayScoreMult : 1) * (game.nearMissT > 0 ? CFG.scoring.nearMissMult : 1); }
+function streakMult() { const S = CFG.scoring; return Math.min(S.streakMax, 1 + Math.floor(game.unseenT / S.streakStepSec) * S.streakStep); }
 function havoc(kind, base, label, opts = {}) {
   const n = game.havocCount[kind] ?? 0;
   game.havocCount[kind] = n + 1;
@@ -2223,6 +2280,130 @@ function popup(text, cls = "") {
 }
 
 // =====================================================================================
+// Step 8: the principal, friends and passing-period mini-games, risk scoring
+// =====================================================================================
+function ensurePrincipal(announce) {
+  if (staff.some((s) => s.key === "principal")) return;
+  spawnStaff("principal", pickStaffPlace("principal"));
+  if (announce) setTimeout(() => game.state === "playing" && pa("principalOut"), 4000);
+}
+
+// One score number. Flat bonuses that aren't havoc (no heat): friends, near misses, nerve.
+function addScore(pts, label, cls = "") {
+  pts = Math.round(pts * scoreMult());
+  game.score += pts;
+  if (label) popup(`+${pts} ${label}`, cls);
+  return pts;
+}
+
+function updateRisk(dt) {
+  const S = CFG.scoring;
+  // unseen streak: anyone with eyes on you (and starting to notice) resets it
+  const watched = !player.hidden && staff.some((st) => (st.suspicion > 0.3 || st.state === "chase") && canSeePlayer(st, 1.4, false).seen);
+  game.unseenT = watched ? 0 : game.unseenT + dt;
+  // near miss: staff within arm's reach who don't see you
+  game.nearMissT = Math.max(0, game.nearMissT - dt);
+  if (!player.hidden && player.invisT <= 0) {
+    for (const st of staff) {
+      st.nearCD = Math.max(0, (st.nearCD ?? 0) - dt);
+      if (st.type.stationary || st.nearCD > 0 || st.stunT > 0 || st.state === "chase" || st.state === "bust") continue;
+      if (Math.hypot(st.x - player.x, st.z - player.z) > S.nearMissRadius || canSeePlayer(st, 1, true).seen) continue;
+      st.nearCD = S.nearMissCooldownSec;
+      if (game.nearMissT <= 0) popup(`NEAR MISS! ×${S.nearMissMult}`, "item");
+      game.nearMissT = S.nearMissSec;
+    }
+  }
+  // hiding close to staff: nerves of steel
+  if (player.hidden) {
+    const n = staff.filter((st) => Math.hypot(st.x - player.x, st.z - player.z) < S.hidingNearRadius).length;
+    game.nerveAcc += n * S.hidingNearPerSec * dt;
+    if (game.nerveAcc >= 8) { addScore(game.nerveAcc, "nerves of steel", "small"); game.nerveAcc = 0; }
+  } else game.nerveAcc = 0;
+}
+
+// ---- friends: a few kids in the crowd who raise a hand during passing periods ----
+const friendsEl = $("friends");
+const OFFER_ICONS = { highFive: "✋", gumTrade: "🍬?", fakePass: "🎫" };
+const OFFER_LABELS = { highFive: "High five", gumTrade: "Trade gum", fakePass: "Fake pass" };
+{
+  const c = new THREE.Color();
+  crowd.slice(0, CFG.friends.count).forEach((k, i) => {
+    k.friend = { offer: pickWeighted(CFG.friends.offers), cd: 0, el: document.createElement("button") };
+    k.friend.el.className = "fbubble"; k.friend.el.type = "button";
+    k.friend.el.addEventListener("pointerdown", (e) => { e.preventDefault(); e.stopPropagation(); friendTap(k); });
+    friendsEl.appendChild(k.friend.el);
+    crowdBodies.setColorAt(i, c.setHex(0xf5f5f5));   // friends wear white tees
+  });
+}
+function friendTap(c) {
+  const F = c.friend, R = CFG.friends;
+  if (game.state !== "playing" || F.cd > 0) return;
+  if (Math.hypot(c.x - player.x, c.z - player.z) > R.interactRange) { toast("Get closer!"); return; }
+  if (F.offer === "highFive") {
+    addScore(R.highFivePoints, "High five!", "item"); playBlip([880, 1320], 0.06, "square", 0.06);
+  } else if (F.offer === "gumTrade") {
+    const i = game.hotbar.findIndex((s) => s && s.key === "gum");
+    if (i < 0) { toast("Friend: \"Got any gum?\" (Bring them gum to trade.)"); return; }
+    const got = pickWeighted(Object.entries(ITEM_TYPES).filter(([k]) => k !== "gum").map(([k, T]) => [k, T.spawnWeight]));
+    game.hotbar[i] = { key: got, uses: ITEM_TYPES[got].uses ?? 1 }; renderHotbar();
+    popup(`Traded gum for ${ITEM_TYPES[got].icon} ${ITEM_TYPES[got].label}`, "item"); playBlip([660, 990], 0.06, "triangle", 0.06);
+  } else if (F.offer === "fakePass") {
+    if (game.passShield) { toast("You already have a fake pass."); return; }
+    game.passShield = true; popup("🎫 Fake pass! Your next catch doesn't count.", "item"); playBlip([523, 659, 784], 0.08, "triangle", 0.06);
+  }
+  F.cd = R.cooldownSec; F.offer = pickWeighted(R.offers);
+}
+function updateFriends(dt) {
+  for (const c of crowd) if (c.friend) c.friend.cd = Math.max(0, c.friend.cd - dt);
+}
+function drawFriends() {
+  const w = window.innerWidth, h = window.innerHeight, R = CFG.friends;
+  for (const c of crowd) {
+    const F = c.friend; if (!F) continue;
+    const d = Math.hypot(c.x - player.x, c.z - player.z);
+    let show = game.state === "playing" && game.phase === "passing" && isActive(c) && c.slipT <= 0 && F.cd <= 0 && d < R.offerRange && !player.hidden;
+    if (show) show = lineOfSight(player.x, player.z, c.x, c.z);
+    if (show) {
+      projA.set(c.x, 1.85, c.z).applyMatrix4(camera.matrixWorldInverse); show = projA.z < -0.2;
+      if (show) {
+        projA.set(c.x, 1.85, c.z).project(camera);
+        show = Math.abs(projA.x) < 1 && Math.abs(projA.y) < 1;
+        F.el.style.left = ((projA.x + 1) / 2) * w + "px"; F.el.style.top = ((1 - projA.y) / 2) * h + "px";
+      }
+    }
+    F.el.style.display = show ? "block" : "none";
+    if (show) {
+      const txt = OFFER_ICONS[F.offer], near = d < R.interactRange;
+      if (F.el.dataset.t !== txt + near) { F.el.dataset.t = txt + near; F.el.textContent = txt; F.el.title = OFFER_LABELS[F.offer]; F.el.classList.toggle("near", near); }
+    }
+  }
+}
+
+// ---- paper airplanes: kids toss them across the hall during passing; walk into one (or tap it) to catch it ----
+function updateAirplanes(dt) {
+  if (game.phase === "passing") {
+    game.nextPlaneT -= dt;
+    if (game.nextPlaneT <= 0) {
+      game.nextPlaneT = rand(...CFG.airplanes.everySec);
+      const throwers = crowd.filter((c) => isActive(c) && !c.friend && c.slipT <= 0 && (() => { const d = Math.hypot(c.x - player.x, c.z - player.z); return d > 4 && d < 11; })() && lineOfSight(c.x, c.z, player.x, player.z));
+      if (throwers.length && !player.hidden) {
+        const c = pick(throwers), tx = player.x + rand(-0.6, 0.6), tz = player.z + rand(-0.6, 0.6), d = Math.hypot(tx - c.x, tz - c.z), sp = 5;
+        spawnObject("paperAirplane", "flying", c.x, 1.6, c.z, { vx: (tx - c.x) / d * sp, vz: (tz - c.z) / d * sp, vy: 0.1, wild: true });
+      }
+    }
+  }
+  for (const o of objects) {
+    if (!o.wild || o.state !== "flying" || player.hidden) continue;
+    if (o.y < 2.3 && Math.hypot(o.x - player.x, o.z - player.z) < CFG.airplanes.catchRadius) catchPlane(o);
+  }
+}
+function catchPlane(o) {
+  if (!addItem("paperAirplane")) return;
+  addScore(CFG.airplanes.catchPoints, "Caught it!", "item");
+  removeObject(o);
+}
+
+// =====================================================================================
 // Main loop
 // =====================================================================================
 function resize() {
@@ -2253,6 +2434,7 @@ renderer.setAnimationLoop(() => {
   drawObjects();
   updateMarkers();
   updateSpotsUI();
+  drawFriends();
   updateHud();
   renderer.render(scene, camera);
   if (debug) { fpsAcc += dt; fpsN++; if (fpsAcc > 0.5) { ui.fps.textContent = `${Math.round(fpsN / fpsAcc)} fps`; fpsAcc = fpsN = 0; } }
@@ -2281,6 +2463,13 @@ if (debug) {   // test-only helpers (only with ?debug in the URL)
     give(key, uses) { return addItem(key, uses); },
     roomInfo() { return SPOTS.filter((sp) => sp.kind === "classroom").map((sp) => ({ room: sp.room, type: sp.roomType, teacher: sp.teacher, loot: [...sp.loot], i: SPOTS.indexOf(sp) })); },
     hideT() { return player.hideT; },
+    friends() { return crowd.filter((c) => c.friend).map((c) => ({ offer: c.friend.offer, cd: c.friend.cd, x: c.x, z: c.z, mode: c.mode, i: crowd.indexOf(c) })); },
+    friendTo(i, offer) { const c = crowd[i]; c.friend.offer = offer; c.friend.cd = 0; c.slipT = 0; c.mode = "wander"; c.x = player.x + 1.5; c.z = player.z; const pr = hallProject(c.x, c.z); c.h = pr.h; c.t = pr.t; c.lat = pr.lat; c.leaveAt = 999; },
+    tapFriend(i) { friendTap(crowd[i]); },
+    risk() { return { unseenT: game.unseenT, streak: streakMult(), nearMissT: game.nearMissT, passShield: game.passShield }; },
+    setUnseen(t) { game.unseenT = t; },
+    spawnPrincipal() { ensurePrincipal(true); return staff.findIndex((s) => s.key === "principal"); },
+    forcePlane() { game.nextPlaneT = 0; },
     setHeat(h, s) { if (h != null) { game.heat = h; game.heatPending = 0; } if (s != null) game.security = s; },
     heat() { return { heat: game.heat, pending: game.heatPending, security: game.security, lastDay: game.lastDay }; },
     objects() { return objects.map((o) => ({ key: o.key, state: o.state, x: o.x, y: o.y, z: o.z, bounces: o.bounces, life: o.life })); },

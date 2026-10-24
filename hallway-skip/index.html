@@ -23,6 +23,15 @@
   #uses { position: absolute; top: calc(max(10px, env(safe-area-inset-top)) + 30px); right: max(14px, env(safe-area-inset-right));
     font-size: 12px; font-weight: 800; letter-spacing: .08em; color: #b9e3c6; text-shadow: 0 2px 4px rgba(0,0,0,.6); }
   #uses.out { color: #ff8f8f; }
+  #mult { position: absolute; top: calc(max(10px, env(safe-area-inset-top)) + 46px); right: max(14px, env(safe-area-inset-right));
+    font-size: 12px; font-weight: 900; letter-spacing: .06em; color: #ffe066; text-shadow: 0 2px 4px rgba(0,0,0,.7); }
+  #passIcon { position: absolute; top: max(8px, env(safe-area-inset-top)); left: calc(max(14px, env(safe-area-inset-left)) + 70px); font-size: 18px; }
+  #passIcon[hidden] { display: none; }
+  .fbubble { position: absolute; transform: translate(-50%, -100%); pointer-events: auto; border: 0; border-radius: 16px; padding: 5px 10px;
+    background: rgba(255,255,255,.92); color: #1d2230; font: 800 18px system-ui, sans-serif; display: none; cursor: pointer;
+    box-shadow: 0 2px 6px rgba(0,0,0,.4); animation: bob 1s ease-in-out infinite; }
+  .fbubble.near { background: #ffd36b; }
+  @keyframes bob { 50% { margin-top: -4px; } }
   #strikes { position: absolute; top: max(12px, env(safe-area-inset-top)); left: max(14px, env(safe-area-inset-left));
     display: flex; gap: 6px; align-items: center; }
   #strikes span, #strikeDots span { width: 14px; height: 14px; border-radius: 50%; border: 2px solid rgba(255,255,255,.7); display: inline-block; }
@@ -163,6 +172,9 @@
   <div id="pa"><span class="who">PA ANNOUNCEMENT</span><span id="paText"></span></div>
   <div id="score">0</div>
   <div id="uses">LOCKERS ×3</div>
+  <div id="mult"></div>
+  <div id="passIcon" hidden title="Fake pass: your next catch doesn't count">🎫</div>
+  <div id="friends"></div>
   <div id="banner"></div>
   <div id="tags"></div>
   <div id="markers"></div>
@@ -191,7 +203,7 @@
 
 <div class="overlay" id="title">
   <div>
-    <span class="tag">prototype · build step 7</span>
+    <span class="tag">prototype · build step 8</span>
     <h1>Hallway Skip</h1>
     <p>Skip class. Don't get caught.</p>
     <div class="buttons">
@@ -210,6 +222,7 @@
     <p>Security guards have narrow flashlight vision, are faster than you for a few seconds, and call for backup. Teachers at their doors yell for help and grab you if you walk past.</p>
     <p>Items turn up in the halls: tap one to pick it up (four slots, right edge). Tap a slot, then flick to throw. Banana peels trip staff, whoopee cushions and basketballs make noise that pulls staff away, the wheelie chair launches you down the hall.</p>
     <p>HEAT (they know it's you) rises when staff see you making mischief or running away, and drops at every bell. Above the line, staff can catch you during passing periods too. SCHOOL ALERT (they know something happened) rises with loud mischief and only drops overnight. Max it out and tomorrow is your LAST DAY.</p>
+    <p>Friends (white tees) raise a hand during passing periods: get close and tap the bubble for a high five, a gum trade, or a fake pass that cancels your next catch. Kids toss paper airplanes: walk into one to catch it. Points multiply while nobody has eyes on you (streak), and double for a few seconds after a near miss. After your second strike, the principal walks the halls.</p>
     <p>Three strikes and you're out. Survive six periods to finish the day. Each day gets harder. Your run saves at every bell.</p>
     <p class="keys">Phone: left thumb moves, drag on the right side to look around.<br>Desktop: WASD or arrow keys move, drag the mouse to look, click or E to hide.</p>
     <button class="go" id="aboutClose" type="button">Got it</button>
