@@ -1,8 +1,9 @@
-// Hallway Skip — build step 4 prototype.
+// Hallway Skip — build step 5 prototype.
 // Step 1: hallway, joystick, a hall monitor that chases, a crowd that thins, and the bell.
 // Step 2: tap-to-interact and hiding spots: lockers, restrooms, classrooms (teacher and sub boot timers).
 // Step 3: security guard, the three-strike ladder, and the PA announcer.
 // Step 4: the six-period day, escalating days, hall teachers, save at the bell. Figure-8 floor plan.
+// Step 5: four-slot hotbar, tap-then-flick throwing with an arc preview, and the first seven items.
 import * as THREE from "three";
 
 // =====================================================================================
@@ -86,6 +87,18 @@ const CFG = {
     bootGraceSec: 1.2,            // after being booted, you can't be caught for this long
   },
 
+  items: {
+    slots: 4,
+    pickupRange: 2.6,             // how close you must be to tap an item lying around
+    hallSpawnsPerPeriod: 3,       // items that turn up lying in the halls each period...
+    maxLying: 8,                  // ...up to this many at once
+    aimTimeScale: 0.5,            // the game runs at half speed while you line up a throw
+    flickFullFrac: 0.32,          // a drag this long (fraction of the screen's short side) is a full-power throw
+    minFlickPx: 22,               // shorter than this counts as a tap (cancels the throw)
+    diminish: 0.6,                // each repeat of the same havoc in one period is worth this much of the last
+    blinkSec: 5,                  // recoverable items blink for this long before they vanish
+  },
+
   footsteps: { hearRange: 20, patrolInterval: 0.55, chaseInterval: 0.3, volume: 0.55 },
 
   strikes: {
@@ -167,6 +180,23 @@ const TEACHER_TYPES = {
   sub:     { label: "Sub", bootSec: 14, silhouette: 0x3a7d44,
              stayLine: "The sub is reading a magazine. You're under a desk.", bootLine: "The sub finally looks up: \"Are you even in this class?\"" },
 };
+
+// Items are data. kind: "throw" (flick it), "ride" (flick to launch yourself), "instant" (tap to use).
+const ITEM_TYPES = {
+  paperAirplane: { label: "Paper airplane", icon: "✈️", kind: "throw", speed: [6, 11], pitchDeg: 8, gravity: 1.2, glide: true,
+                   perStudent: 10, crowdLandBonus: 50, crowdLandCount: 3, spawnWeight: 3 },
+  spitball:      { label: "Spitball", icon: "🫧", kind: "throw", uses: 3, speed: [12, 18], pitchDeg: 4, gravity: 6, hitPoints: 25, spawnWeight: 4 },
+  bananaPeel:    { label: "Banana peel", icon: "🍌", kind: "throw", speed: [3, 8], pitchDeg: 35, gravity: 9.8, lifeSec: 40,
+                   slipStaffSec: 2.5, slipStudentSec: 1.0, slipPlayerSec: 0.8, staffPoints: 150, studentPoints: 30, spawnWeight: 2 },
+  whoopee:       { label: "Whoopee cushion", icon: "💨", kind: "throw", recoverable: true, speed: [3, 8], pitchDeg: 35, gravity: 9.8,
+                   noiseRadius: 14, lifeSec: 20, points: 50, spawnWeight: 2 },
+  basketball:    { label: "Basketball", icon: "🏀", kind: "throw", recoverable: true, speed: [5, 11], pitchDeg: 30, gravity: 9.8,
+                   bounces: [6, 8], restitution: 0.72, noiseRadius: 10, lingerSec: 5, bouncePoints: 5, spawnWeight: 2 },
+  wheelieChair:  { label: "Wheelie chair", icon: "🪑", kind: "ride", rideSpeed: 9.5, maxRideSec: 3, dazeSec: 1.5, leftoverSec: 3,
+                   studentPoints: 40, spawnWeight: 1 },
+  gum:           { label: "Gum", icon: "🍬", kind: "instant", points: 100, line: "You stick gum under the water fountain. Gross. +havoc", spawnWeight: 3 },
+};
+const REST_Y = { basketball: 0.2, wheelieChair: 0, whoopee: 0.08 };   // how high items sit on the floor (default 0.04)
 
 // Floor plan: a squared figure 8. An outer loop plus a main hall across the middle, around two classroom blocks.
 // Halls run node to node. "side" on a hall: +1 / -1 = which wall (+1 is the classroom side on the outer loop).
@@ -529,7 +559,7 @@ function makePerson({ body, skin = 0xf1c27d, scale = 1, hat = null, hood = null 
 // ---------- player ----------
 const player = {
   x: 0, z: 0, vx: 0, vz: 0, heading: 0,
-  hidden: null, hideT: 0, hideArmed: false, graceT: 0, invisT: 0, pushSpot: null, pushT: 0,
+  hidden: null, hideT: 0, hideArmed: false, graceT: 0, invisT: 0, pushSpot: null, pushT: 0, slipT: 0, dazeT: 0, ride: null,
   mesh: makePerson({ body: 0x8a8f99, hood: 0x7b808a }),   // the gray hoodie
 };
 
@@ -547,7 +577,7 @@ const DOOR_SPOTS = () => SPOTS.filter((sp) => sp.kind === "classroom");
     crowdBodies.setColorAt(i, c.setHex(pick(SHIRT_COLORS)));
     crowdHeads.setColorAt(i, c.setHex(pick(SKIN_COLORS)));
     crowd.push({ h: 0, t: 0, to: 0, lat: 0, x: 0, z: 0, targetLat: 0, speed: 1, mode: "gone", leaveAt: 0, door: null,
-      spawnAt: 0, retargetT: 0, bob: Math.random() * 10, heading: 0, scale: rand(0.88, 1.08) });
+      spawnAt: 0, retargetT: 0, bob: Math.random() * 10, heading: 0, scale: rand(0.88, 1.08), slipT: 0 });
   }
 }
 
@@ -573,7 +603,7 @@ function spawnStaff(typeKey, place) {
   const edge = document.createElement("div"); edge.className = "edge"; markersEl.appendChild(edge);
   const st = { type: T, key: typeKey, x: 0, z: 0, h: place.h ?? 0, t: place.t ?? 0, to: place.to ?? 0, facing: 0, state: "patrol",
     suspicion: 0, lastX: 0, lastZ: 0, lastVX: 0, lastVZ: 0, searchT: 0, stepT: 0, sweep: Math.random() * 10,
-    tx: 0, tz: 0, pauseT: 0, bustSpot: null, chaseT: 0, windedT: 0, alarmT: 0, calledBackup: false,
+    tx: 0, tz: 0, pauseT: 0, bustSpot: null, chaseT: 0, windedT: 0, alarmT: 0, calledBackup: false, stunT: 0, distractT: 0, dX: 0, dZ: 0,
     roamT: T.roamTurnSec ? rand(...T.roamTurnSec) : 0, route: place.route ?? null, ri: place.ri ?? 0, rstep: place.rstep ?? 1,
     post: place.post ?? null, mesh, cone, alert, edge };
   if (T.stationary) { st.x = place.x; st.z = place.z; st.facing = place.facing; st.state = "post"; }
@@ -722,10 +752,11 @@ canvas.addEventListener("pointercancel", endPointer);
 window.addEventListener("keydown", (e) => {
   keys.add(e.key.toLowerCase());
   if ((e.key === " " || e.key === "Enter") && game.state !== "playing") { e.preventDefault(); onOverlayTap(); }
-  if (e.key === "Escape" && game.state === "playing") pause();
+  if (e.key === "Escape" && game.state === "playing") { if (game.aim) cancelAim(); else pause(); }
+  if (/^[1-9]$/.test(e.key) && game.state === "playing" && !e.repeat) selectSlot(+e.key - 1);
   if (e.key.toLowerCase() === "e" && game.state === "playing" && !e.repeat) {   // desktop: enter / leave
     if (player.hidden) exitSpot(false);
-    else { const sp = nearestSpot(); if (sp) enterSpot(sp); }
+    else if (!pickupNearest()) { const sp = nearestSpot(); if (sp) enterSpot(sp); }
   }
 });
 window.addEventListener("keyup", (e) => keys.delete(e.key.toLowerCase()));
@@ -745,7 +776,7 @@ function readInput() {
 // =====================================================================================
 const game = { state: "title", day: 1, period: 1, phase: "passing", phaseT: 0, score: 0, time: 0,
   strikes: 0, highAlert: false, periodScore: 0, periodsSkipped: 0, dayPeriodsSkipped: 0, sceneT: 0, sceneEnd: null,
-  lockerUses: 0, pendingOffice: false };
+  lockerUses: 0, pendingOffice: false, hotbar: [], aim: null, havocCount: {} };
 const cam = { yaw: 0 };
 const $ = (id) => document.getElementById(id);
 const ui = { phase: $("phase"), label: $("phaseLabel"), timer: $("timer"), score: $("score"), uses: $("uses"), banner: $("banner"), fps: $("fps"),
@@ -801,6 +832,10 @@ function morningSetup() {
     c.mode = "wander"; c.retargetT = rand(1, 4);
   }
   clearStaff();
+  clearObjects(); cancelAim();
+  if (player.ride) { scene.remove(player.ride.chair); player.ride = null; }
+  player.slipT = player.dazeT = 0; player.mesh.rotation.z = 0;
+  game.hotbar = Array(CFG.items.slots).fill(null); renderHotbar();
   resetSpotsForPeriod();
   for (const sp of SPOTS) if (sp.kind === "restroom") sp.nextSweep = game.time + rand(12, CFG.hiding.restroomSweepEverySec);
   rollSubs();
@@ -821,6 +856,8 @@ function resetSpotsForPeriod() {
 
 function startPassing(first) {
   game.phase = "passing"; game.phaseT = 0; game.periodScore = 0;
+  game.havocCount = {};
+  spawnHallItems();
   const P = phaseLen("passing"), doors = DOOR_SPOTS();
   for (const c of crowd) {
     c.leaveAt = rand(CFG.crowd.leaveStartFrac, CFG.crowd.leaveEndFrac) * P;
@@ -885,6 +922,8 @@ function startNextDay() {
 function releaseControls() { stick.id = look.id = null; keys.clear(); stickBase.style.display = stickKnob.style.display = "none"; }
 
 function caught(st) {
+  cancelAim();
+  if (player.ride) endRide(false);
   game.strikes++;
   ui.hide.hidden = true;
   releaseControls();
@@ -961,7 +1000,7 @@ function pa(kind, text = null, sec = null, vars = {}) {
 function pause() {
   if (game.state !== "playing") return;
   game.state = "paused"; $("paused").hidden = false;
-  releaseControls();
+  releaseControls(); cancelAim();
 }
 function startRun(save) {
   resetGame(save);
@@ -1028,6 +1067,15 @@ function updatePlayer(dt) {
   player.graceT = Math.max(0, player.graceT - dt);
   if (player.invisT > 0) { player.invisT -= dt; player.mesh.visible = !player.hidden && (player.invisT <= 0 || Math.sin(game.time * 22) > -0.3); }
   if (player.hidden) { updateHiding(dt); return; }
+  if (player.ride) { updateRide(dt); return; }
+  if (player.slipT > 0 || player.dazeT > 0) {   // flat on your back, or seeing stars
+    player.slipT = Math.max(0, player.slipT - dt); player.dazeT = Math.max(0, player.dazeT - dt);
+    player.vx = player.vz = 0;
+    player.mesh.rotation.z = player.slipT > 0 ? 1.25 : Math.sin(game.time * 14) * 0.25;
+    if (player.slipT <= 0 && player.dazeT <= 0) player.mesh.rotation.z = 0;
+    player.mesh.position.set(player.x, 0, player.z);
+    return;
+  }
   const f = { x: Math.sin(cam.yaw), z: Math.cos(cam.yaw) }, r = { x: -Math.cos(cam.yaw), z: Math.sin(cam.yaw) };
   const mx = r.x * input.x + f.x * input.y, mz = r.z * input.x + f.z * input.y;
   const sp = CFG.player.speed;
@@ -1055,6 +1103,7 @@ function updatePlayer(dt) {
 function updateCrowd(dt) {
   for (const c of crowd) {
     if (c.mode === "gone") continue;
+    if (c.slipT > 0) { c.slipT -= dt; continue; }   // on the floor for a moment
     if (c.mode === "spawning") {
       if (game.phaseT < c.spawnAt) continue;
       const d = c.door;
@@ -1106,7 +1155,7 @@ function drawCrowd() {
   crowd.forEach((c, i) => {
     const hidden = c.mode === "gone" || c.mode === "spawning";
     crowdMatrix.position.set(c.x, hidden ? -10 : Math.abs(Math.sin(game.time * 8 + c.bob)) * 0.05, c.z);
-    crowdMatrix.rotation.y = c.heading;
+    crowdMatrix.rotation.set(c.slipT > 0 ? 1.35 : 0, c.heading, 0, "YXZ");
     crowdMatrix.scale.setScalar(hidden ? 0.0001 : c.scale);
     crowdMatrix.updateMatrix();
     crowdBodies.setMatrixAt(i, crowdMatrix.matrix);
@@ -1154,7 +1203,7 @@ function setReturnPoint(st) {
 }
 
 function canSeePlayer(st, rangeMult, needCone) {
-  if (player.hidden) return { seen: false, d: Infinity };
+  if (player.hidden || st.stunT > 0) return { seen: false, d: Infinity };
   const T = st.type, dx = player.x - st.x, dz = player.z - st.z, d = Math.hypot(dx, dz);
   if (player.invisT > 0) return { seen: false, d };   // just served a strike: a moment to get away
   if (d > T.visionRange * staffMult("vision") * rangeMult) return { seen: false, d };
@@ -1187,6 +1236,13 @@ function updateStaff(dt, cover) {
     const T = st.type;
     st.sweep += dt * T.sweepRate;
     let speed = 0;
+    st.distractT = Math.max(0, st.distractT - dt);
+    if (st.stunT > 0) {   // slipped on a banana peel
+      st.stunT -= dt;
+      st.mesh.rotation.z = st.stunT > 0 ? 1.3 : 0; st.mesh.position.set(st.x, 0, st.z);
+      st.cone.visible = st.stunT <= 0;
+      continue;
+    }
     if (st.pauseT > 0) {   // "I saw you go in there." — a beat before chasing
       st.pauseT -= dt;
       st.facing = lerpAngle(st.facing, Math.atan2(player.x - st.x, player.z - st.z), damp(8, dt));
@@ -1210,7 +1266,7 @@ function updateStaff(dt, cover) {
         callBackup(st, false);
       }
       const base = st.post ? Math.atan2(-st.post.side * HALLS[st.post.h].nx, -st.post.side * HALLS[st.post.h].nz) : st.facing;
-      const want = st.suspicion > 0.05 ? Math.atan2(player.x - st.x, player.z - st.z) : base + Math.sin(st.sweep) * (T.sweepDeg * Math.PI / 180);
+      const want = st.suspicion > 0.05 ? Math.atan2(player.x - st.x, player.z - st.z) : st.distractT > 0 ? Math.atan2(st.dX - st.x, st.dZ - st.z) : base + Math.sin(st.sweep) * (T.sweepDeg * Math.PI / 180);
       st.facing = lerpAngle(st.facing, want, damp(st.suspicion > 0.05 ? 5 : 2, dt));
     } else if (st.state === "patrol" || st.state === "return") {
       const look = canSeePlayer(st, 1, true);
@@ -1226,12 +1282,12 @@ function updateStaff(dt, cover) {
         if (navToward(st, tgt.x, tgt.z, speed, dt) < 0.3) st.state = "patrol";
       } else {
         // patrol (monitors: a fixed loop; guards: roaming); slow down and squint while suspicious
-        speed = T.patrolSpeed * staffMult("speed") * (st.suspicion > 0.05 ? D.suspiciousSlow : 1);
+        speed = T.patrolSpeed * staffMult("speed") * (st.suspicion > 0.05 ? D.suspiciousSlow : 1) * (st.distractT > 0 ? 0.15 : 1);
         if (T.roamTurnSec) { st.roamT -= dt; if (st.roamT <= 0) { st.roamT = rand(...T.roamTurnSec); if (Math.random() < 0.6) st.to = otherEnd(st.h, st.to); } }
         walk(st, speed * dt, patrolChooser(st));
         hallPos(st.h, st.t, 0, st);
         const base = hallHeading(st.h, st.to === HALLS[st.h].b ? 1 : -1);
-        const want = st.suspicion > 0.05 ? Math.atan2(player.x - st.x, player.z - st.z) : base + Math.sin(st.sweep) * (T.sweepDeg * Math.PI / 180);
+        const want = st.suspicion > 0.05 ? Math.atan2(player.x - st.x, player.z - st.z) : st.distractT > 0 ? Math.atan2(st.dX - st.x, st.dZ - st.z) : base + Math.sin(st.sweep) * (T.sweepDeg * Math.PI / 180);
         st.facing = lerpAngle(st.facing, want, damp(st.suspicion > 0.05 ? 5 : 3, dt));
       }
     } else if (st.state === "chase") {
@@ -1415,6 +1471,7 @@ function update(dt) {
   updateRestrooms();
   updateCrowd(dt);
   updateStaff(dt, crowdCoverCount());
+  if (game.state === "playing") updateObjects(dt);
 }
 
 // =====================================================================================
@@ -1544,6 +1601,7 @@ function updateRestrooms() {
 const projA = new THREE.Vector3(), projB = new THREE.Vector3();
 function handleTap(x, y) {
   if (player.hidden) return;
+  if (tryTapPickup(x, y)) return;
   const w = window.innerWidth, h = window.innerHeight;
   let best = null, bd = CFG.interact.tapRadiusPx;
   for (const sp of SPOTS) {
@@ -1595,6 +1653,395 @@ function updateSpotsUI() {
 }
 
 // =====================================================================================
+// Items: hotbar, tap-then-flick throwing, things lying around, havoc points
+// =====================================================================================
+const objects = [];
+const isActive = (c) => c.mode !== "gone" && c.mode !== "spawning";
+const ringGeo = new THREE.RingGeometry(0.34, 0.46, 20);
+function makeItemMesh(key) {
+  const g = new THREE.Group();
+  const m = (geo, color) => { const mesh = new THREE.Mesh(geo, lambert(color)); g.add(mesh); return mesh; };
+  switch (key) {
+    case "paperAirplane": { const a = m(new THREE.ConeGeometry(0.16, 0.5, 3), 0xffffff); a.rotation.x = Math.PI / 2; a.scale.set(1.6, 1, 0.25); break; }
+    case "spitball": m(new THREE.IcosahedronGeometry(0.07, 0), 0xf4f4f4); break;
+    case "bananaPeel": {
+      m(new THREE.BoxGeometry(0.16, 0.05, 0.16), 0xf2d43b);
+      for (const a of [0, 2.1, 4.2]) { const p = m(new THREE.BoxGeometry(0.07, 0.03, 0.26), 0xe8c22a); p.rotation.y = a; p.position.set(Math.sin(a) * 0.12, 0, Math.cos(a) * 0.12); }
+      break;
+    }
+    case "whoopee": {
+      const c = m(new THREE.IcosahedronGeometry(0.22, 1), 0xff6fa8); c.scale.set(1, 0.35, 1);
+      const n = m(new THREE.CylinderGeometry(0.04, 0.05, 0.1, 6), 0xe0558f); n.rotation.x = Math.PI / 2; n.position.set(0, 0, 0.24);
+      break;
+    }
+    case "basketball": m(new THREE.IcosahedronGeometry(0.2, 1), 0xe67e22); break;
+    case "wheelieChair": {
+      const seat = m(new THREE.BoxGeometry(0.5, 0.08, 0.5), 0x2c3e66); seat.position.y = 0.45;
+      const back = m(new THREE.BoxGeometry(0.5, 0.5, 0.06), 0x2c3e66); back.position.set(0, 0.75, -0.24);
+      const post = m(new THREE.CylinderGeometry(0.04, 0.04, 0.35, 6), 0x555555); post.position.y = 0.25;
+      for (const a of [0, 1.26, 2.51, 3.77, 5.03]) { const l = m(new THREE.BoxGeometry(0.05, 0.05, 0.32), 0x333333); l.rotation.y = a; l.position.set(Math.sin(a) * 0.15, 0.06, Math.cos(a) * 0.15); }
+      break;
+    }
+    case "gum": m(new THREE.BoxGeometry(0.16, 0.05, 0.09), 0xff8fc8); break;
+  }
+  scene.add(g);
+  return g;
+}
+let objectIds = 0;
+function spawnObject(key, state, x, y, z, extra = {}) {
+  const T = ITEM_TYPES[key];
+  const o = { id: ++objectIds, key, T, state, x, y, z, vx: 0, vy: 0, vz: 0, age: 0, life: Infinity, bounces: 0, maxBounces: 0,
+    flown: new Set(), noiseCD: 0, slips: 0, uses: T.uses ?? 1, spin: Math.random() * 6, mesh: makeItemMesh(key), ...extra };
+  o.ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xffdc80, transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false }));
+  o.ring.rotation.x = -Math.PI / 2; scene.add(o.ring);
+  objects.push(o);
+  return o;
+}
+function removeObject(o) { scene.remove(o.mesh); scene.remove(o.ring); o.dead = true; }
+function clearObjects() { for (const o of objects) removeObject(o); objects.length = 0; }
+
+function pickWeighted(pairs) {
+  let r = Math.random() * pairs.reduce((a, [, w]) => a + w, 0);
+  for (const [k, w] of pairs) if ((r -= w) <= 0) return k;
+  return pairs[0][0];
+}
+function spawnHallItems() {
+  const lying = objects.filter((o) => o.state === "pickup").length;
+  const table = Object.entries(ITEM_TYPES).map(([k, T]) => [k, T.spawnWeight]);
+  for (let i = 0; i < CFG.items.hallSpawnsPerPeriod && lying + i < CFG.items.maxLying; i++) {
+    for (let tries = 0; tries < 12; tries++) {
+      const h = Math.floor(Math.random() * HALLS.length), t = rand(1.5, HALLS[h].len - 1.5), [lo, hi] = latLimits(h, t);
+      const p = hallPos(h, t, rand(lo, hi));
+      if (Math.hypot(p.x - player.x, p.z - player.z) < 8) continue;
+      const key = pickWeighted(table);
+      spawnObject(key, "pickup", p.x, REST_Y[key] ?? 0.04, p.z);
+      break;
+    }
+  }
+}
+
+// ---- hotbar ----
+const hotbarEl = $("hotbar");
+for (let i = 0; i < CFG.items.slots; i++) {
+  const b = document.createElement("button"); b.className = "slot empty"; b.type = "button";
+  b.addEventListener("pointerdown", (e) => { e.preventDefault(); e.stopPropagation(); selectSlot(i); });
+  hotbarEl.appendChild(b);
+}
+function renderHotbar() {
+  [...hotbarEl.children].forEach((b, i) => {
+    const it = game.hotbar[i];
+    b.innerHTML = it ? `${ITEM_TYPES[it.key].icon}${it.uses > 1 ? `<small>${it.uses}</small>` : ""}` : "";
+    b.classList.toggle("empty", !it); b.classList.toggle("active", game.aim?.slot === i);
+    b.title = it ? ITEM_TYPES[it.key].label : "Empty slot";
+  });
+}
+function addItem(key, uses) {
+  const i = game.hotbar.findIndex((s) => !s);
+  if (i < 0) { toast("Inventory full! Use something first."); playBlip([180], 0.08, "square", 0.04); return false; }
+  game.hotbar[i] = { key, uses: uses ?? ITEM_TYPES[key].uses ?? 1 };
+  renderHotbar();
+  popup(`${ITEM_TYPES[key].icon} ${ITEM_TYPES[key].label}`, "item");
+  playBlip([660, 990], 0.06, "triangle", 0.06);
+  return true;
+}
+function consumeSlot(i) { const it = game.hotbar[i]; if (!it) return; if (--it.uses <= 0) game.hotbar[i] = null; renderHotbar(); }
+
+function selectSlot(i) {
+  if (game.state !== "playing") return;
+  const it = game.hotbar[i]; if (!it) return;
+  if (player.hidden) { toast("Not while you're hiding"); return; }
+  if (player.ride || player.dazeT > 0 || player.slipT > 0) return;
+  if (game.aim?.slot === i) { cancelAim(); return; }
+  const T = ITEM_TYPES[it.key];
+  if (T.kind === "instant") { consumeSlot(i); toast(T.line); havoc(it.key, T.points, T.label, { x: player.x, z: player.z }); return; }
+  game.aim = { slot: i, key: it.key, id: null, sx: 0, sy: 0, cx: 0, cy: 0 };
+  $("aim").hidden = false;
+  $("aimText").textContent = T.kind === "ride" ? "Flick to launch the wheelie chair" : `Flick to throw the ${T.label.toLowerCase()}`;
+  renderHotbar();
+}
+function cancelAim() { if (!game.aim) return; game.aim = null; $("aim").hidden = true; arc.visible = false; renderHotbar(); }
+
+// ---- aiming: drag anywhere, the dotted arc shows where it will go, release to throw ----
+const aimEl = $("aim");
+aimEl.addEventListener("pointerdown", (e) => {
+  if (!game.aim || e.target.id === "aimCancel") return;
+  const a = game.aim; a.id = e.pointerId; a.sx = a.cx = e.clientX; a.sy = a.cy = e.clientY;
+  try { aimEl.setPointerCapture(e.pointerId); } catch (err) { /* fine */ }
+});
+aimEl.addEventListener("pointermove", (e) => { const a = game.aim; if (a && e.pointerId === a.id) { a.cx = e.clientX; a.cy = e.clientY; } });
+aimEl.addEventListener("pointerup", (e) => {
+  const a = game.aim; if (!a || e.pointerId !== a.id) return;
+  a.id = null;
+  if (Math.hypot(a.cx - a.sx, a.cy - a.sy) < CFG.items.minFlickPx) { cancelAim(); return; }   // a tap cancels
+  release(a);
+});
+aimEl.addEventListener("pointercancel", () => { if (game.aim) game.aim.id = null; });
+$("aimCancel").addEventListener("click", cancelAim);
+
+// flick up the screen = away from the camera; length sets the power
+function flickLaunch(a) {
+  const dx = a.cx - a.sx, dy = a.cy - a.sy, len = Math.hypot(dx, dy);
+  const fx = Math.sin(cam.yaw), fz = Math.cos(cam.yaw);
+  let wx = fx * -dy + camRight.x * dx, wz = fz * -dy + camRight.z * dx;
+  const wl = Math.hypot(wx, wz) || 1; wx /= wl; wz /= wl;
+  return { dx: wx, dz: wz, power: clamp(len / (CFG.items.flickFullFrac * Math.min(window.innerWidth, window.innerHeight)), 0.15, 1) };
+}
+function launchVel(T, L) {
+  const sp = T.speed[0] + (T.speed[1] - T.speed[0]) * L.power, p = (T.pitchDeg * Math.PI) / 180;
+  return { vx: L.dx * Math.cos(p) * sp, vy: Math.sin(p) * sp, vz: L.dz * Math.cos(p) * sp };
+}
+const THROW_Y = 1.3;
+function release(a) {
+  const T = ITEM_TYPES[a.key], L = flickLaunch(a);
+  player.heading = Math.atan2(L.dx, L.dz);
+  consumeSlot(a.slot);
+  cancelAim();
+  if (T.kind === "ride") { startRide(L); return; }
+  const o = spawnObject(a.key, "flying", player.x + L.dx * 0.45, THROW_Y, player.z + L.dz * 0.45, launchVel(T, L));
+  if (T.bounces) o.maxBounces = Math.floor(rand(T.bounces[0], T.bounces[1] + 1));
+  playBlip([300, 520], 0.06, "triangle", 0.05);   // whoosh
+}
+
+const ARC_N = 30;
+const arc = new THREE.Points(new THREE.BufferGeometry().setAttribute("position", new THREE.BufferAttribute(new Float32Array(ARC_N * 3), 3)),
+  new THREE.PointsMaterial({ color: 0xffe066, size: 0.26, transparent: true, opacity: 0.95, depthTest: false }));
+arc.visible = false; arc.renderOrder = 5; arc.frustumCulled = false; scene.add(arc);
+function updateAimPreview() {
+  const a = game.aim;
+  if (!a || a.id === null || Math.hypot(a.cx - a.sx, a.cy - a.sy) < CFG.items.minFlickPx) { arc.visible = false; return; }
+  const T = ITEM_TYPES[a.key], L = flickLaunch(a), pos = arc.geometry.attributes.position, step = 0.04;
+  const sim = { x: player.x + L.dx * 0.45, y: T.kind === "ride" ? 0.1 : THROW_Y, z: player.z + L.dz * 0.45, vx: 0, vy: 0, vz: 0 };
+  if (T.kind === "ride") { sim.vx = L.dx * T.rideSpeed; sim.vz = L.dz * T.rideSpeed; } else Object.assign(sim, launchVel(T, L));
+  let i = 0, stopped = false;
+  for (let k = 0; k < 120 && i < ARC_N; k++) {
+    if (!stopped) {
+      if (T.kind !== "ride") { sim.vy -= T.gravity * step; if (T.glide) sim.vy = Math.max(sim.vy, -0.9); }
+      const nx = sim.x + sim.vx * step, nz = sim.z + sim.vz * step;
+      if (!lineOfSight(sim.x, sim.z, nx, nz) || sim.y + sim.vy * step < 0.05) stopped = true;
+      else { sim.x = nx; sim.z = nz; sim.y += sim.vy * step; }
+    }
+    if (k % 4 === 0) pos.setXYZ(i++, sim.x, sim.y, sim.z);
+  }
+  pos.needsUpdate = true; arc.visible = true;
+}
+
+// ---- physics and effects ----
+function wallBounce(o, dt, keep) {   // reflect off walls; returns true if it hit one
+  let hit = false;
+  for (const ax of ["x", "z"]) {
+    const v = ax === "x" ? o.vx : o.vz;
+    if (Math.abs(v) < 1e-4) continue;
+    const reach = Math.abs(v) * dt + 0.18;
+    const d = ax === "x" ? raycast(o.x, o.z, Math.sign(v), 0, reach) : raycast(o.x, o.z, 0, Math.sign(v), reach);
+    if (d < reach) { if (ax === "x") o.vx = -o.vx * keep; else o.vz = -o.vz * keep; hit = true; }
+  }
+  return hit;
+}
+function updateObjects(dt) {
+  for (const o of objects) {
+    if (o.dead) continue;
+    o.age += dt; o.noiseCD -= dt;
+    if (o.state === "flying") flyObject(o, dt);
+    else if (o.state === "rolling") rollObject(o, dt);
+    else if (o.state === "trap") trapCheck(o);
+    else if (o.state === "resting" && o.key === "whoopee") stepOnCushion(o);
+    if (o.dead) continue;
+    if (o.life !== Infinity) { o.life -= dt; if (o.life <= 0) removeObject(o); }
+  }
+  for (let i = objects.length - 1; i >= 0; i--) if (objects[i].dead) objects.splice(i, 1);
+}
+function drawObjects() {
+  const pulse = 0.35 + 0.25 * Math.sin(performance.now() / 160);
+  for (const o of objects) {
+    o.mesh.position.set(o.x, o.y, o.z);
+    if (o.state === "flying") o.mesh.rotation.y = Math.atan2(o.vx, o.vz);
+    if (o.state === "pickup") { o.spin += 0.02; o.mesh.rotation.y = o.spin; o.mesh.position.y = o.y + 0.1 + Math.sin(o.spin * 2) * 0.05; }
+    const fading = (o.state === "pickup" || o.state === "resting") && o.life < CFG.items.blinkSec;
+    o.mesh.visible = !(fading && Math.sin(o.life * 18) < 0);
+    const reach = pickable(o) && game.state === "playing" && !player.hidden && Math.hypot(o.x - player.x, o.z - player.z) < CFG.items.pickupRange;
+    o.ring.material.opacity = reach ? pulse : pickable(o) ? 0.12 : 0;
+    o.ring.position.set(o.x, 0.03, o.z);
+  }
+}
+function flyObject(o, dt) {
+  const T = o.T;
+  o.vy -= T.gravity * dt;
+  if (T.glide) o.vy = Math.max(o.vy, -0.9);
+  if (wallBounce(o, dt, T.bounces ? 0.8 : 0.15)) { if (T.bounces) bounceNoise(o); else if (T.glide) o.vy = Math.min(o.vy, -2.5); }
+  o.x += o.vx * dt; o.z += o.vz * dt; o.y += o.vy * dt;
+  if (o.y > LAYOUT.wallHeight - 0.2) { o.y = LAYOUT.wallHeight - 0.2; o.vy = -Math.abs(o.vy) * 0.5; }
+  if (o.key === "paperAirplane") { for (const c of crowd) if (isActive(c) && Math.hypot(c.x - o.x, c.z - o.z) < 1.3) o.flown.add(c); }
+  if (o.key === "spitball") {
+    for (const c of crowd) if (isActive(c) && o.y < 1.7 && Math.hypot(c.x - o.x, c.z - o.z) < 0.45) {
+      c.slipT = 0.35; havoc("spitball", T.hitPoints, "Spitball! Ew!", { x: o.x, z: o.z }); removeObject(o); return;
+    }
+    for (const st of staff) if (o.y < 2.1 && Math.hypot(st.x - o.x, st.z - o.z) < 0.5) {   // bad idea
+      popup(`You hit the ${st.type.name}...`, "bad"); st.suspicion = Math.max(st.suspicion, 0.9);
+      st.distractT = 1.5; st.dX = player.x; st.dZ = player.z; removeObject(o); return;
+    }
+  }
+  const r = REST_Y[o.key] ?? 0.04;
+  if (o.y <= r) {
+    o.y = r;
+    if (T.bounces && o.bounces < o.maxBounces && Math.abs(o.vy) > 1.2) { o.vy = -o.vy * T.restitution; o.bounces++; bounceNoise(o); }
+    else landObject(o);
+  }
+}
+function landObject(o) {
+  const T = o.T;
+  o.vy = 0;
+  if (o.key !== "basketball") o.vx = o.vz = 0;
+  switch (o.key) {
+    case "paperAirplane": {
+      const n = o.flown.size, near = crowd.filter((c) => isActive(c) && Math.hypot(c.x - o.x, c.z - o.z) < 2.5).length;
+      const crowdLand = near >= T.crowdLandCount;
+      if (n) havoc("paperAirplane", n * T.perStudent + (crowdLand ? T.crowdLandBonus : 0), `Airplane over ${n} kid${n === 1 ? "" : "s"}${crowdLand ? " · crowd landing!" : ""}`, { x: o.x, z: o.z });
+      else popup("The airplane lands. Nobody notices.", "meh");
+      o.state = "spent"; o.life = 1.5; break;
+    }
+    case "spitball": o.state = "spent"; o.life = 0.4; break;
+    case "bananaPeel": o.state = "trap"; o.life = T.lifeSec; o.mesh.rotation.y = Math.random() * 6; break;
+    case "whoopee": o.state = "resting"; o.life = T.lifeSec; cushionNoise(o); break;
+    case "basketball": o.state = "rolling"; break;
+    default: o.state = "resting"; o.life = 10;
+  }
+}
+function rollObject(o, dt) {
+  const k = Math.exp(-1.6 * dt); o.vx *= k; o.vz *= k;
+  wallBounce(o, dt, 0.7);
+  o.x += o.vx * dt; o.z += o.vz * dt; o.y = REST_Y[o.key] ?? 0.04;
+  o.mesh.rotation.x += Math.hypot(o.vx, o.vz) * dt * 4;
+  if (Math.hypot(o.vx, o.vz) < 0.25) { o.state = "resting"; o.life = o.T.lingerSec; }
+}
+function bounceNoise(o) {
+  playFootstep(o.x, o.z, true);
+  const pts = Math.round(o.T.bouncePoints * scoreMult());
+  game.score += pts; popup(`+${pts} bounce`, "small");
+  makeNoise(o.x, o.z, o.T.noiseRadius, false, o);
+}
+function cushionNoise(o) {
+  if (o.noiseCD > 0) return;
+  o.noiseCD = 3;
+  playBlip([95, 70, 110, 60], 0.09, "sawtooth", 0.1);   // pfffft
+  havoc("whoopee", o.T.points, "PFFFT!", { x: o.x, z: o.z, loud: true });
+  makeNoise(o.x, o.z, o.T.noiseRadius, true, o);
+}
+function stepOnCushion(o) {
+  if (o.age < 1 || o.noiseCD > 0) return;
+  const on = (x, z, r) => Math.hypot(x - o.x, z - o.z) < r;
+  if (crowd.some((c) => isActive(c) && on(c.x, c.z, 0.5)) || staff.some((s) => on(s.x, s.z, 0.55)) || (!player.hidden && on(player.x, player.z, 0.45))) cushionNoise(o);
+}
+// A noise: staff nearby either come to investigate (pull) or just turn and look.
+function makeNoise(x, z, radius, pull) {
+  for (const st of staff) {
+    const d = Math.hypot(st.x - x, st.z - z);
+    if (d > radius || st.state === "chase" || st.state === "bust" || st.stunT > 0) continue;
+    if (pull && !st.type.stationary) {
+      st.state = "search"; st.searchT = -Math.min(8, d / (st.type.chaseSpeed * 0.8));
+      st.lastX = st.tx = x; st.lastZ = st.tz = z; st.suspicion = Math.max(st.suspicion, 0.3);
+    } else { st.distractT = 2.2; st.dX = x; st.dZ = z; }
+  }
+}
+function trapCheck(o) {
+  const T = o.T;
+  for (const st of staff) {
+    if (st.type.stationary || st.stunT > 0 || Math.hypot(st.x - o.x, st.z - o.z) > 0.55) continue;
+    st.stunT = T.slipStaffSec;
+    if (st.state === "chase" || st.state === "bust") { st.state = "search"; st.searchT = 0; st.lastX = st.tx = player.x; st.lastZ = st.tz = player.z; }
+    playBlip([700, 300], 0.12, "sawtooth", 0.07);
+    havoc("bananaStaff", T.staffPoints, `Wipeout! The ${st.type.name} slips`, { x: o.x, z: o.z, loud: true });
+    removeObject(o); return;
+  }
+  for (const c of crowd) {
+    if (!isActive(c) || c.slipT > 0 || Math.hypot(c.x - o.x, c.z - o.z) > 0.45) continue;
+    c.slipT = T.slipStudentSec;
+    havoc("bananaStudent", T.studentPoints, "A kid slips!", { x: o.x, z: o.z });
+    if (++o.slips >= 2) { removeObject(o); return; }
+  }
+  if (o.age > 1.2 && !player.hidden && !player.ride && player.slipT <= 0 && Math.hypot(player.x - o.x, player.z - o.z) < 0.45) {
+    player.slipT = T.slipPlayerSec; toast("You slipped on your own banana peel!"); removeObject(o);
+  }
+}
+
+// ---- the wheelie chair: flick to launch yourself, no steering ----
+function startRide(L) {
+  player.ride = { dx: L.dx, dz: L.dz, t: 0, chair: makeItemMesh("wheelieChair") };
+  player.heading = Math.atan2(L.dx, L.dz);
+  toast("WHEEEEE!");
+  playBlip([400, 600, 800], 0.07, "triangle", 0.06);
+}
+function updateRide(dt) {
+  const R = player.ride, T = ITEM_TYPES.wheelieChair;
+  R.t += dt;
+  const ox = player.x, oz = player.z, want = T.rideSpeed * dt;
+  player.x += R.dx * want; player.z += R.dz * want;
+  collide(player, CFG.player.radius);
+  const moved = Math.hypot(player.x - ox, player.z - oz);
+  player.vx = (player.x - ox) / Math.max(dt, 1e-4); player.vz = (player.z - oz) / Math.max(dt, 1e-4);
+  cam.yaw = lerpAngle(cam.yaw, player.heading, damp(3, dt));
+  for (const st of staff) if (Math.hypot(st.x - player.x, st.z - player.z) < 0.8) { endRide(true); caught(st); return; }   // straight into staff: caught
+  for (const c of crowd) {
+    if (!isActive(c) || Math.hypot(c.x - player.x, c.z - player.z) > 0.6) continue;
+    c.slipT = 1.2; havoc("chairStudent", T.studentPoints, "Chair vs. student!", { x: c.x, z: c.z, loud: true });
+    endRide(true); return;
+  }
+  if (moved < want * 0.5 || R.t > T.maxRideSec) { endRide(true); return; }
+  R.chair.position.set(player.x, 0, player.z); R.chair.rotation.y = player.heading;
+  player.mesh.position.set(player.x, 0.35, player.z); player.mesh.rotation.y = player.heading;
+}
+function endRide(crash) {
+  const R = player.ride, T = ITEM_TYPES.wheelieChair;
+  if (!R) return;
+  player.ride = null; scene.remove(R.chair);
+  spawnObject("wheelieChair", "spent", player.x - R.dx * 0.6, 0, player.z - R.dz * 0.6, { life: T.leftoverSec });
+  player.mesh.position.y = 0;
+  if (crash) { player.dazeT = T.dazeSec; playBlip([200, 120], 0.12, "sawtooth", 0.08); popup("CRASH!", "bad"); }
+}
+
+// ---- picking things up ----
+function pickable(o) { return o.state === "pickup" || (o.state === "resting" && o.T.recoverable); }
+function pickUp(o) { if (!addItem(o.key, o.key === "spitball" ? o.uses : undefined)) return false; removeObject(o); return true; }
+function pickupNearest() {
+  let best = null, bd = CFG.items.pickupRange;
+  for (const o of objects) if (pickable(o)) { const d = Math.hypot(o.x - player.x, o.z - player.z); if (d < bd) { bd = d; best = o; } }
+  if (best) { pickUp(best); return true; }
+  return false;
+}
+function tryTapPickup(x, y) {
+  const w = window.innerWidth, h = window.innerHeight;
+  let best = null, bd = CFG.interact.tapRadiusPx;
+  for (const o of objects) {
+    if (!pickable(o) || Math.hypot(o.x - player.x, o.z - player.z) > CFG.items.pickupRange) continue;
+    projA.set(o.x, o.y + 0.1, o.z).applyMatrix4(camera.matrixWorldInverse);
+    if (projA.z > -0.2) continue;
+    projA.set(o.x, o.y + 0.1, o.z).project(camera);
+    const d = Math.hypot(x - ((projA.x + 1) / 2) * w, y - ((1 - projA.y) / 2) * h);
+    if (d < bd) { bd = d; best = o; }
+  }
+  if (best) { pickUp(best); return true; }
+  return false;
+}
+
+// ---- havoc: flat points for mischief, worth less each time you repeat it in a period ----
+function scoreMult() { return 1; }
+function havoc(kind, base, label, opts = {}) {
+  const n = game.havocCount[kind] ?? 0;
+  game.havocCount[kind] = n + 1;
+  const pts = Math.max(1, Math.round(base * Math.pow(CFG.items.diminish, n) * scoreMult()));
+  game.score += pts;
+  popup(`+${pts} ${label}`);
+  onHavoc(kind, pts, opts);
+  return pts;
+}
+function onHavoc(kind, pts, opts) { /* build step 7 adds heat and the security level here */ }
+const popupsEl = $("popups");
+function popup(text, cls = "") {
+  const el = document.createElement("div"); el.className = "pop " + cls; el.textContent = text;
+  popupsEl.appendChild(el); setTimeout(() => el.remove(), 1600);
+  while (popupsEl.children.length > 4) popupsEl.firstChild.remove();
+}
+
+// =====================================================================================
 // Main loop
 // =====================================================================================
 function resize() {
@@ -1614,13 +2061,15 @@ updateCrowd(0.016); drawCrowd(); for (const st of staff) updateCone(st);
 
 renderer.setAnimationLoop(() => {
   const dt = Math.min(clock.getDelta(), 0.05);
-  if (game.state === "playing") update(dt);
+  if (game.state === "playing") update(dt * (game.aim ? CFG.items.aimTimeScale : 1));
   if (game.state === "scene") { game.sceneT += dt; if (game.sceneT >= game.sceneEnd) endScene(); }
   if (paTimer > 0) { paTimer -= dt; if (paTimer <= 0) $("pa").classList.remove("show"); }
   if (bannerTimer > 0) { bannerTimer -= dt; if (bannerTimer <= 0) ui.banner.classList.remove("show"); }
   if (toastTimer > 0) { toastTimer -= dt; if (toastTimer <= 0) ui.toast.classList.remove("show"); }
   drawCrowd();
   updateCamera(dt);
+  updateAimPreview();
+  drawObjects();
   updateMarkers();
   updateSpotsUI();
   updateHud();
@@ -1638,6 +2087,7 @@ window.__hallwaySkip = { get state() { return { ...game,
 if (debug) {   // test-only helpers (only with ?debug in the URL)
   Object.assign(window.__hallwaySkip, {
     place(h, t, lat) { const p = hallPos(h, t, lat); player.x = p.x; player.z = p.z; },
+    placeXZ(x, z) { player.x = x; player.z = z; },
     inFrontOf(k, dist) { const st = staff[k]; player.x = st.x + Math.sin(st.facing) * dist; player.z = st.z + Math.cos(st.facing) * dist;
       cam.yaw = player.heading = st.facing + Math.PI; manualCamT = 99; },
     spotFront(i) { const sp = SPOTS[i], f = spotFront(sp, {}); return { x: f.x, z: f.z, h: sp.h, t: sp.t, wallLat: sp.wallLat, frontLat: sp.frontLat, side: sp.side }; },
@@ -1647,6 +2097,12 @@ if (debug) {   // test-only helpers (only with ?debug in the URL)
     setTime(t) { game.phaseT = t; },
     catchNow(k = 0) { caught(staff[k]); },
     sweepNow(i) { SPOTS[i].nextSweep = game.time; },
+    give(key, uses) { return addItem(key, uses); },
+    objects() { return objects.map((o) => ({ key: o.key, state: o.state, x: o.x, y: o.y, z: o.z, bounces: o.bounces, life: o.life })); },
+    dropItem(key, dx, dz) { const o = spawnObject(key, "pickup", player.x + dx, REST_Y[key] ?? 0.04, player.z + dz); return o.id; },
+    hotbar() { return game.hotbar.map((s) => s && `${s.key}${s.uses > 1 ? "x" + s.uses : ""}`); },
+    playerState() { return { slipT: player.slipT, dazeT: player.dazeT, riding: !!player.ride, x: player.x, z: player.z }; },
+    staffFull(k) { const s = staff[k]; return { state: s.state, stunT: s.stunT, distractT: s.distractT, x: s.x, z: s.z, key: s.key }; },
     searchTo(k, x, z) { const st = staff[k]; st.state = "search"; st.searchT = -30; st.lastX = st.tx = x; st.lastZ = st.tz = z; },
     nodes() { return NODES.map((n) => ({ id: n.id, x: n.x, z: n.z })); },
     phaseLens() { return { passing: phaseLen("passing"), skipping: phaseLen("skipping") }; },

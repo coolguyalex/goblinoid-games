@@ -78,8 +78,29 @@
     border: 2px solid rgba(255,255,255,.28); }
   #stickKnob { width: 54px; height: 54px; margin: -27px 0 0 -27px; background: rgba(255,255,255,.4); }
 
+  /* hotbar (right edge) and aiming */
+  #hotbar { position: fixed; right: max(10px, env(safe-area-inset-right)); top: 50%; transform: translateY(-50%); display: flex;
+    flex-direction: column; gap: 8px; z-index: 4; }
+  #hotbar .slot { width: 54px; height: 54px; border-radius: 14px; border: 2px solid rgba(255,255,255,.35); background: rgba(20,24,36,.72);
+    font-size: 27px; position: relative; color: #fff; padding: 0; touch-action: none; cursor: pointer; }
+  #hotbar .slot.empty { opacity: .4; }
+  #hotbar .slot.active { border-color: #ffd36b; box-shadow: 0 0 0 3px rgba(255,211,107,.5); }
+  #hotbar .slot small { position: absolute; right: 4px; bottom: 1px; font-size: 12px; font-weight: 800; }
+  #aim { position: fixed; inset: 0; background: rgba(10,12,20,.45); z-index: 3; touch-action: none; }
+  #aim[hidden] { display: none; }
+  #aimText { position: absolute; top: 20%; width: 100%; text-align: center; font-weight: 800; font-size: 20px; pointer-events: none;
+    text-shadow: 0 2px 4px rgba(0,0,0,.7); }
+  .aimHint { position: absolute; top: calc(20% + 30px); width: 100%; text-align: center; font-size: 13px; opacity: .8; pointer-events: none; padding: 0 70px; box-sizing: border-box; }
+  #aimCancel { position: absolute; left: 50%; bottom: max(14px, env(safe-area-inset-bottom)); transform: translateX(-50%); padding: 9px 20px;
+    border: 0; border-radius: 999px; background: rgba(255,255,255,.18); color: #fff; font: 700 14px system-ui, sans-serif; }
+  #popups { position: fixed; left: 50%; top: 30%; transform: translateX(-50%); pointer-events: none; display: flex; flex-direction: column;
+    align-items: center; gap: 4px; z-index: 2; }
+  .pop { font-weight: 900; font-size: 18px; color: #ffe066; text-shadow: 0 2px 4px rgba(0,0,0,.7); white-space: nowrap; animation: pop 1.6s ease-out forwards; }
+  .pop.item { color: #8ef0a0; } .pop.bad { color: #ff8f8f; } .pop.small { font-size: 13px; } .pop.meh { color: #c9cfdb; font-size: 14px; }
+  @keyframes pop { 0% { opacity: 0; transform: translateY(8px) scale(.9); } 12% { opacity: 1; transform: none; } 75% { opacity: 1; } 100% { opacity: 0; transform: translateY(-18px); } }
+
   /* overlays */
-  .overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+  .overlay { z-index: 6; position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
     background: rgba(12, 14, 22, .72); padding: 16px; text-align: center; cursor: pointer; }
   .overlay[hidden] { display: none; }
   .overlay h1 { margin: 0 0 4px; font-size: clamp(34px, 7vw, 58px); letter-spacing: .03em; }
@@ -110,7 +131,7 @@
   #strikeDots { display: flex; gap: 8px; justify-content: center; margin: 8px 0; }
   #strikeSub { font-weight: 700; }
   #rotate { position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
-    background: #1d2230; text-align: center; padding: 24px; font-size: 20px; font-weight: 700; z-index: 5; }
+    background: #1d2230; text-align: center; padding: 24px; font-size: 20px; font-weight: 700; z-index: 8; }
   @media (orientation: portrait) and (pointer: coarse) { #rotate { display: flex; } }
   #error { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; padding: 24px;
     text-align: center; background: #1d2230; z-index: 10; }
@@ -139,11 +160,18 @@
     <div class="hint">or push the stick (E on desktop)</div>
   </div>
 </div>
+<div id="hotbar"></div>
+<div id="aim" hidden>
+  <div id="aimText"></div>
+  <div class="aimHint">Drag and let go: direction and distance. The dots show where it lands.</div>
+  <button id="aimCancel" type="button">✕ Cancel</button>
+</div>
+<div id="popups"></div>
 <div id="stickBase"></div><div id="stickKnob"></div>
 
 <div class="overlay" id="title">
   <div>
-    <span class="tag">prototype · build step 4</span>
+    <span class="tag">prototype · build step 5</span>
     <h1>Hallway Skip</h1>
     <p>Skip class. Don't get caught.</p>
     <div class="buttons">
@@ -160,6 +188,7 @@
     <p>Slip out with the crowd, then stay out of class until the next bell. Keep out of the staff's vision cones. If you're spotted, break line of sight, then hide.</p>
     <p>Walk into (or tap) a green locker, a restroom, or a classroom door to hide. Subs take longer to notice you.</p>
     <p>Security guards have narrow flashlight vision, are faster than you for a few seconds, and call for backup. Teachers at their doors yell for help and grab you if you walk past.</p>
+    <p>Items turn up in the halls: tap one to pick it up (four slots, right edge). Tap a slot, then flick to throw. Banana peels trip staff, whoopee cushions and basketballs make noise that pulls staff away, the wheelie chair launches you down the hall.</p>
     <p>Three strikes and you're out. Survive six periods to finish the day. Each day gets harder. Your run saves at every bell.</p>
     <p class="keys">Phone: left thumb moves, drag on the right side to look around.<br>Desktop: WASD or arrow keys move, drag the mouse to look, click or E to hide.</p>
     <button class="go" id="aboutClose" type="button">Got it</button>
