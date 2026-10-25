@@ -44,6 +44,7 @@ Built from `Hallway_Skip_Game_Spec` v0.2. Done so far:
 - **Step 37:** take anything from the custodian's closet and it's locked (🔒) for the rest of the day. A staff key opens it (one use each time). It still restocks every period. Unlocked again each morning.
 - **Step 38:** the wet-floor sign is no longer in the closet. When the custodian cleans something wet (slime, Mentos, a mop-bucket puddle, a stink cloud, a flooded restroom) he sets two signs out around it and collects them when he's done. Swipe one (E / tap) and set it down: staff on their rounds who see it ahead turn back (+30); staff who are suspicious or chasing ignore it. 10 s after you take one, he drops whatever he's doing to get it back, from the floor or from you (`CFG.custodian.signsFor`, `retrieveAfterSec`).
 - **Step 39:** toilet paper climbs faster and flies higher (2.85 m), so it clears the banners and drapes over the wires (caught 8 out of 8 throws from 3–9 m away in testing). Paper that snags stays put instead of sliding off. The plunger blinds staff for 12 s (was 5). The kick-me sign works on kids too: staff first if one's in reach, otherwise the nearest kid, who gets stuck in a ring of laughing kids for 9 s (+150, +10 a kid).
+- **Step 40:** hood up (🧥 button next to sprint on phones, H on a keyboard): for 12 s staff build suspicion at half the rate. Sprinting knocks it down. Then a 25 s cooldown (the button counts down). The hood covers your face while it's up (`CFG.hoodie`).
 
 ## Before turning on real ads
 

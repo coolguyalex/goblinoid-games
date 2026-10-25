@@ -172,9 +172,14 @@
   #pauseBtn { position: fixed; left: max(10px, env(safe-area-inset-left)); bottom: max(10px, env(safe-area-inset-bottom)); width: 38px; height: 38px;
     border-radius: 50%; border: 2px solid rgba(255,255,255,.3); background: rgba(20,24,36,.6); color: #fff; font-size: 15px; padding: 0; z-index: 4; display: none; }
   @media (pointer: coarse) { #pauseBtn { display: block; } }
-  #jumpBtn { position: fixed; right: calc(max(10px, env(safe-area-inset-right)) + 66px); bottom: max(12px, env(safe-area-inset-bottom)); z-index: 4;
+  #jumpBtn { position: fixed; right: calc(max(10px, env(safe-area-inset-right)) + 128px); bottom: max(12px, env(safe-area-inset-bottom)); z-index: 4;
     padding: 12px 18px; border: 0; border-radius: 999px; background: #ffd36b; color: #1d2230; font: 900 16px system-ui, sans-serif; box-shadow: 0 3px 10px rgba(0,0,0,.4); }
   #jumpBtn[hidden] { display: none; }
+  #hoodBtn { position: fixed; right: calc(max(10px, env(safe-area-inset-right)) + 64px); bottom: max(10px, env(safe-area-inset-bottom)); width: 54px; height: 54px;
+    border-radius: 50%; border: 2px solid rgba(255,255,255,.35); background: rgba(20,24,36,.72); color: #fff; font: 800 15px system-ui, sans-serif; z-index: 4; padding: 0; display: none; touch-action: none; }
+  #hoodBtn.on { border-color: #b8a6ff; background: rgba(150,130,255,.35); } #hoodBtn.cd { opacity: .45; }
+  @media (pointer: coarse) { #hoodBtn { display: block; } }
+  .state-off #hoodBtn { display: none !important; }
   /* options */
   #options { z-index: 7; background: rgba(18, 21, 31, .97); cursor: default; }
   .opt { display: flex; gap: 12px; align-items: flex-start; text-align: left; margin: 12px auto; max-width: 30em; padding: 10px 14px;
@@ -266,7 +271,7 @@
   <div id="markers"></div>
   <div id="toast"></div>
   <div id="keyHint"></div>
-  <div id="kbdHelp">WASD move · Shift sprint · E interact · 1–4 items · Esc pause</div>
+  <div id="kbdHelp">WASD move · Shift sprint · H hood · E interact · 1–4 items · Esc pause</div>
   <div id="fps" hidden></div>
 </div>
 <div id="alarmFx" hidden></div>
@@ -285,6 +290,7 @@
 <div id="autoTarget">🎯</div>
 <div id="stickGuide" hidden><div class="gBase"><div class="gKnob"></div></div><span>move</span></div>
 <div id="lookGuide" hidden>👆 drag here to look around</div>
+<button id="hoodBtn" type="button" aria-label="Hood up">🧥</button>
 <button id="jumpBtn" type="button" hidden>🦘 Jump off</button>
 <button id="pauseBtn" type="button" aria-label="Pause">⏸</button>
 <div id="hotbar"></div>
@@ -299,7 +305,7 @@
 
 <div class="overlay" id="title">
   <div>
-    <span class="tag">prototype · build step 39</span>
+    <span class="tag">prototype · build step 40</span>
     <h1>Hallway Skip</h1>
     <p>Skip class. Don't get caught.</p>
     <div class="buttons">
@@ -326,7 +332,7 @@
     <p>Friends (white tees) raise a hand during passing periods: get close and tap the bubble for a high five or a gum trade. Trading gum pays well and gets you a fake pass that cancels your next catch. Kids toss paper airplanes: walk into one to catch it. Points multiply while nobody has eyes on you (streak), and double for a few seconds after a near miss. After your second strike, the principal walks the halls.</p>
     <p>Three strikes and you're out. Survive six periods to finish the day. Each day gets harder. Your run saves at every bell.</p>
     <p class="keys">Phone: left thumb moves, drag on the right side to look around, hold 🏃 to sprint, ⏸ pauses.<br>Desktop: WASD or arrow keys move, Shift sprints, drag the mouse to look. E does whatever the little E bubble says (pick up, hide, high five, catch). 1–4 throw an item (with auto-aim off: pick it, aim with the arrow keys, throw with Space). While hiding, number keys grab things off the desks.</p>
-    <p>Sprinting is fast but short, makes you easier to notice, and barging through kids gets attention.</p>
+    <p>Hood up (🧥 on phones, H on a keyboard) and staff take twice as long to notice you for 12 seconds, but running knocks it down, and then it needs a breather. Sprinting is fast but short, makes you easier to notice, and barging through kids gets attention.</p>
     <button class="go" id="aboutClose" type="button">Got it</button>
   </div>
 </div>

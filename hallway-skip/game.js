@@ -40,6 +40,7 @@
 // Step 38: no wet-floor sign in the closet. The custodian puts two out around wet messes while he cleans; steal one and set it down:
 //          staff who aren't onto you turn around when they see it. 10 s after you take one, he drops everything to get it back.
 // Step 39: toilet paper flies higher (clears the banners), the plunger lasts much longer, and the kick-me sign works on kids too.
+// Step 40: hood up (🧥 button or H): staff are slower to notice you for a while; running pulls it down; then a cooldown.
 import * as THREE from "three";
 
 // =====================================================================================
@@ -118,6 +119,8 @@ const CFG = {
     visitEverySec: [35, 70],      // how often he goes to his closet when there's nothing to clean
   },
   breaker: { sec: 10, visionMult: 0.4, points: 300, light: 0.22 },   // lights out: staff can barely see
+  // Hood up: for a while staff build suspicion at half the rate. Sprinting knocks it down. Then a cooldown.
+  hoodie: { sec: 12, cooldownSec: 25, noticeMult: 0.5 },
   // Energy drink: a longer stamina bar (and faster refills) for a while
   energy: { boostSec: 60, maxMult: 2, rechargeMult: 1.5 },
   keyboard: { aimTurnRate: 1.8, aimPowerRate: 0.9, startPower: 0.55 },   // arrow-key aiming: radians/s and power/s
@@ -1002,6 +1005,7 @@ const player = {
   x: 0, z: 0, vx: 0, vz: 0, heading: 0, stamina: 1, staminaMax: 1, boostT: 0, sprinting: false, winded: false, shoveCD: 0,
   hidden: null, hideT: 0, hideArmed: false, graceT: 0, invisT: 0, pushSpot: null, pushT: 0, slipT: 0, dazeT: 0, stuckT: 0, ride: null,
   mesh: makePerson({ body: 0x8a8f99, hood: 0x7b808a }),   // the gray hoodie
+  hoodT: 0, hoodCD: 0,
 };
 
 // ---------- crowd (instanced: one mesh for bodies, one for heads) ----------
@@ -1208,7 +1212,7 @@ window.addEventListener("pointerdown", (e) => { if (e.pointerType === "touch") s
 window.addEventListener("keydown", (e) => {
   const k = e.key.toLowerCase();
   keys.add(k);
-  if (/^(w|a|s|d|e|shift|arrow\w+|[1-9]| )$/.test(k)) setUsingKeys(true);
+  if (/^(w|a|s|d|e|h|shift|arrow\w+|[1-9]| )$/.test(k)) setUsingKeys(true);
   if ((e.key === " " || e.key === "Enter") && game.state !== "playing") { e.preventDefault(); onOverlayTap(); return; }
   if (game.state !== "playing") return;
   if (e.key === "Escape") { if (game.aim) cancelAim(); else pause(); return; }
@@ -1221,6 +1225,7 @@ window.addEventListener("keydown", (e) => {
   }
   if (player.ride && (k === "e" || k === " ") && !e.repeat) { e.preventDefault(); jumpOff(); return; }
   if (k === "e" && !e.repeat) doInteract();
+  if (k === "h" && !e.repeat) hoodUp();
 });
 window.addEventListener("keyup", (e) => keys.delete(e.key.toLowerCase()));
 
@@ -1375,6 +1380,7 @@ function morningSetup() {
   clearObjects(); cancelAim(); clearGraffiti(); clearTrails();   // the custodian scrubs the walls (and takes down the TP) overnight
   if (player.ride) { scene.remove(player.ride.chair); player.ride = null; $("jumpBtn").hidden = true; }
   player.slipT = player.dazeT = player.stuckT = 0; player.mesh.rotation.z = 0; player.stamina = 1; player.staminaMax = 1; player.boostT = 0; player.winded = false;
+  if (player.hoodT > 0) hoodDown(); player.hoodCD = 0;
   game.hotbar = Array(CFG.items.slots).fill(null); renderHotbar();
   rollSubs();             // first, so sub rooms get their extra desk loot
   resetSpotsForPeriod();
@@ -1709,6 +1715,7 @@ $("optStick").addEventListener("change", (e) => { opts.stickGuide = e.target.che
 $("options").addEventListener("click", (e) => e.stopPropagation());
 $("optionsClose").addEventListener("click", () => { $("options").hidden = true; });
 $("pauseBtn").addEventListener("pointerdown", (e) => e.stopPropagation());
+$("hoodBtn").addEventListener("pointerdown", (e) => { e.preventDefault(); e.stopPropagation(); hoodUp(); });
 $("jumpBtn").addEventListener("pointerdown", (e) => { e.preventDefault(); e.stopPropagation(); jumpOff(); });
 $("pauseBtn").addEventListener("click", (e) => { e.stopPropagation(); pause(); });
 renderOptSummary();
@@ -1805,6 +1812,29 @@ function updateSprint(dt) {
   player.sprinting = want && !player.winded && player.stamina > 0;
   if (player.sprinting) { player.stamina = Math.max(0, player.stamina - dt / S.staminaSec); if (player.stamina <= 0) { player.winded = true; toast("Out of breath!"); } }
   else player.stamina = Math.min(player.staminaMax, player.stamina + (dt / S.rechargeSec) * (player.boostT > 0 ? CFG.energy.rechargeMult : 1));
+}
+// ---- hood up: harder to notice for a while ----
+const hoodUpMesh = new THREE.Mesh(new THREE.IcosahedronGeometry(0.27, 1), lambert(0x5d626b));
+hoodUpMesh.position.set(0, 1.37, -0.03); hoodUpMesh.scale.set(1.05, 1.08, 1.0); hoodUpMesh.visible = false; player.mesh.add(hoodUpMesh);
+function hoodUp() {
+  if (game.state !== "playing" || player.hidden || player.hoodT > 0) return;
+  if (player.hoodCD > 0) { toast(`Hood's cooling off (${Math.ceil(player.hoodCD)} s)`); return; }
+  player.hoodT = CFG.hoodie.sec; hoodUpMesh.visible = true; player.mesh.userData.eyes.visible = false;
+  toast(`Hood up. Staff are slower to notice you for ${CFG.hoodie.sec} s. Don't run.`, 2.2); playBlip([300, 240], 0.06, "triangle", 0.04);
+}
+function hoodDown(msg) {
+  player.hoodT = 0; player.hoodCD = CFG.hoodie.cooldownSec; hoodUpMesh.visible = false; player.mesh.userData.eyes.visible = true;
+  if (msg) toast(msg);
+}
+function tickHood(dt) {
+  if (player.hoodT > 0) {
+    player.hoodT -= dt;
+    if (player.sprinting) hoodDown("Running knocked your hood down.");
+    else if (player.hoodT <= 0) hoodDown("Hood down.");
+  } else if (player.hoodCD > 0) player.hoodCD -= dt;
+  const b = $("hoodBtn"), label = player.hoodT > 0 ? `🧥 ${Math.ceil(player.hoodT)}` : player.hoodCD > 0 ? `🧥 ${Math.ceil(player.hoodCD)}` : "🧥";
+  if (b.dataset.l !== label) { b.dataset.l = label; b.textContent = label; }
+  b.classList.toggle("on", player.hoodT > 0); b.classList.toggle("cd", player.hoodT <= 0 && player.hoodCD > 0);
 }
 // energy drink: the bar is twice as long (and refills faster) until boostT runs out
 function drinkEnergy() {
@@ -1977,6 +2007,7 @@ function noticeRate(st, d, cover) {
   rate /= 1 + cover * CFG.crowd.coverPerStudent;
   if (player.sprinting) rate *= CFG.sprint.noticeMult;   // a running kid stands out
   if (game.phase === "passing") rate /= D.passingBeatMult;
+  if (player.hoodT > 0) rate *= CFG.hoodie.noticeMult;   // hood up: just another kid in a hoodie
   return rate;
 }
 
@@ -4623,7 +4654,7 @@ renderer.setAnimationLoop(() => {
   if (toastTimer > 0) { toastTimer -= dt; if (toastTimer <= 0) ui.toast.classList.remove("show"); }
   drawCrowd();
   updateCamera(dt);
-  if (game.state === "playing") { updateKeyAim(dt); tickBoost(dt); tickBlackout(dt); }
+  if (game.state === "playing") { updateKeyAim(dt); tickBoost(dt); tickBlackout(dt); tickHood(dt); }
   updateAimPreview();
   updateKeyHint();
   updateAutoTarget();
