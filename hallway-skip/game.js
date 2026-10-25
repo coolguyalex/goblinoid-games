@@ -30,6 +30,7 @@
 // Step 28: the band room (room 206): the trumpet (every staff member comes running, big points) and the bass drum (roll it down the hall).
 // Step 29: steer the wheelie chair a little (steering slows you down), and jump off before the crash (the chair rolls on without you).
 // Step 30: staff can't pull you out of a locker. If they saw you go in, they wait outside it until you come out (burst out!).
+// Step 31: the custodian does the cleaning (messes stay until he gets to them; kids grab balls and planes), never chases, radios you in.
 import * as THREE from "three";
 
 // =====================================================================================
@@ -45,7 +46,8 @@ const CFG = {
   // Within-day curve: index = period - 1. Period 1 is easy, period 6 is very hard but possible.
   monitorsPerPeriod: [1, 1, 2, 2, 2, 3],
   guardsPerPeriod:   [0, 1, 1, 1, 1, 2],
-  teachersPerPeriod: [0, 0, 1, 1, 2, 3],   // teachers standing guard at their doors
+  teachersPerPeriod: [0, 0, 1, 1, 2, 3],
+  custodiansPerPeriod: [1, 1, 1, 1, 1, 1],   // one per floor (more once there are more floors)   // teachers standing guard at their doors
 
   // Across-days curve, kept separate so the two are easy to tune independently.
   days: {
@@ -81,6 +83,20 @@ const CFG = {
     defaultPower: 0.55,
     power: { bananaPeel: 0.3, whoopee: 0.3, slime: 0.35, mentos: 0.35, stinkBomb: 0.5, spitball: 0.6, wheelieChair: 1 },
     behind: ["bananaPeel"],       // these drop behind you instead
+  },
+  // The custodian: the only one who cleans up. Messes stay where they are until he gets to them (he hears about them on
+  // the radio, then walks over). Kids grab the fun stuff (balls, frisbees, paper airplanes) lying around before he can.
+  // He never chases you, but if he gets a good look he radios the nearest staff.
+  custodian: {
+    pickupSec: 1.6,               // picking up an item or litter
+    scrubSec: 4,                  // scrubbing graffiti off a wall
+    tpSec: 3,                     // pulling down a toilet-paper streamer
+    mopSec: 7,                    // mopping a flooded restroom (it reopens)
+    airSec: 2.5,                  // airing out what's left of a stink bomb
+    radioCooldownSec: 15, radioHeat: 5, radioStaff: 2,
+    kidsTake: ["basketball", "football", "frisbee", "paperAirplane", "bassDrum"],
+    kidGrabRange: 0.9, kidGrabAfterSec: 1.5,
+    lingerRadius: 0.55,           // a stink cloud shrinks to this fraction once it fades, and hangs around until he airs it out
   },
   // Energy drink: a longer stamina bar (and faster refills) for a while
   energy: { boostSec: 60, maxMult: 2, rechargeMult: 1.5 },
@@ -303,6 +319,17 @@ const STAFF_TYPES = {
     vestColor: 0x3b3f4a, hatColor: null, scale: 1.22,
     caughtLine: "\"My office. Now.\"",
   },
+  custodian: {
+    name: "custodian",
+    custodian: true,                          // cleans; never chases or catches you; radios you in if he sees you
+    patrolSpeed: 1.7, chaseSpeed: 1.7,
+    visionRange: 8, visionHalfAngleDeg: 45,
+    sweepDeg: 30, sweepRate: 0.7,
+    roamTurnSec: [8, 16],
+    notice: 0.7,
+    vestColor: 0x4f6d7a, hatColor: 0x2d3b45, scale: 1.1, coneColor: 0x9fd8ff,
+    caughtLine: "\"Not my department, kid.\"",
+  },
   hallTeacher: {
     name: "teacher",
     stationary: true,                          // stands at their classroom door
@@ -345,6 +372,8 @@ const BARKS = {   // speech bubbles over staff heads
                    slip: ["WHOA—", "My back!"], bust: ["I SAW that.", "Nice try."], tidy: ["Who left this here?", "Unbelievable.", "*sigh* Kids."], check: ["Hey, do you kids have a pass?", "Anybody in here?"] },
   securityGuard: { suspicious: ["...", "Movement."], chase: ["Code gray hoodie!", "Freeze!"], search: ["Come out, come out..."],
                    giveUp: ["Copy. Lost visual."], slip: ["Man down!"], winded: ["*wheeze*", "Gimme... a sec..."], bust: ["Gotcha."], tidy: ["Confiscated.", "Evidence."], check: ["Hey, do you kids have a pass?", "Security. Everybody out."] },
+  custodian:     { suspicious: ["Hm.", "*squints*"], tidy: ["Every. Single. Day.", "Kids these days.", "*mutters*", "Who raised you?"],
+                   slip: ["Oof! My knees!", "Not again..."], radio: ["Got a kid out here!", "Yeah, I see one. Over.", "Somebody come get this one."] },
   hallTeacher:   { suspicious: ["Excuse me?"], alarm: ["HALL PASS!", "Excuse me?!", "SECURITY!"] },
   principal:     { suspicious: ["Mm-hm."], chase: ["YOUNG PERSON!", "MY OFFICE!"], search: ["Hiding won't help."],
                    giveUp: ["This isn't over."], slip: ["Who put this here?!"], bust: ["Out. Now."], tidy: ["In MY school?", "Disgraceful."], check: ["Hey, do you kids have a pass?", "I know someone's in here."] },
@@ -458,7 +487,7 @@ const ROOM_TYPES = {
 // Items are data. kind: "throw" (flick it), "ride" (flick to launch yourself), "instant" (tap to use).
 // hit: what happens when it hits someone. Hitting staff always pays more. Stun "flinch" = a stagger, "fall" = flat on the floor.
 const ITEM_TYPES = {
-  paperAirplane: { label: "Paper airplane", icon: "✈️", kind: "throw", flight: "glide2", speed: [6, 11], pitchDeg: 8, gravity: 1.2, glide: true,
+  paperAirplane: { label: "Paper airplane", icon: "✈️", kind: "throw", recoverable: true, flight: "glide2", speed: [6, 11], pitchDeg: 8, gravity: 1.2, glide: true,
                    // two-stage flight: soars over heads (fly-over points), then drops to head height (can hit people)
                    cruiseY: 2.55, highSec: [0.45, 1.3], lowY: 1.35, sinkRate: 0.75, drag: 0.25,
                    perStudent: 10, crowdLandBonus: 50, crowdLandCount: 3,
@@ -477,7 +506,7 @@ const ITEM_TYPES = {
   spitball:      { label: "Spitball", icon: "🫧", kind: "throw", uses: 3, speed: [16, 24], pitchDeg: 4, gravity: 5,
                    hit: { student: 25, staff: 75, studentSec: 0.4, staffSec: 0.8, style: "flinch" } },
   bananaPeel:    { label: "Banana peel", icon: "🍌", kind: "throw", speed: [2, 4.5], pitchDeg: 35, gravity: 9.8,
-                   maxSlips: 5,   // stays down until a staff member slips on it (and cleans it up) or it's been slipped on 5 times
+                   maxSlips: Infinity,   // stays down (each person slips once) until the custodian cleans it up
                    slipStaffSec: 2.5, slipStudentSec: 1.0, slipPlayerSec: 0.8, staffPoints: 150, studentPoints: 30 },
   whoopee:       { label: "Whoopee cushion", icon: "💨", kind: "throw", recoverable: true, trap: true, speed: [3, 8], pitchDeg: 35, gravity: 9.8,
                    noiseRadius: 14, points: 50 },   // goes off when someone steps on it (you too)
@@ -494,7 +523,7 @@ const ITEM_TYPES = {
   // Science labs: lands as a puddle (or on whoever it hits). The first few people to step in it are stuck for a few
   // seconds: staff can still look around and yell, they just can't move.
   slime:         { label: "Slime", icon: "🟢", kind: "throw", trap: true, speed: [4, 9], pitchDeg: 25, gravity: 9.8,
-                   radius: 0.6, maxSticks: 3, stickStaffSec: 4, stickStudentSec: 2.5, stickPlayerSec: 1.5, staffPoints: 120, studentPoints: 30 },
+                   radius: 0.6, maxSticks: Infinity, stickStaffSec: 4, stickStudentSec: 2.5, stickPlayerSec: 1.5, staffPoints: 120, studentPoints: 30 },
   // Stick it on a staff member's back (get right up behind them; if they're facing you, they catch on). During a passing
   // period the kids crowd round laughing and pen them in until the tardy bell. Stick it on during class and it waits.
   kickMe:        { label: "\"Kick me\" sign", icon: "🦵", kind: "sign", range: 1.4, points: 400, penKids: 9, penPoints: 100 },
@@ -949,6 +978,11 @@ function spawnStaff(typeKey, place) {
     const tie = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.4, 0.04), lambert(0xc0392b));
     tie.position.set(0, 0.85, 0.3); mesh.add(tie);
   }
+  if (typeKey === "custodian") {   // a mop over the shoulder
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 1.6, 5), lambert(0xc8a46a));
+    pole.position.set(0.32, 0.9, 0); pole.rotation.z = 0.35; mesh.add(pole);
+    const head = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.14, 0.22), lambert(0xe8e2d0)); head.position.set(0.6, 0.18, 0); mesh.add(head);
+  }
   if (T.stationary) {   // a coffee mug, so teachers read differently from a distance
     const mug = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.14, 6), lambert(0xffffff));
     mug.position.set(0.3, 0.85, 0.2); mesh.add(mug);
@@ -958,7 +992,7 @@ function spawnStaff(typeKey, place) {
   geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array((RAYS + 2) * 3), 3));
   const idx = []; for (let i = 0; i < RAYS; i++) idx.push(0, i + 1, i + 2);
   geo.setIndex(idx);
-  const cone = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0xfff2a8, transparent: true, opacity: 0.28, depthWrite: false, side: THREE.DoubleSide }));
+  const cone = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: T.coneColor ?? 0xfff2a8, transparent: true, opacity: 0.28, depthWrite: false, side: THREE.DoubleSide }));
   cone.frustumCulled = false; cone.renderOrder = 1;
   scene.add(cone);
   const alert = document.createElement("div"); alert.className = "alert"; markersEl.appendChild(alert);
@@ -1338,7 +1372,7 @@ function startPassing(first) {
     if (!first) { c.mode = "spawning"; c.spawnAt = rand(0, CFG.crowd.floodSpreadSec); c.speed = rand(CFG.crowd.speedMin, CFG.crowd.speedMax); }
   }
   // staff for this period (the within-day curve); they stay on for the rest of the day
-  for (const [key, table, line] of [["hallMonitor", CFG.monitorsPerPeriod], ["securityGuard", CFG.guardsPerPeriod, "guardOnDuty"], ["hallTeacher", CFG.teachersPerPeriod, "teacherOut"]]) {
+  for (const [key, table, line] of [["hallMonitor", CFG.monitorsPerPeriod], ["securityGuard", CFG.guardsPerPeriod, "guardOnDuty"], ["hallTeacher", CFG.teachersPerPeriod, "teacherOut"], ["custodian", CFG.custodiansPerPeriod]]) {
     let have = staff.filter((st) => st.key === key).length;
     const S = CFG.security, extra = key !== "securityGuard" ? 0 : (game.security >= S.extraGuardAt ? 1 : 0) + (game.security >= S.secondGuardAt ? 1 : 0);
     const want = perPeriod(table) + extra;
@@ -1470,6 +1504,7 @@ function caught(st) {
   // everyone backs off
   for (const o of staff) {
     if (o.type.stationary) o.state = "post";
+    else if (o.type.custodian) { o.suspicion = 0; continue; }
     else if (o.state !== "patrol") { o.state = "return"; setReturnPoint(o); }
     o.suspicion = 0; o.calledBackup = false; o.chaseT = 0; o.windedT = 0; o.pauseT = 0.8;
   }
@@ -1482,7 +1517,7 @@ function shoo(st, line = null) {
   playBlip([520, 390], 0.1, "triangle", 0.07);
   if (!line) addHeat(CFG.heat.shooHeat);
   for (const o of staff) {
-    if (o.type.stationary) { o.suspicion = 0; o.alarmT = Math.max(o.alarmT, 3); continue; }
+    if (!chaser(o)) { o.suspicion = 0; o.alarmT = Math.max(o.alarmT, 3); continue; }
     if (o.state !== "patrol") { o.state = "return"; setReturnPoint(o); }
     o.suspicion = 0; o.calledBackup = false; o.pauseT = 1.0;
   }
@@ -1906,7 +1941,9 @@ function updateStaff(dt, cover) {
 
     const stuck = st.stuckT > 0, snap = stuck ? [st.x, st.z, st.h, st.t, st.to, st.ri] : null;   // in slime: can look and yell, can't move
     if (stuck) st.stuckT -= dt;
-    if (st.state === "post") {
+    if (T.custodian) {
+      speed = updateCustodian(st, dt, cover, stuck);
+    } else if (st.state === "post") {
       // a teacher at their door: doesn't chase, but yells for backup, and grabs you if you walk right past
       const look = canSeePlayer(st, 1, true);
       st.alarmT = Math.max(0, st.alarmT - dt);
@@ -1957,7 +1994,7 @@ function updateStaff(dt, cover) {
         walk(st, speed * dt, patrolChooser(st));
         hallPos(st.h, st.t, 0, st);
         st.tidyScanT = (st.tidyScanT ?? 0) - dt;   // glance around for things lying in the hall
-        if (st.tidyScanT <= 0 && st.suspicion < 0.05) { st.tidyScanT = 0.4; const o = findTidy(st); if (o) setTidy(st, o); }
+        // (only the custodian tidies up now)
         if (st.state === "patrol" && st.suspicion < 0.05) maybeCheckRestroom(st);
         const base = hallHeading(st.h, st.to === HALLS[st.h].b ? 1 : -1);
         const want = st.suspicion > 0.05 ? Math.atan2(player.x - st.x, player.z - st.z) : st.distractT > 0 ? Math.atan2(st.dX - st.x, st.dZ - st.z) : base + Math.sin(st.sweep) * (T.sweepDeg * Math.PI / 180);
@@ -2036,6 +2073,8 @@ function updateStaff(dt, cover) {
     updateCone(st);
   }
 }
+// staff who chase and catch (not teachers at their doors, not the custodian)
+const chaser = (st) => !st.type.stationary && !st.type.custodian;
 function bark(st, kind, force = false) {
   const lines = BARKS[st.key]?.[kind];
   if (!lines || (!force && game.time - st.barkAt < CFG.barkCooldownSec)) return;
@@ -2057,7 +2096,7 @@ function chaseSpeed(st, dt) {
 // A radio call (guard) or a yell (teacher): the nearest free staff head for your position.
 function callBackup(caller, announce) {
   if (announce) playBlip([1400, 1100, 1400], 0.05, "square", 0.05);   // radio chirp
-  const others = staff.filter((o) => o !== caller && !o.type.stationary && o.state !== "chase" && o.state !== "bust")
+  const others = staff.filter((o) => o !== caller && chaser(o) && o.state !== "chase" && o.state !== "bust")
     .map((o) => ({ o, d: Math.hypot(o.x - player.x, o.z - player.z) }))
     .filter((e) => caller.type.backupAll || e.d < CFG.backup.range).sort((a, b) => a.d - b.d).slice(0, caller.type.backupAll ? 99 : CFG.backup.maxResponders);
   for (const { o, d } of others) {
@@ -2193,7 +2232,7 @@ function update(dt) {
   updatePlayer(dt);
   updateCrowd(dt);
   updateStaff(dt, crowdCoverCount());
-  if (game.state === "playing") { updateKickMe(); updateObjects(dt); updateTrails(dt); updateHeat(dt); updateRisk(dt); updateFriends(dt); updateAirplanes(dt); updateAlarm(dt); }
+  if (game.state === "playing") { updateKickMe(); updateObjects(dt); updateTrails(dt); kidsGrab(dt); updateHeat(dt); updateRisk(dt); updateFriends(dt); updateAirplanes(dt); updateAlarm(dt); }
 }
 
 // =====================================================================================
@@ -2239,7 +2278,7 @@ function enterSpot(sp) {
   stick.x = stick.y = 0;
   // Did anyone see you go in?
   for (const st of staff) {
-    if (st.type.stationary) continue;
+    if (!chaser(st)) continue;
     const d = Math.hypot(st.x - f.x, st.z - f.z);
     if (!lineOfSight(st.x, st.z, f.x, f.z)) continue;
     if ((st.state === "chase" || st.state === "search") && d < st.type.visionRange * CFG.detection.chaseSightRangeMult) {
@@ -2470,7 +2509,7 @@ function roomBackfire(sp) {
   toast(`${TT_NAME(sp)} picks up the phone: "Security to room ${sp.room}."`, 2.6);
   playBlip([880, 0, 880], 0.12, "sine", 0.05);
   const f = spotFront(sp, {});
-  const free = staff.filter((s) => !s.type.stationary && s.state !== "chase" && s.state !== "bust")
+  const free = staff.filter((s) => chaser(s) && s.state !== "chase" && s.state !== "bust")
     .sort((a, b) => (b.key === "securityGuard") - (a.key === "securityGuard") || Math.hypot(a.x - f.x, a.z - f.z) - Math.hypot(b.x - f.x, b.z - f.z));
   const st = free[0];
   if (sp.R.alarmHeat) {   // the main office: every staff member on the floor comes running, and it's a lot of heat
@@ -2976,6 +3015,107 @@ function stunStaff(st, sec, style) {
   st.stunT = Math.max(st.stunT, sec); st.stunStyle = style; st.camping = false;
   if (st.state === "chase" || st.state === "bust") { st.state = "search"; st.searchT = 0; st.lastX = st.tx = player.x; st.lastZ = st.tz = player.z; }
 }
+// ---- the custodian: walks to the nearest mess and cleans it; radios you in if he gets a good look ----
+const kidsWant = (o) => CFG.custodian.kidsTake.includes(o.key);
+function custodianJobs() {
+  const C = CFG.custodian, jobs = [];
+  for (const o of objects) {
+    if (o.dead || o.wild) continue;
+    if (o.state === "cloud" && o.lingering) jobs.push({ kind: "cloud", o, x: o.x, z: o.z, sec: C.airSec, reach: 1.2 });
+    else if (tidyable(o) && !kidsWant(o) && o.state !== "pickup") jobs.push({ kind: "obj", o, x: o.x, z: o.z, sec: C.pickupSec, reach: 0.6 });
+  }
+  for (const g of graffiti) { const p = hallPos(g.h, g.t, wallLat(g.h, g.side) - g.side * 0.55); jobs.push({ kind: "graffiti", g, x: p.x, z: p.z, sec: C.scrubSec, reach: 0.6 }); }
+  for (const tr of tpTrails) {
+    if (!tr.done || !tr.mesh) continue;
+    const m = tr.pts[Math.floor(tr.pts.length / 2)], pr = hallProject(m.x, m.z), p = hallPos(pr.h, pr.t, clamp(pr.lat, -1.6, 1.6));
+    jobs.push({ kind: "tp", tr, x: p.x, z: p.z, sec: C.tpSec, reach: 1.0 });
+  }
+  for (const sp of RESTROOMS) if (sp.closed) { const f = spotFront(sp, {}); jobs.push({ kind: "flood", sp, x: f.x, z: f.z, sec: C.mopSec, reach: 0.8 }); }
+  return jobs;
+}
+function jobGone(j) {
+  if (j.kind === "obj") return j.o.dead || !tidyable(j.o);
+  if (j.kind === "cloud") return j.o.dead;
+  if (j.kind === "graffiti") return !graffiti.includes(j.g);
+  if (j.kind === "tp") return !tpTrails.includes(j.tr);
+  return !j.sp.closed;
+}
+const jobKey = (j) => j.o ?? j.g ?? j.tr ?? j.sp;
+function finishJob(st, j) {
+  if (j.kind === "obj" || j.kind === "cloud") removeObject(j.o);
+  else if (j.kind === "graffiti") { const i = graffiti.indexOf(j.g); graffiti.splice(i, 1); scene.remove(j.g.mesh); j.g.mesh.material.map.dispose(); j.g.mesh.material.dispose(); }
+  else if (j.kind === "tp") { dropTrail(j.tr); tpTrails.splice(tpTrails.indexOf(j.tr), 1); }
+  else { j.sp.closed = false; if (j.sp.puddle) j.sp.puddle.visible = false; if (player.hidden !== j.sp) toast("The custodian mopped up the flooded restroom. It's open again."); }
+  bark(st, "tidy", true);
+}
+function radioIn(st) {
+  const C = CFG.custodian;
+  const free = staff.filter((o) => chaser(o) && o.state !== "chase" && o.state !== "bust" && o.stunT <= 0)
+    .sort((a, b) => Math.hypot(a.x - player.x, a.z - player.z) - Math.hypot(b.x - player.x, b.z - player.z)).slice(0, C.radioStaff);
+  for (const o of free) { o.state = "search"; o.searchT = -8; o.suspicion = 0.6; o.lastX = o.tx = player.x + rand(-2, 2); o.lastZ = o.tz = player.z + rand(-2, 2); }
+  bark(st, "radio", true); playBlip([1400, 1100, 1400], 0.05, "square", 0.05);
+  toast(free.length ? `The custodian radios it in. ${free.length === 1 ? "Someone's" : "Staff are"} on the way!` : "The custodian radios it in, but nobody answers.", 2.4);
+  addHeat(C.radioHeat);
+}
+function updateCustodian(st, dt, cover, stuck) {
+  const T = st.type, C = CFG.custodian, D = CFG.detection;
+  const look = canSeePlayer(st, 1, true);
+  if (look.seen) st.suspicion += noticeRate(st, look.d, cover) * dt;
+  else st.suspicion = Math.max(0, st.suspicion - D.decayRate * dt);
+  st.radioCD = Math.max(0, (st.radioCD ?? 0) - dt);
+  if (st.suspicion >= 1) { st.suspicion = 0.4; if (st.radioCD <= 0) { st.radioCD = C.radioCooldownSec; radioIn(st); } }
+  if (stuck) return 0;
+  const sus = st.suspicion > 0.05;
+  if (sus) st.facing = lerpAngle(st.facing, Math.atan2(player.x - st.x, player.z - st.z), damp(5, dt));
+  const speed = T.patrolSpeed * staffMult("speed") * (sus ? 0.3 : 1);
+  st.jobScanT = (st.jobScanT ?? 0) - dt;
+  if (st.job && jobGone(st.job)) st.job = null;
+  if (!st.job && st.jobScanT <= 0) {   // the nearest mess nobody else is on
+    st.jobScanT = 0.6;
+    const taken = new Set(staff.filter((o) => o !== st && o.job).map((o) => jobKey(o.job)));
+    let best = null, bd = Infinity;
+    for (const j of custodianJobs()) { if (taken.has(jobKey(j))) continue; const d = Math.hypot(j.x - st.x, j.z - st.z); if (d < bd) { bd = d; best = j; } }
+    st.job = best; st.workT = 0;
+  }
+  if (st.job) {
+    const j = st.job; st.offHall = true;
+    if (navToward(st, j.x, j.z, speed, dt) < j.reach) {
+      if (!sus) st.facing = lerpAngle(st.facing, j.kind === "graffiti" ? Math.atan2(j.g.side * HALLS[j.g.h].nx, j.g.side * HALLS[j.g.h].nz) : st.facing, damp(4, dt));
+      st.workT += dt;
+      if (st.workT >= j.sec) { finishJob(st, j); st.job = null; }
+      return 0;
+    }
+    if (!sus) st.facing = lerpAngle(st.facing, Math.atan2(j.x - st.x, j.z - st.z), damp(4, dt));
+    return speed;
+  }
+  // nothing to clean: wander the halls
+  st.roamT -= dt; if (st.roamT <= 0) { st.roamT = rand(...T.roamTurnSec); if (Math.random() < 0.5) st.to = otherEnd(st.h, st.to); }
+  if (st.offHall) {   // back to the middle of the hall first
+    const pr = hallProject(st.x, st.z), c = hallPos(pr.h, pr.t, 0);
+    st.h = pr.h; st.t = pr.t; if (st.to !== HALLS[pr.h].a && st.to !== HALLS[pr.h].b) st.to = HALLS[pr.h].b;
+    if (moveToward(st, c.x, c.z, speed, dt) < 0.3) st.offHall = false;
+    return speed;
+  }
+  walk(st, speed * dt, randomOnward);
+  hallPos(st.h, st.t, 0, st);
+  if (!sus) st.facing = lerpAngle(st.facing, hallHeading(st.h, st.to === HALLS[st.h].b ? 1 : -1) + Math.sin(st.sweep) * (T.sweepDeg * Math.PI / 180), damp(3, dt));
+  return speed;
+}
+// kids pocket the fun stuff they find lying around
+let kidGrabT = 0;
+function kidsGrab(dt) {
+  if ((kidGrabT -= dt) > 0) return;
+  kidGrabT = 0.4;
+  const C = CFG.custodian;
+  for (const o of objects) {
+    if (o.dead || o.state !== "resting" || !kidsWant(o) || o.age < C.kidGrabAfterSec) continue;
+    if (crowd.some((c) => isActive(c) && c.slipT <= 0 && Math.hypot(c.x - o.x, c.z - o.z) < C.kidGrabRange)) {
+      removeObject(o);
+      if (Math.hypot(o.x - player.x, o.z - player.z) < 14) popup(`A kid grabs the ${o.T.label.toLowerCase()}`, "meh");
+    }
+  }
+}
+
 // ---- staff tidying up: they walk over to things lying around and pick them up ----
 function claimedBy(o) { return staff.find((s) => s.state === "tidy" && s.tidyObj === o) ?? null; }
 function setTidy(st, o, wait = 0) { if (st.type.stationary) return; st.state = "tidy"; st.tidyObj = o; st.tidyT = -wait; }
@@ -3097,7 +3237,7 @@ function landObject(o) {
       else if (!o.hitSet?.size && !o.trail) popup(`The ${T.label.toLowerCase()} lands. Nobody notices.`, "meh");
       if (o.trail) finishTrail(o);
       dareEvent("flyover", { n });
-      if (o.key === "frisbee") { o.state = "resting"; o.mesh.rotation.set(0, o.mesh.rotation.y, 0); break; }   // pick it back up
+      if (o.key === "frisbee" || o.key === "paperAirplane") { o.state = "resting"; o.mesh.rotation.set(0, o.mesh.rotation.y, 0); break; }   // pick it back up (or a kid will)
       o.state = "spent"; o.life = o.trail ? 0.6 : 1.5; break;
     }
     case "mentos": o.state = "fuse"; o.fuseT = o.T.fuseSec; o.vx = o.vz = 0; o.mesh.rotation.set(0, 0, 0); playBlip([900, 1100], 0.05, "sine", 0.03); break;
@@ -3168,7 +3308,7 @@ function playTrumpet() {
 function summonStaff(x, z) {
   let n = 0;
   for (const o of staff) {
-    if (o.type.stationary || o.state === "chase" || o.state === "bust") continue;
+    if (!chaser(o) || o.state === "chase" || o.state === "bust") continue;
     const d = Math.hypot(o.x - x, o.z - z);
     o.state = "search"; o.searchT = -Math.min(18, d / (o.type.chaseSpeed * 0.8)); o.suspicion = Math.max(o.suspicion, 0.6);
     o.lastX = o.tx = x; o.lastZ = o.tz = z; n++;
@@ -3189,14 +3329,15 @@ function cushionNoise(o, who) {
   havoc("whoopee", o.T.points, label, { x: o.x, z: o.z, loud: true });
   o.popped = true;   // now staff notice it lying there
   dareEvent("whoopee", { staff: who?.type ? who.key : null });
-  if (who?.type) { bark(who, "slip", true); setTidy(who, o, CFG.tidy.afterTrapSec); }   // they pick it up (it can't go off again)
+  if (who?.type) bark(who, "slip", true);
+  o.mesh.scale.y = 0.35;   // deflated: it won't go off again until you pick it up and set it again
   makeNoise(o.x, o.z, o.T.noiseRadius, true, who?.type ? who : null);
 }
 // Goes off when anyone steps on it: staff, a student, or you (then the staff come to see who it was).
 function stepOnCushion(o) {
-  if (o.age < (o.armedAt ?? 1) || o.noiseCD > 0 || claimedBy(o)) return;   // (not while someone's coming to pick it up)
+  if (o.age < (o.armedAt ?? 1) || o.noiseCD > 0 || o.popped) return;   // (not while someone's coming to pick it up)
   const on = (x, z, r) => Math.hypot(x - o.x, z - o.z) < r;
-  const st = staff.find((s) => on(s.x, s.z, 0.55));
+  const st = staff.find((s) => chaser(s) && on(s.x, s.z, 0.55));
   if (st) { cushionNoise(o, st); return; }
   if (crowd.some((c) => isActive(c) && on(c.x, c.z, 0.5))) { cushionNoise(o, null); return; }
   if (!player.hidden && on(player.x, player.z, 0.45)) cushionNoise(o, "player");
@@ -3206,7 +3347,7 @@ function makeNoise(x, z, radius, pull, except = null) {
   for (const st of staff) {
     const d = Math.hypot(st.x - x, st.z - z);
     if (st === except || d > radius || st.state === "chase" || st.state === "bust" || st.stunT > 0) continue;
-    if (pull && !st.type.stationary) {
+    if (pull && chaser(st)) {
       st.state = "search"; st.searchT = -Math.min(8, d / (st.type.chaseSpeed * 0.8));
       st.lastX = st.tx = x; st.lastZ = st.tz = z; st.suspicion = Math.max(st.suspicion, 0.3);
     } else { st.distractT = 2.2; st.dX = x; st.dZ = z; }
@@ -3223,13 +3364,12 @@ function trapCheck(o) {
     return o.dead;
   };
   for (const st of staff) {
-    if (st.type.stationary || st.stunT > 0 || o.hitSet.has(st) || Math.hypot(st.x - o.x, st.z - o.z) > 0.55) continue;
+    if (!chaser(st) || st.stunT > 0 || o.hitSet.has(st) || Math.hypot(st.x - o.x, st.z - o.z) > 0.55) continue;   // (the custodian steps around it)
     dareEvent("hit", { item: "bananaPeel", staff: st.key, chasing: st.state === "chase" || st.state === "bust" });
     stunStaff(st, T.slipStaffSec, "fall"); bark(st, "slip", true);
     playBlip([700, 300], 0.12, "sawtooth", 0.07);
     havoc("bananaStaff", T.staffPoints, `Wipeout! The ${st.type.name} slips`, { x: o.x, z: o.z, loud: true });
     if (slipped(st)) return;
-    if (!claimedBy(o)) setTidy(st, o, CFG.tidy.afterTrapSec);
   }
   for (const c of crowd) {
     if (!isActive(c) || c.slipT > 0 || o.hitSet.has(c) || Math.hypot(c.x - o.x, c.z - o.z) > 0.45) continue;
@@ -3251,13 +3391,12 @@ function slimeCheck(o) {
   const stuck = (who) => { o.hitSet.add(who); if (++o.slips >= T.maxSticks) o.spentAt ??= o.age; };
   if (o.slips >= T.maxSticks) { if (o.age - o.spentAt > 0.2 && !claimedBy(o)) removeObject(o); return; }   // all used up (unless someone's coming to clean it)
   for (const st of staff) {
-    if (st.type.stationary || o.hitSet.has(st) || !near(st.x, st.z)) continue;
+    if (!chaser(st) || o.hitSet.has(st) || !near(st.x, st.z)) continue;   // (the custodian's boots are slime-proof)
     dareEvent("hit", { item: "slime", staff: st.key, chasing: st.state === "chase" });
     st.stuckT = T.stickStaffSec;
     st.bubble.textContent = pick(["I'm STUCK!", "Is this... SLIME?!", "Ugh, my shoes!"]); st.barkUntil = performance.now() + 1800; st.barkAt = game.time;
     playBlip([220, 160, 240], 0.1, "sine", 0.08);   // squelch
     havoc("slimeStaff", T.staffPoints, `Slimed! The ${st.type.name} is stuck`, { x: o.x, z: o.z, loud: true });
-    if (!claimedBy(o)) setTidy(st, o, CFG.tidy.afterTrapSec);   // they clean it up once they're free
     stuck(st);
     if (o.slips >= T.maxSticks) return;
   }
@@ -3414,7 +3553,7 @@ function stickKickMe(slot) {
   if (facing) {   // they saw it coming
     st.bubble.textContent = "Is that... for ME?"; st.barkUntil = performance.now() + 1800; st.barkAt = game.time;
     toast(`The ${st.type.name} turns around just in time. Get behind them next time.`, 2.4);
-    if (!st.type.stationary) startChase(st); else { st.suspicion = 1; }
+    if (chaser(st)) startChase(st); else { st.suspicion = 1; }
     return;
   }
   st.kickMe = true;
@@ -3483,12 +3622,15 @@ function popStinkBomb(o) {
 }
 function stinkCloud(o, dt) {
   const T = o.T, k = o.life / T.cloudSec;
-  o.cloud.material.opacity = 0.32 * Math.min(1, k * 3);
-  o.cloud.rotation.y += dt * 0.4; o.cloud.scale.y = 0.9 + Math.sin(o.age * 2) * 0.08;
+  if (!o.lingering && o.life < 0.4) {   // it fades to a smaller, fainter cloud that hangs around until the custodian airs it out
+    o.lingering = true; o.life = Infinity; o.cloud.scale.set(T.cloudRadius * CFG.custodian.lingerRadius, 0.6, T.cloudRadius * CFG.custodian.lingerRadius);
+  }
+  o.cloud.material.opacity = o.lingering ? 0.16 : 0.32 * Math.min(1, k * 3);
+  o.cloud.rotation.y += dt * 0.4; o.cloud.scale.y = (o.lingering ? 0.6 : 0.9) + Math.sin(o.age * 2) * 0.08;
   o.hitSet ??= new Set();
-  const inside = (x, z) => Math.hypot(x - o.x, z - o.z) < T.cloudRadius;
+  const R = T.cloudRadius * (o.lingering ? CFG.custodian.lingerRadius : 1), inside = (x, z) => Math.hypot(x - o.x, z - o.z) < R;
   for (const st of staff) {
-    if (o.hitSet.has(st) || !inside(st.x, st.z)) continue;
+    if (o.hitSet.has(st) || st.type.custodian || !inside(st.x, st.z)) continue;
     o.hitSet.add(st); stunStaff(st, T.staffGagSec, "flinch");
     st.bubble.textContent = pick(["*cough*", "UGH. What IS that?", "*gag*"]); st.barkUntil = performance.now() + 1500; st.barkAt = game.time;
     addScore(T.perStaff, `The ${st.type.name} walks into the stink`, "small");
@@ -3755,7 +3897,7 @@ function updateSurvival(dt) {
   game.nextArrivalT -= dt;
   if (game.nextArrivalT <= 0) {   // reinforcements, radioed in on your rough location
     game.nextArrivalT = V.staffEverySec;
-    if (staff.filter((s) => !s.type.stationary).length < V.maxStaff) {
+    if (staff.filter(chaser).length < V.maxStaff) {
       const n = staff.filter((s) => s.survivalArrival).length;
       const key = V.arrivals[n % V.arrivals.length];
       if (key !== "principal" || !staff.some((s) => s.key === "principal")) {
@@ -3769,7 +3911,7 @@ function updateSurvival(dt) {
   game.nextRadioT -= dt;
   if (game.nextRadioT <= 0) {   // the two nearest free staff get sent toward wherever you are now
     game.nextRadioT = V.radioEverySec;
-    const free = staff.filter((o) => !o.type.stationary && o.state !== "chase" && o.state !== "bust" && o.stunT <= 0)
+    const free = staff.filter((o) => chaser(o) && o.state !== "chase" && o.state !== "bust" && o.stunT <= 0)
       .sort((a, b) => Math.hypot(a.x - player.x, a.z - player.z) - Math.hypot(b.x - player.x, b.z - player.z)).slice(0, 2);
     for (const o of free) { o.state = "search"; o.searchT = -8; o.suspicion = 0.6; o.lastX = o.tx = player.x + rand(-3, 3); o.lastZ = o.tz = player.z + rand(-3, 3); }
     if (free.length) playBlip([1400, 1100, 1400], 0.05, "square", 0.04);   // radio chirp
@@ -3959,7 +4101,7 @@ function updateRisk(dt) {
   if (!player.hidden && player.invisT <= 0) {
     for (const st of staff) {
       st.nearCD = Math.max(0, (st.nearCD ?? 0) - dt);
-      if (st.type.stationary || st.nearCD > 0 || st.stunT > 0 || st.state === "chase" || st.state === "bust") continue;
+      if (!chaser(st) || st.nearCD > 0 || st.stunT > 0 || st.state === "chase" || st.state === "bust") continue;
       if (Math.hypot(st.x - player.x, st.z - player.z) > S.nearMissRadius || canSeePlayer(st, 1, true).seen) continue;
       st.nearCD = S.nearMissCooldownSec;
       if (game.nearMissT <= 0) popup(`NEAR MISS! ×${S.nearMissMult}`, "item");
@@ -4170,12 +4312,12 @@ if (debug) {   // a small test panel for phone playtests (only with ?debug in th
   add("Heat +30", () => { addHeat(30); });
   add("Max heat (rebel run)", () => { game.heat = 100; game.heatPending = 0; });
   add("School alert 100%", () => { game.security = 100; });
-  add("Get a strike", () => { const st = staff.find((s) => !s.type.stationary) ?? staff[0], ph = game.phase; game.phase = "skipping"; caught(st); game.phase = ph; });
+  add("Get a strike", () => { const st = staff.find(chaser) ?? staff[0], ph = game.phase; game.phase = "skipping"; caught(st); game.phase = ph; });
   add("Principal", () => { ensurePrincipal(true); });
   // a spot a few meters ahead of the kid, in the hall
   const ahead = (d) => { const x = player.x + Math.sin(player.heading) * d, z = player.z + Math.cos(player.heading) * d; const g = { x, z }; collide(g, 0.4); return g; };
   add("Staff ahead (back turned)", () => {
-    const st = staff.find((s) => !s.type.stationary);
+    const st = staff.find(chaser);
     const g = ahead(6), pr = hallProject(g.x, g.z), H = HALLS[pr.h];
     st.h = pr.h; st.t = pr.t; st.state = "patrol"; st.suspicion = 0; st.stunT = 0; st.pauseT = 0;
     // walk away from the kid
