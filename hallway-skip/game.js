@@ -36,6 +36,7 @@
 // Step 34: the custodian's closet: a mop (jams a classroom door), a wet-floor sign, a mop bucket, a plunger, and the breaker box (lights out).
 // Step 35: after a strike (or a "get to class!"), you get a real head start: whoever caught you lets you go and looks the other way for a while.
 // Step 36: balls and frisbees turn up in lockers too; slime, stink bombs and Mentos geysers cover a bigger area.
+// Step 37: take anything from the custodian's closet and he locks it for the rest of the day; only the staff key opens it.
 import * as THREE from "three";
 
 // =====================================================================================
@@ -1375,6 +1376,7 @@ function morningSetup() {
   }
   game.alarmPulled = false; stopAlarm();
   for (const sp of SPOTS) if (sp.jammed) unjam(sp);   // the custodian frees everyone overnight
+  for (const sp of CLOSETS) sp.locked = false;
   game.breakerUsed = false; if (game.blackoutT > 0) { game.blackoutT = 0; lightsOn(); }
   startPassing(true);
   if (game.strikes >= 2) ensurePrincipal(false);
@@ -1397,7 +1399,7 @@ function resetSpotsForPeriod() {
   game.lockerUses = CFG.hiding.lockerUsesPerPeriod;
   for (const sp of SPOTS) {
     sp.used = false; sp.rummaged = false; sp.tpTaken = false;
-    if (sp.kind === "closet") sp.taken.clear();
+    if (sp.kind === "closet") sp.taken.clear();   // (restocked, but still locked if you stole from it today)
     if (sp.kind === "classroom") {
       // raided last period: locked for a while, and nothing gets restocked until it opens again
       if (sp.raided) { sp.lockedUntil = game.period + CFG.rooms.raidLockPeriods - 1; sp.raided = false; }
@@ -2309,6 +2311,7 @@ const hasKey = () => game.hotbar.some((it) => it && it.key === "masterKey");
 function keyOpens(sp) {
   if (game.alarmT > 0 || sp.closed) return false;   // not during a fire alarm, and not a flooded bathroom
   if (sp.kind === "classroom") return (roomLocked(sp) || sp.used) && !staff.some((s) => s.post === sp);
+  if (sp.kind === "closet") return sp.locked;
   return sp.kind === "restroom" && sp.used;
 }
 function spotBlocked(sp) {   // why this spot can't be used right now ("" if it can)
@@ -2317,6 +2320,7 @@ function spotBlocked(sp) {   // why this spot can't be used right now ("" if it 
   if (sp.closed) return "Out of order (somebody flooded it)";
   if (roomLocked(sp)) return `Room ${sp.room} is locked (you raided it)`;
   if (sp.jammed) return `Room ${sp.room} is jammed shut with a mop`;
+  if (sp.kind === "closet" && sp.locked) return "The custodian locked his closet. You'd need a staff key.";
   if (sp.used && sp.kind === "closet") return "You already hid in the closet this period";
   if (sp.used) return sp.kind === "restroom" ? "You already hid in this restroom this period" : `Room ${sp.room} already kicked you out this period`;
   if (sp.kind === "classroom" && staff.some((s) => s.post === sp)) return `Room ${sp.room}'s teacher is standing right there`;
@@ -2719,7 +2723,7 @@ function updateSpotsUI() {
     if (!show) continue;
     let text, cls = "itag";
     if (sp.kind === "locker") text = sp.busted ? "Locker · busted" : blocked ? "Locker · none left" : "Locker";
-    else if (sp.kind === "closet") text = blocked ? "Custodian's closet · used" : "Custodian's closet";
+    else if (sp.kind === "closet") text = sp.locked ? "Custodian's closet · locked 🔒" : blocked ? "Custodian's closet · used" : "Custodian's closet";
     else if (sp.kind === "restroom") text = sp.closed ? "Restroom · out of order" : blocked ? "Restroom · used" : game.dares.length < CFG.dares.max ? "Restroom · 📜" : "Restroom";
     else { text = `Room ${sp.room}${sp.R.label ? " · " + sp.R.label : ""} · ${TEACHER_TYPES[sp.teacher].label}${blocked ? (game.alarmT > 0 ? " · locked (fire alarm)" : sp.jammed ? " · jammed 🧹" : roomLocked(sp) ? " · locked" : sp.used ? " · used" : " · guarded") : ""}`; if (sp.teacher === "sub") cls += " sub"; }
     const keyOk = blocked && keyOpens(sp) && hasKey();
@@ -3961,7 +3965,8 @@ function grabCloset(key) {
   const sp = player.hidden;
   if (!sp || sp.kind !== "closet" || sp.taken.has(key) || game.state !== "playing") return;
   if (!addItem(key)) return;
-  sp.taken.add(key); player.hideT += CFG.closet.grabSec;
+  if (!sp.locked) toast("He'll notice that's missing. The closet's getting locked behind you.", 2.4);
+  sp.taken.add(key); sp.locked = true; player.hideT += CFG.closet.grabSec;
   updateHidePanel();
 }
 // lights out: staff can barely see for a few seconds
