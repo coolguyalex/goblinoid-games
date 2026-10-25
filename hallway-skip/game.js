@@ -1,4 +1,4 @@
-// Hallway Skip — build step 17 prototype.
+// Hallway Skip — build step 18 prototype.
 // Step 1: hallway, joystick, a hall monitor that chases, a crowd that thins, and the bell.
 // Step 2: tap-to-interact and hiding spots: lockers, restrooms, classrooms (teacher and sub boot timers).
 // Step 3: security guard, the three-strike ladder, and the PA announcer.
@@ -16,6 +16,7 @@
 // Step 15: a bigger crowd (110 kids, ?crowd=N to try others); kids out of view aren't drawn.
 // Step 16: fewer lockers (and you can rummage through them: might be junk), nothing spawns in the halls, things stay where they land until staff tidy them up, balls only from the gym.
 // Step 17: slime (science: whoever steps in it is stuck), toilet paper (restrooms: flies like the airplane, leaves a streamer), frisbee (gym: long flight, pick it back up).
+// Step 18: no restroom sweep timer: staff walking past a restroom check it about half the time ("Hey, do you kids have a pass?").
 import * as THREE from "three";
 
 // =====================================================================================
@@ -107,8 +108,8 @@ const CFG = {
   },
   hiding: {
     lockerUsesPerPeriod: 3,       // shared by all lockers
-    restroomSweepEverySec: 35,    // a monitor sweeps each restroom about this often...
-    restroomSweepJitterSec: 8,    // ...give or take this much
+    // Restrooms: no timer. When staff walk past one, about half the time they stick their head in to check.
+    restroomCheck: { chance: 0.5, passRange: 3.5, cooldownSec: 25, peekSec: 1.6 },
     subsPerDay: [1, 2],           // how many classrooms get a substitute each day (min, max)
     bustPauseSec: 0.9,            // monitor pauses after yanking you out ("I saw you go in there")
     bootGraceSec: 1.2,            // after being booted, you can't be caught for this long
@@ -310,12 +311,12 @@ const PA_LINES = {
 const BARKS = {   // speech bubbles over staff heads
   hallMonitor:   { suspicious: ["Hmm?", "Is that...?", "*squints*"], chase: ["HEY!", "Walking! WALKING!", "Stop right there!"],
                    search: ["Where'd you go...", "I know you're here."], giveUp: ["Kids these days.", "Must've been nothing."],
-                   slip: ["WHOA—", "My back!"], bust: ["I SAW that.", "Nice try."], tidy: ["Who left this here?", "Unbelievable.", "*sigh* Kids."] },
+                   slip: ["WHOA—", "My back!"], bust: ["I SAW that.", "Nice try."], tidy: ["Who left this here?", "Unbelievable.", "*sigh* Kids."], check: ["Hey, do you kids have a pass?", "Anybody in here?"] },
   securityGuard: { suspicious: ["...", "Movement."], chase: ["Code gray hoodie!", "Freeze!"], search: ["Come out, come out..."],
-                   giveUp: ["Copy. Lost visual."], slip: ["Man down!"], winded: ["*wheeze*", "Gimme... a sec..."], bust: ["Gotcha."], tidy: ["Confiscated.", "Evidence."] },
+                   giveUp: ["Copy. Lost visual."], slip: ["Man down!"], winded: ["*wheeze*", "Gimme... a sec..."], bust: ["Gotcha."], tidy: ["Confiscated.", "Evidence."], check: ["Hey, do you kids have a pass?", "Security. Everybody out."] },
   hallTeacher:   { suspicious: ["Excuse me?"], alarm: ["HALL PASS!", "Excuse me?!", "SECURITY!"] },
   principal:     { suspicious: ["Mm-hm."], chase: ["YOUNG PERSON!", "MY OFFICE!"], search: ["Hiding won't help."],
-                   giveUp: ["This isn't over."], slip: ["Who put this here?!"], bust: ["Out. Now."], tidy: ["In MY school?", "Disgraceful."] },
+                   giveUp: ["This isn't over."], slip: ["Who put this here?!"], bust: ["Out. Now."], tidy: ["In MY school?", "Disgraceful."], check: ["Hey, do you kids have a pass?", "I know someone's in here."] },
 };
 const CAUGHT_LINES = {   // strike 1, by who caught you
   hallMonitor:   ["\"You better get to class.\"", "\"Pass? No? Didn't think so.\"", "\"I'm writing this down. In pen.\""],
@@ -352,7 +353,7 @@ const SPOT_TYPES = {
   locker:    { label: "Locker", halfW: 0.45, maxStaySec: 15,
                stayLine: "Cramped. Smells like old gym socks.", timeoutLine: "Too cramped! You tumble out." },
   restroom:  { label: "Restroom", halfW: 0.75, maxStaySec: 45,
-               stayLine: "Nobody questions a long bathroom break.", timeoutLine: "Someone's pounding on the stall door. Time to go." },
+               stayLine: "Staff passing by sometimes check the stalls. Keep your feet up.", timeoutLine: "Someone's pounding on the stall door. Time to go." },
   classroom: { label: "Room", halfW: 0.6 },   // stay time comes from who's teaching
 };
 // Who's in the room. backfire = chance per grab that they pick up the phone and call security.
@@ -730,7 +731,7 @@ for (const { h, t } of LAYOUT.hideLockers) {
   for (let k = 0; k < 3; k++) wallBox(h, t, wl - side * 0.01, 0.5, 0.035, 0.02, 0x2a3a30, 1.62 + k * 0.09);
 }
 for (const { h, t } of LAYOUT.restrooms) {
-  const side = HALLS[h].outerSide, wl = wallLat(h, side), sp = addSpot("restroom", h, t, side, { nextSweep: 0 });
+  const side = HALLS[h].outerSide, wl = wallLat(h, side), sp = addSpot("restroom", h, t, side);
   sp.glow.push(wallBox(h, t, wl + side * (LAYOUT.lockerDepth - 0.04), 1.3, 2.25, 0.08, 0x3f9c9a, 1.125).material);
   wallBox(h, t, wl + side * (LAYOUT.lockerDepth - 0.09), 0.42, 0.42, 0.03, 0xf4f4f4, 2.55);
   wallBox(h, t, wl + side * (LAYOUT.lockerDepth - 0.11), 0.12, 0.2, 0.02, 0x3f9c9a, 2.5);
@@ -1139,7 +1140,6 @@ function morningSetup() {
   rollSubs();             // first, so sub rooms get their extra desk loot
   resetSpotsForPeriod();
   for (const sp of SPOTS) if (sp.kind === "restroom") {
-    sp.nextSweep = game.time + rand(12, CFG.hiding.restroomSweepEverySec);
     sp.closed = false; if (sp.puddle) sp.puddle.visible = false;   // mopped overnight
   }
   game.alarmPulled = false; stopAlarm();
@@ -1713,7 +1713,7 @@ function updateStaff(dt, cover) {
       const base = st.post ? Math.atan2(-st.post.side * HALLS[st.post.h].nx, -st.post.side * HALLS[st.post.h].nz) : st.facing;
       const want = st.suspicion > 0.05 ? Math.atan2(player.x - st.x, player.z - st.z) : st.distractT > 0 ? Math.atan2(st.dX - st.x, st.dZ - st.z) : base + Math.sin(st.sweep) * (T.sweepDeg * Math.PI / 180);
       st.facing = lerpAngle(st.facing, want, damp(st.suspicion > 0.05 ? 5 : 2, dt));
-    } else if (st.state === "patrol" || st.state === "return" || st.state === "tidy") {
+    } else if (st.state === "patrol" || st.state === "return" || st.state === "tidy" || st.state === "check") {
       const look = canSeePlayer(st, 1, true);
       if (look.seen) {
         st.suspicion += noticeRate(st, look.d, cover) * dt;
@@ -1733,6 +1733,8 @@ function updateStaff(dt, cover) {
             if (st.tidyT >= CFG.tidy.pickupSec) { removeObject(o); bark(st, "tidy", true); st.state = "return"; setReturnPoint(st); }
           }
         }
+      } else if (st.state === "check") {
+        speed = updateCheck(st, dt);
       } else if (st.state === "return") {
         speed = T.patrolSpeed * staffMult("speed");
         const tgt = hallPos(st.h, st.t, 0);
@@ -1745,6 +1747,7 @@ function updateStaff(dt, cover) {
         hallPos(st.h, st.t, 0, st);
         st.tidyScanT = (st.tidyScanT ?? 0) - dt;   // glance around for things lying in the hall
         if (st.tidyScanT <= 0 && st.suspicion < 0.05) { st.tidyScanT = 0.4; const o = findTidy(st); if (o) setTidy(st, o); }
+        if (st.state === "patrol" && st.suspicion < 0.05) maybeCheckRestroom(st);
         const base = hallHeading(st.h, st.to === HALLS[st.h].b ? 1 : -1);
         const want = st.suspicion > 0.05 ? Math.atan2(player.x - st.x, player.z - st.z) : st.distractT > 0 ? Math.atan2(st.dX - st.x, st.dZ - st.z) : base + Math.sin(st.sweep) * (T.sweepDeg * Math.PI / 180);
         st.facing = lerpAngle(st.facing, want, damp(st.suspicion > 0.05 ? 5 : 3, dt));
@@ -1958,7 +1961,6 @@ function update(dt) {
     if (game.phaseT >= phaseLen("skipping")) { periodSurvived(); if (game.state !== "playing") return; }
   }
   updatePlayer(dt);
-  updateRestrooms();
   updateCrowd(dt);
   updateStaff(dt, crowdCoverCount());
   if (game.state === "playing") { updateObjects(dt); updateHeat(dt); updateRisk(dt); updateFriends(dt); updateAirplanes(dt); updateAlarm(dt); }
@@ -2076,10 +2078,7 @@ function updateHidePanel() {
   renderLoot(sp);
   const line = sp.kind === "classroom" ? TEACHER_TYPES[sp.teacher].stayLine : sp.T.stayLine;
   let warn = "";
-  if (sp.kind === "restroom") {
-    const sweepIn = sp.nextSweep - game.time;
-    if (sweepIn < left) warn = `Sweep in ${Math.ceil(sweepIn)}s!`;
-  }
+  if (sp.kind === "restroom" && staff.some((st) => st.state === "check" && st.checkSpot === sp)) warn = "Footsteps outside... someone's coming to check!";
   ui.hpTitle.textContent = title;
   ui.hpLine.textContent = line;
   ui.hpWarn.textContent = warn;
@@ -2188,20 +2187,32 @@ function roomBackfire(sp) {
 const TT_NAME = (sp) => (sp.teacher === "office" ? "The secretary" : sp.teacher === "sub" ? "The sub" : "The teacher");
 function onRoomBackfire(sp) { addHeat(CFG.heat.roomCall); }   // short-term heat only; the security level is for loud havoc
 
-function updateRestrooms() {
-  for (const sp of SPOTS) {
-    if (sp.kind !== "restroom" || game.time < sp.nextSweep) continue;
-    const J = CFG.hiding.restroomSweepJitterSec;
-    sp.nextSweep = game.time + CFG.hiding.restroomSweepEverySec + rand(-J, J);
-    if (player.hidden !== sp) continue;
-    exitSpot(true, "Restroom sweep! A monitor shoos everyone out.");
-    pa("sweep");
-    // the nearest monitor who isn't busy comes to see who that was
-    const f = spotFront(sp, {});
-    let best = null, bd = Infinity;
-    for (const st of staff) { const d = Math.hypot(st.x - f.x, st.z - f.z); if (!st.type.stationary && st.state !== "chase" && st.state !== "bust" && d < bd) { bd = d; best = st; } }
-    if (best) { best.state = "search"; best.searchT = -Math.min(16, bd / (best.type.chaseSpeed * 0.8)); best.lastX = best.tx = f.x; best.lastZ = best.tz = f.z; }
+// Staff walking past a restroom sometimes stick their head in: "Hey, do you kids have a pass?"
+const RESTROOMS = SPOTS.filter((sp) => sp.kind === "restroom");
+function maybeCheckRestroom(st) {
+  const C = CFG.hiding.restroomCheck;
+  st.checkCD ??= new Map();
+  for (const sp of RESTROOMS) {
+    if (sp.closed || (st.checkCD.get(sp) ?? 0) > game.time) continue;
+    const f = spotFront(sp, tmp);
+    if (Math.hypot(f.x - st.x, f.z - st.z) > C.passRange) continue;
+    st.checkCD.set(sp, game.time + C.cooldownSec);   // one roll per pass
+    if (Math.random() < C.chance) { st.state = "check"; st.checkSpot = sp; st.checkT = 0; }
+    return;
   }
+}
+function updateCheck(st, dt) {   // returns the walking speed this frame
+  const sp = st.checkSpot, f = spotFront(sp, tmp), T = st.type;
+  if (navToward(st, f.x, f.z, T.patrolSpeed * staffMult("speed"), dt) > 0.7) return T.patrolSpeed;
+  if (st.checkT === 0) bark(st, "check", true);
+  st.checkT += dt;
+  st.facing = lerpAngle(st.facing, Math.atan2(sp.side * HALLS[sp.h].nx, sp.side * HALLS[sp.h].nz), damp(6, dt));   // looking in
+  if (st.checkT < CFG.hiding.restroomCheck.peekSec) return 0;
+  if (player.hidden === sp) {   // found you
+    exitSpot(true, `The ${T.name} pokes their head in: "Hey, do you kids have a pass?"`);
+    startChase(st); st.pauseT = CFG.hiding.bustPauseSec; bark(st, "bust", true);
+  } else { st.state = "return"; setReturnPoint(st); }
+  return 0;
 }
 
 // Tap on a world object: find the spot whose on-screen outline (a vertical line from floor to door top) is nearest the finger.
@@ -2280,7 +2291,7 @@ function updateSpotsUI() {
     if (!show) continue;
     let text, cls = "itag";
     if (sp.kind === "locker") text = blocked ? "Locker · none left" : "Locker";
-    else if (sp.kind === "restroom") text = sp.closed ? "Restroom · out of order" : blocked ? "Restroom · used" : `Restroom · sweep in ${Math.max(0, Math.ceil(sp.nextSweep - game.time))}s`;
+    else if (sp.kind === "restroom") text = sp.closed ? "Restroom · out of order" : blocked ? "Restroom · used" : "Restroom";
     else { text = `Room ${sp.room}${sp.R.label ? " · " + sp.R.label : ""} · ${TEACHER_TYPES[sp.teacher].label}${blocked ? (game.alarmT > 0 ? " · locked (fire alarm)" : roomLocked(sp) ? " · locked" : sp.used ? " · used" : " · guarded") : ""}`; if (sp.teacher === "sub") cls += " sub"; }
     const keyOk = blocked && keyOpens(sp) && hasKey();
     if (keyOk) text += " · 🔑";
@@ -3487,7 +3498,8 @@ if (debug) {   // test-only helpers (only with ?debug in the URL)
     staffTo(k, x, z, state) { const st = staff[k]; st.x = x; st.z = z; if (state) { st.state = state; st.suspicion = 1; } },
     setTime(t) { game.phaseT = t; },
     catchNow(k = 0) { caught(staff[k]); },
-    sweepNow(i) { SPOTS[i].nextSweep = game.time; },
+    checkRoll(k) { const st = staff[k]; st.checkCD = new Map(); st.state = "patrol"; maybeCheckRestroom(st); const r = st.state; st.state = "patrol"; return r; },
+    checkNow(k, i) { const st = staff[k]; st.state = "check"; st.checkSpot = SPOTS[i]; st.checkT = 0; },
     give(key, uses) { return addItem(key, uses); },
     // throw an item from the hotbar: yaw = world heading, power 0..1
     throwAt(key, power, yaw) {
