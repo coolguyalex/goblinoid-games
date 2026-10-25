@@ -25,6 +25,7 @@
 // Step 24: burst out of a locker: stuns staff close by and gives you a head start, but busts that locker for the day.
 // Step 25: easier controls: an options menu (saved), auto-aim on by default (tap an item to throw it; banana peels go behind you),
 //          a joystick guide on phones, a pause button; a bigger stamina bar, and the energy drink (twice the stamina for a minute).
+// Step 26: toilet paper drifts down like a streamer and snags on things (locker tops, the trophy case, new spirit-banner wires).
 import * as THREE from "three";
 
 // =====================================================================================
@@ -790,6 +791,27 @@ function wallBox(h, t, lat, w, hgt, d, color, y) { const p = hallPos(h, t, lat);
     lockers.setColorAt(i, c.setHex(i % 2 ? 0x3d6fb6 : 0x3563a8));
   });
   scene.add(lockers);
+}
+
+// Spirit banners strung across a few halls on a wire, overhead (toilet paper snags on the wires).
+const BANNERS = [
+  { h: 0, f: 0.3, text: "GO GOBLINS!", bg: "#c0392b", fg: "#ffd36b" },
+  { h: 6, f: 0.62, text: "SPIRIT WEEK", bg: "#2e86c1", fg: "#ffffff" },
+  { h: 3, f: 0.55, text: "HOMECOMING FRIDAY", bg: "#27ae60", fg: "#ffffff" },
+  { h: 6, f: 0.2, text: "NO RUNNING IN THE HALLS", bg: "#f4f4ee", fg: "#c0392b" },
+];
+for (const b of BANNERS) {
+  b.t = HALLS[b.h].len * b.f; b.wireY = 2.44;
+  const cv = document.createElement("canvas"); cv.width = 1024; cv.height = 80;
+  const g = cv.getContext("2d"); g.fillStyle = b.bg; g.fillRect(0, 0, 1024, 80);
+  g.fillStyle = b.fg; g.font = "900 54px system-ui, sans-serif"; g.textAlign = "center"; g.textBaseline = "middle"; g.fillText(b.text, 512, 43);
+  const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
+  const w = LAYOUT.hallHalf * 2 - 0.1, p = hallPos(b.h, b.t, 0), rot = hallHeading(b.h, 1);
+  for (const flip of [0, Math.PI]) {   // printed on both sides
+    const flag = new THREE.Mesh(new THREE.PlaneGeometry(w * 0.9, w * 0.9 * 80 / 1024 * 1.6), new THREE.MeshBasicMaterial({ map: tex }));
+    flag.position.set(p.x, 2.2, p.z); flag.rotation.y = rot + flip; scene.add(flag);
+  }
+  const wire = box(w, 0.03, 0.03, 0x555555, p.x, b.wireY, p.z); wire.rotation.y = rot;
 }
 
 // =====================================================================================
@@ -2141,7 +2163,7 @@ function update(dt) {
   updatePlayer(dt);
   updateCrowd(dt);
   updateStaff(dt, crowdCoverCount());
-  if (game.state === "playing") { updateKickMe(); updateObjects(dt); updateHeat(dt); updateRisk(dt); updateFriends(dt); updateAirplanes(dt); updateAlarm(dt); }
+  if (game.state === "playing") { updateKickMe(); updateObjects(dt); updateTrails(dt); updateHeat(dt); updateRisk(dt); updateFriends(dt); updateAirplanes(dt); updateAlarm(dt); }
 }
 
 // =====================================================================================
@@ -2623,7 +2645,7 @@ function spawnObject(key, state, x, y, z, extra = {}) {
   objects.push(o);
   return o;
 }
-function removeObject(o) { if (o.foam) { scene.remove(o.foam); o.foam.material.dispose(); o.foam = null; } if (o.trailMesh) { scene.remove(o.trailMesh); o.trailMesh.geometry.dispose(); o.trailMesh = null; } scene.remove(o.mesh); scene.remove(o.ring); if (o.cloud) { scene.remove(o.cloud); o.cloud.material.dispose(); } o.dead = true; }
+function removeObject(o) { if (o.foam) { scene.remove(o.foam); o.foam.material.dispose(); o.foam = null; } if (o.trail) { o.trail.o = null; o.trail = null; } scene.remove(o.mesh); scene.remove(o.ring); if (o.cloud) { scene.remove(o.cloud); o.cloud.material.dispose(); } o.dead = true; }
 function clearObjects() { for (const o of objects) removeObject(o); objects.length = 0; }
 
 function pickWeighted(pairs) {
@@ -2816,7 +2838,7 @@ function release(a, L = flickLaunch(a)) {
   const o = spawnObject(a.key, "flying", player.x + L.dx * 0.45, THROW_Y, player.z + L.dz * 0.45, launchVel(T, L));
   if (T.bounces) o.maxBounces = Math.floor(rand(T.bounces[0], T.bounces[1] + 1));
   if (T.flight === "glide2") initPlane(o, L.power, T);
-  if (a.key === "toiletPaper") o.trail = [[o.x, o.y, o.z]];
+  if (a.key === "toiletPaper") o.trail = newTrail(o);
   playBlip([300, 520], 0.06, "triangle", 0.05);   // whoosh
 }
 
@@ -2975,7 +2997,7 @@ function flyObject(o, dt) {
     if (o.y > 2.0) { for (const c of crowd) if (isActive(c) && Math.hypot(c.x - o.x, c.z - o.z) < 1.3) o.flown.add(c); }   // high: flying over
     else if (o.stage >= 2) { const p = personHit(o, 0.5, 1.9); if (p) { hitPerson(o, p.who, p.isStaff); landObject(o); return; } }   // low: can hit
   }
-  if (o.trail) growTrail(o);
+  if (o.trail && o.stage !== 3) growTrail(o);
   if (o.key === "frisbee") o.mesh.rotation.y += dt * 14;   // spinning
   if (o.key === "slime") {   // splat on whoever it hits: they're standing in it
     const p = personHit(o, 0.45, 2.0);
@@ -3141,45 +3163,114 @@ function slimeCheck(o) {
     stuck(player);
   }
 }
-// toilet paper: a streamer along its flight path, hanging down in loops. Stays until the custodian clears it overnight.
-const tpTrails = [];
+// toilet paper: a streamer laid along its flight path. It drifts down like a light rope (a little chain of points with
+// gravity), lands on the floor, or snags on whatever it falls onto (locker tops, the trophy case, the banner wires) and
+// hangs from there. It stays until the custodian clears it overnight.
+const TP = { gravity: 3.4, damping: 0.97, floorY: 0.015, slack: 1.12, iters: 6, settleSec: 6, width: 0.15, maxTrails: 8 };
+const tpTrails = [];   // every streamer up today (each one: points, rest lengths, mesh)
 const tpMat = new THREE.MeshBasicMaterial({ color: 0xf4f4ee, side: THREE.DoubleSide });
+// how high something under (x, z) would hold the paper up: 0 for the bare floor
+function tpSupport(x, z) {
+  const pr = hallProject(x, z), H = HALLS[pr.h];
+  let s = 0;
+  for (const b of BANNERS) if (b.h === pr.h && Math.abs(pr.t - b.t) < 0.22) s = Math.max(s, b.wireY);
+  const side = pr.lat >= 0 ? 1 : -1, fromWall = Math.abs(wallLat(pr.h, side)) - Math.abs(pr.lat);   // distance out from the wall
+  for (const ob of OBSTACLES) if (ob.h === pr.h && ob.side === side && Math.abs(pr.t - ob.t) < ob.halfLen + 0.1 && fromWall < ob.depth + 0.15) s = Math.max(s, ob.height);
+  if (H.outerSide === side && fromWall < 0.2) {   // the row of lockers along the outer wall (and the hide lockers, a bit taller)
+    const hide = LAYOUT.hideLockers.some((l) => l.h === pr.h && Math.abs(l.t - pr.t) < 0.5);
+    const gap = LAYOUT.restrooms.some((r) => r.h === pr.h && Math.abs(r.t - pr.t) < 1.2) || (LAYOUT.entrance.h === pr.h && Math.abs(LAYOUT.entrance.t - pr.t) < 2);
+    if (hide) s = Math.max(s, 2.1); else if (!gap) s = Math.max(s, 2.0);
+  }
+  return s;
+}
+function newTrail(o) {
+  const tr = { pts: [], rest: [], mesh: null, o, t: 0, done: false };
+  for (let k = 0; k < 2; k++) tr.pts.push({ x: o.x, y: o.y, z: o.z, px: o.x, py: o.y, pz: o.z, held: false });   // the loose end, and the roll
+  tr.rest.push(0);
+  tpTrails.push(tr);
+  while (tpTrails.length > TP.maxTrails) dropTrail(tpTrails.shift());
+  return tr;
+}
+function dropTrail(tr) { if (tr.mesh) { scene.remove(tr.mesh); tr.mesh.geometry.dispose(); tr.mesh = null; } tr.done = true; if (tr.o) tr.o.trail = null; }
+// two crossed ribbons along the chain, so it shows from any angle (hanging straight down too)
 function trailGeometry(pts) {
-  const pos = [];
-  for (let i = 1; i < pts.length; i++) {   // a ribbon, sagging between points
-    const [ax, ay, az] = pts[i - 1], [bx, by, bz] = pts[i];
-    const sagA = 0.25 * Math.abs(Math.sin(i * 0.9)), sagB = 0.25 * Math.abs(Math.sin((i + 1) * 0.9));
-    const a0 = [ax, ay - sagA, az], a1 = [ax, ay - sagA - 0.16, az], b0 = [bx, by - sagB, bz], b1 = [bx, by - sagB - 0.16, bz];
-    pos.push(...a0, ...a1, ...b0, ...b0, ...a1, ...b1);   // an upright strip (seen from the side)...
-    const dx = bx - ax, dz = bz - az, dl = Math.hypot(dx, dz) || 1, px = -dz / dl * 0.09, pz = dx / dl * 0.09;
-    const c0 = [ax - px, ay - sagA, az - pz], c1 = [ax + px, ay - sagA, az + pz], d0 = [bx - px, by - sagB, bz - pz], d1 = [bx + px, by - sagB, bz + pz];
-    pos.push(...c0, ...c1, ...d0, ...d0, ...c1, ...d1);   // ...and a flat one crossing it (seen from behind or below)
-    if (i % 4 === 0) {   // a loose end hanging toward the floor, crossed so it shows from any angle
-      const len = Math.min(by - 0.3, 1.2), w = 0.06;
-      pos.push(bx - w, by, bz, bx + w, by, bz, bx - w, by - len, bz, bx - w, by - len, bz, bx + w, by, bz, bx + w, by - len, bz);
-      pos.push(bx, by, bz - w, bx, by, bz + w, bx, by - len, bz - w, bx, by - len, bz - w, bx, by, bz + w, bx, by - len, bz + w);
+  const pos = [], w = TP.width / 2;
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1], b = pts[i];
+    let dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z; const dl = Math.hypot(dx, dy, dz) || 1; dx /= dl; dy /= dl; dz /= dl;
+    let ux = dz, uz = -dx, ul = Math.hypot(ux, uz);   // across the paper, level with the floor...
+    if (ul < 0.2) { ux = 1; uz = 0; ul = 1; }
+    ux /= ul; uz /= ul;
+    const vx = dy * uz, vy = dz * ux - dx * uz, vz = -dy * ux;   // ...and at right angles to that
+    for (const [cx, cy, cz] of [[ux * w, 0, uz * w], [vx * w, vy * w, vz * w]]) {
+      pos.push(a.x - cx, a.y - cy, a.z - cz, a.x + cx, a.y + cy, a.z + cz, b.x - cx, b.y - cy, b.z - cz,
+               b.x - cx, b.y - cy, b.z - cz, a.x + cx, a.y + cy, a.z + cz, b.x + cx, b.y + cy, b.z + cz);
     }
   }
   return new THREE.BufferGeometry().setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
 }
+// the last point rides on the roll; every 35 cm it leaves a new point behind
 function growTrail(o) {
-  const last = o.trail[o.trail.length - 1];
-  if (Math.hypot(o.x - last[0], o.z - last[2]) < 0.35) return;
-  o.trail.push([o.x, o.y, o.z]);
-  if (o.trailMesh) { scene.remove(o.trailMesh); o.trailMesh.geometry.dispose(); }
-  o.trailMesh = new THREE.Mesh(trailGeometry(o.trail), tpMat); scene.add(o.trailMesh);
+  const tr = o.trail, n = tr.pts.length, prev = tr.pts[n - 2];
+  const d = Math.hypot(o.x - prev.x, o.y - prev.y, o.z - prev.z);
+  tr.rest[n - 2] = Math.max(tr.rest[n - 2], d * TP.slack);
+  if (Math.hypot(o.x - prev.x, o.z - prev.z) < 0.35) return;
+  tr.pts.push({ x: o.x, y: o.y, z: o.z, px: o.x, py: o.y, pz: o.z, held: false });
+  tr.rest.push(0);
+}
+const rollHolds = (tr) => tr.o && !tr.o.dead && tr.o.state === "flying" && tr.o.stage !== 3;   // let go once it hits a wall
+// one physics step for a streamer: gravity, then keep each piece from stretching, then the floor and anything it lands on
+function stepTrail(tr, dt) {
+  const P = tr.pts, n = P.length, g = TP.gravity * dt * dt, pin = rollHolds(tr) ? P[n - 1] : null;
+  for (const p of P) {
+    if (p === pin) continue;
+    const vx = (p.x - p.px) * TP.damping, vy = (p.y - p.py) * TP.damping, vz = (p.z - p.pz) * TP.damping;
+    p.px = p.x; p.py = p.y; p.pz = p.z;
+    if (p.held) { p.x += vx * 0.2; p.z += vz * 0.2; p.y += Math.min(0, vy); }   // snagged or on the floor: barely slides
+    else { p.x += vx; p.y += vy - g; p.z += vz; }
+  }
+  if (pin) { pin.x = pin.px = tr.o.x; pin.y = pin.py = tr.o.y; pin.z = pin.pz = tr.o.z; }
+  for (let k = 0; k < TP.iters; k++) {
+    for (let i = 1; i < n; i++) {
+      const a = P[i - 1], b = P[i], dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z, d = Math.hypot(dx, dy, dz), r = tr.rest[i - 1];
+      if (d <= r || d < 1e-6) continue;   // paper doesn't stretch, but it can bunch up
+      const wa = a === pin ? 0 : a.held ? 0.15 : 1, wb = b === pin ? 0 : b.held ? 0.15 : 1, sum = wa + wb;
+      if (!sum) continue;
+      const f = (d - r) / d / sum;
+      a.x += dx * f * wa; a.y += dy * f * wa; a.z += dz * f * wa;
+      b.x -= dx * f * wb; b.y -= dy * f * wb; b.z -= dz * f * wb;
+    }
+    for (const p of P) {
+      if (p === pin) continue;
+      if (p.y < TP.floorY) { p.y = TP.floorY; p.held = true; continue; }
+      const s = tpSupport(p.x, p.z);
+      if (s > TP.floorY && p.y < s && p.py >= s - 0.04) { p.y = s + 0.01; p.held = true; }   // it came down onto something: snagged
+      else if (p.held && p.y > TP.floorY + 0.02 && p.y < s - 0.06) p.held = false;       // pulled off the edge
+    }
+  }
+}
+function updateTrails(dt) {
+  for (const tr of tpTrails) {
+    if (tr.done) continue;
+    if (!rollHolds(tr)) tr.t += dt;
+    const sub = 2, h = Math.min(dt, 0.05) / sub;
+    for (let k = 0; k < sub; k++) stepTrail(tr, h);
+    if (tr.pts.length > 1) {
+      if (tr.mesh) { scene.remove(tr.mesh); tr.mesh.geometry.dispose(); }
+      tr.mesh = new THREE.Mesh(trailGeometry(tr.pts), tpMat); tr.mesh.frustumCulled = false; scene.add(tr.mesh);
+    }
+    if (tr.t > TP.settleSec) tr.done = true;   // it's settled: leave the mesh as it is
+  }
 }
 function finishTrail(o) {
-  let len = 0;
-  for (let i = 1; i < o.trail.length; i++) len += Math.hypot(o.trail[i][0] - o.trail[i - 1][0], o.trail[i][2] - o.trail[i - 1][2]);
-  if (o.trailMesh) { tpTrails.push(o.trailMesh); o.trailMesh = null; }
-  while (tpTrails.length > 8) { const m = tpTrails.shift(); scene.remove(m); m.geometry.dispose(); }
+  const tr = o.trail; let len = 0;
+  for (let i = 1; i < tr.pts.length; i++) len += Math.hypot(tr.pts[i].x - tr.pts[i - 1].x, tr.pts[i].z - tr.pts[i - 1].z);
   if (len >= 2) havoc("tpTrail", Math.round(len * o.T.trailPointsPerM), `TP'd ${Math.round(len)} m of hallway!`, { x: o.x, z: o.z });
   o.trailLen = len;
   dareEvent("trail", { len });
-  o.trail = null;
+  tr.o = null; o.trail = null;
 }
-function clearTrails() { for (const m of tpTrails) { scene.remove(m); m.geometry.dispose(); } tpTrails.length = 0; }
+function clearTrails() { for (const tr of tpTrails) dropTrail(tr); tpTrails.length = 0; }
 
 // ---- kids crowding round a spot: the n nearest kids in the halls walk over and stand in a ring until done() ----
 function gatherKids(x, z, n, radius, ring, done) {
@@ -4067,6 +4158,10 @@ if (debug) {   // test-only helpers (only with ?debug in the URL)
     dareEvent(t, d) { dareEvent(t, d); },
     grabRoll() { grabRoll(); },
     trails() { return tpTrails.length; },
+    trailInfo() { return tpTrails.map((tr) => ({ n: tr.pts.length, done: tr.done, held: tr.pts.filter((p) => p.held).length,
+      maxY: Math.round(Math.max(...tr.pts.map((p) => p.y)) * 100) / 100, minY: Math.round(Math.min(...tr.pts.map((p) => p.y)) * 100) / 100,
+      snagged: tr.pts.filter((p) => p.held && p.y > 0.5).length })); },
+    banners() { return BANNERS.map((b) => { const p = hallPos(b.h, b.t, 0); return { h: b.h, t: b.t, x: p.x, z: p.z, text: b.text }; }); },
     stuck() { return { player: player.stuckT, staff: staff.map((s) => s.stuckT ?? 0) }; },
     lockers() { return SPOTS.map((sp, i) => ({ i, kind: sp.kind })).filter((x) => x.kind === "locker").map((x) => x.i); },
     selectSlot(i) { selectSlot(i); },
