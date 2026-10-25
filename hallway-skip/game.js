@@ -45,6 +45,7 @@
 // Step 42: a second floor. Two stairwells (northwest and southeast corners) connect them; staff follow you up and down,
 //          each floor has its own custodian, closet, restrooms and rooms. Rooms are now numbered 101-114 and 201-214.
 // Step 43: stronger slow motion while you aim a throw by hand (a fifth of normal speed), easing in and out, with a blue edge.
+// Step 44: sneaking into a classroom is a hide check, and so is every grab. Spotted: out, security's called, room locked 3 periods.
 import * as THREE from "three";
 
 // =====================================================================================
@@ -216,6 +217,16 @@ const CFG = {
   rooms: {
     grabSec: 1.5,                 // grabbing an item off a desk eats this much of your hiding time (subs: see TEACHER_TYPES)
     raidLockPeriods: 2,           // grab anything from a room and its door is locked for this many periods (no restock either)
+    hideCheck: {                  // step 44: sneaking in, and each grab, is a roll against the teacher's hideChance
+      grabPenalty: 0.1,           // each grab in the same visit makes the next roll this much harder
+      hoodBonus: 0.1,             // hood up: a little easier
+      min: 0.1, max: 0.97,
+      lockPeriods: 3,             // spotted: the room's locked this period and the next two
+      lines: ["\"Can I help you?\"", "\"Are you confused about how school works?\"", "\"Excuse me, does this look like a hotel?\"", "\"SECURITYYYY!\"",
+              "\"You're not on my roster.\"", "\"Hi. Who are you?\""],
+      subLines: ["\"Um... are you in this class? I'm calling someone.\"", "\"Hey! Hey, you! ...Security?\""],
+      officeLines: ["\"Do you have an appointment? No? SECURITY.\"", "\"Excuse me! That's staff only!\""],
+    },
   },
 
   // Short-term heat, 0-100: "they know it's me". Like a GTA wanted level.
@@ -487,13 +498,14 @@ const SPOT_TYPES = {
   closet:    { label: "Custodian's closet", halfW: 0.7, maxStaySec: 30,
                stayLine: "Mops, buckets, a breaker box. Smells like bleach. The custodian checks in here now and then.", timeoutLine: "Keys jingling outside. Time to go." },
 };
-// Who's in the room. backfire = chance per grab that they pick up the phone and call security.
+// Who's in the room. Step 44: walking in is a hide check (hideChance); so is every grab off a desk (a little harder each time).
+// Get spotted and you're out, security's called and the room's locked for a few periods. Make it and you can stay bootSec.
 const TEACHER_TYPES = {
-  teacher: { label: "Teacher", bootSec: 4, silhouette: 0x2b2f3a, backfire: 0.3,
-             stayLine: "\"Can I help you?\"", bootLine: "\"Nice try. Out.\"" },
-  sub:     { label: "Sub", bootSec: 14, silhouette: 0x3a7d44, backfire: 0.05, grabSec: 0.75,
+  teacher: { label: "Teacher", bootSec: 15, silhouette: 0x2b2f3a, hideChance: 0.65,
+             stayLine: "You slipped in behind the back row. The teacher's writing on the board.", bootLine: "\"Nice try. Out.\"" },
+  sub:     { label: "Sub", bootSec: 20, silhouette: 0x3a7d44, hideChance: 0.9, grabSec: 0.75,
              stayLine: "The sub is reading a magazine. You're under a desk.", bootLine: "The sub finally looks up: \"Are you even in this class?\"" },
-  office:  { label: "Secretary", bootSec: 3, silhouette: 0x7a4b8c, backfire: 0.5,
+  office:  { label: "Secretary", bootSec: 12, silhouette: 0x7a4b8c, hideChance: 0.5,
              stayLine: "The secretary is on hold with the district. You duck behind the counter.", bootLine: "\"Do you have an appointment? No? Out.\"" },
 };
 // Rooms as shops: what's lying on the desks, by room type. A new room type is one line.
@@ -1505,7 +1517,7 @@ function resetSpotsForPeriod() {
     if (sp.kind === "closet") sp.taken.clear();   // (restocked, but still locked if you stole from it today)
     if (sp.kind === "classroom") {
       // raided last period: locked for a while, and nothing gets restocked until it opens again
-      if (sp.raided) { sp.lockedUntil = game.period + CFG.rooms.raidLockPeriods - 1; sp.raided = false; }
+      if (sp.raided) { if (game.period + CFG.rooms.raidLockPeriods - 1 > sp.lockedUntil) sp.lockWhy = "raided"; sp.lockedUntil = Math.max(sp.lockedUntil, game.period + CFG.rooms.raidLockPeriods - 1); sp.raided = false; }
       if (!roomLocked(sp)) {   // restock the desks
         const [lo, hi] = sp.R.count, n = lo + Math.floor(Math.random() * (hi - lo + 1)) + (sp.teacher === "sub" && sp.R.loot.length ? 1 : 0);
         sp.loot = [...(sp.R.always ?? []), ...Array.from({ length: n }, () => pickWeighted(sp.R.loot))];
@@ -2558,7 +2570,7 @@ function spotBlocked(sp) {   // why this spot can't be used right now ("" if it 
   if (sp.kind === "locker") return sp.busted ? "This locker's busted (you burst out of it)" : game.lockerUses > 0 ? "" : "No locker uses left this period";
   if (sp.kind === "classroom" && game.alarmT > 0) return "Fire alarm! Every classroom is locked";
   if (sp.closed) return "Out of order (somebody flooded it)";
-  if (roomLocked(sp)) return `Room ${sp.room} is locked (you raided it)`;
+  if (roomLocked(sp)) return `Room ${sp.room} is locked (${sp.lockWhy === "spotted" ? "the teacher spotted you" : "you raided it"})`;
   if (sp.jammed) return `Room ${sp.room} is jammed shut with a mop`;
   if (sp.kind === "closet" && sp.locked) return "The custodian locked his closet. You'd need a staff key.";
   if (sp.used && sp.kind === "closet") return "You already hid in the closet this period";
@@ -2601,7 +2613,13 @@ function enterSpot(sp) {
     }
   }
   playBlip([260, 200], 0.07, "triangle", 0.07);
-  if (sp.kind === "classroom") dareEvent("enterRoom", { sp });
+  if (sp.kind === "classroom") {   // step 44: did the teacher see you slip in?
+    sp.grabs = 0;
+    const ch = roomHideChance(sp);
+    if (Math.random() >= ch) { roomSpotted(sp); return true; }
+    toast(`🤫 Nobody noticed you slip in. (${Math.round(ch * 100)}% chance)`, 1.8);
+    dareEvent("enterRoom", { sp });
+  }
   if (sp.kind === "restroom") sp.checks = 0;   // a new stay
   if (sp.kind === "restroom") game.dareOffer = game.dares.length < CFG.dares.max ? makeDareOffer() : null;   // the kid by the sinks
   ui.hide.hidden = false;
@@ -2609,7 +2627,7 @@ function enterSpot(sp) {
   return true;
 }
 
-function exitSpot(booted, msg = "") {
+function exitSpot(booted, msg = "", title = "BOOTED!") {
   const sp = player.hidden;
   if (!sp) return;
   player.hidden = null; player.mesh.visible = true; player.pushT = 0;
@@ -2620,7 +2638,7 @@ function exitSpot(booted, msg = "") {
   ui.hide.hidden = true;
   if (booted) {
     player.graceT = CFG.hiding.bootGraceSec;
-    banner(`BOOTED!<small>${msg}</small>`, 2.6);
+    banner(`${title}<small>${msg}</small>`, 2.6);
     playBlip([440, 330], 0.1, "sawtooth", 0.06);
   } else {
     if (msg) toast(msg);
@@ -2684,7 +2702,7 @@ function updateHidePanel() {
 // Rooms as shops: tap an item on the desk to grab it. It costs hiding time, and the teacher might call security.
 const lootEl = $("hpLoot");
 function renderLoot(sp) {
-  const key = sp.kind === "classroom" || sp.kind === "closet" ? `${sp.room}:${sp.lootVer}:${sp.loot?.length}:${[...sp.taken]}:${game.passShield}:${game.breakerUsed}` : `${sp.kind}${sp.h}:${sp.t}:${!!sp.rummaged}:${!!sp.tpTaken}:${game.dareOffer?.id}:${game.dares.length}`;
+  const key = sp.kind === "classroom" || sp.kind === "closet" ? `${sp.room}:${sp.lootVer}:${sp.loot?.length}:${[...sp.taken]}:${game.passShield}:${game.breakerUsed}:${sp.grabs}:${player.hoodT > 0}` : `${sp.kind}${sp.h}:${sp.t}:${!!sp.rummaged}:${!!sp.tpTaken}:${game.dareOffer?.id}:${game.dares.length}`;
   if (lootEl.dataset.key === key) return;
   lootEl.dataset.key = key; lootEl.innerHTML = "";
   if (sp.kind === "restroom") {   // the bathroom flood: big points and heat, and it's closed for the rest of the day
@@ -2741,7 +2759,7 @@ function renderLoot(sp) {
     return;
   }
   if (sp.kind !== "classroom") return;
-  const grab = TEACHER_TYPES[sp.teacher].grabSec ?? CFG.rooms.grabSec;
+  const grab = TEACHER_TYPES[sp.teacher].grabSec ?? CFG.rooms.grabSec, risk = `${Math.round((1 - roomHideChance(sp)) * 100)}% risk`;
   const note = game.dares.find((m) => m.id === "loveNote" && m.p.from === sp.room && !m.p.has);
   if (note) {   // the love note for the dare (no grab time, and it doesn't count as raiding the room)
     const b = document.createElement("button"); b.type = "button"; b.className = "prize";
@@ -2751,7 +2769,7 @@ function renderLoot(sp) {
   }
   sp.loot.forEach((k, i) => {
     const b = document.createElement("button"); b.type = "button";
-    b.innerHTML = `${ITEM_TYPES[k].icon} ${ITEM_TYPES[k].label}<small>-${grab}s</small>`;
+    b.innerHTML = `${ITEM_TYPES[k].icon} ${ITEM_TYPES[k].label}<small>-${grab}s · ${risk}</small>`;
     b.addEventListener("click", () => grabLoot(i));
     lootEl.appendChild(b);
   });
@@ -2759,7 +2777,7 @@ function renderLoot(sp) {
     if (sp.taken.has(id)) continue;
     const b = document.createElement("button"); b.type = "button"; b.className = "prize";
     const note = id === "prize" ? `+${X.points} · ` : id === "fakePass" && game.passShield ? "you have one · " : "";
-    b.innerHTML = `${X.icon} ${X.label}<small>${note}-${grab}s</small>`;
+    b.innerHTML = `${X.icon} ${X.label}<small>${note}-${grab}s · ${risk}</small>`;
     b.addEventListener("click", () => grabLoot(id));
     lootEl.appendChild(b);
   }
@@ -2782,8 +2800,11 @@ function grabLoot(i) {
   const sp = player.hidden;
   if (!sp || sp.kind !== "classroom" || game.state !== "playing") return;
   const TT = TEACHER_TYPES[sp.teacher];
+  if (typeof i === "string" ? sp.taken.has(i) : !sp.loot[i]) return;
+  // step 44: every grab is another roll; get spotted and you leave empty-handed
+  if (Math.random() >= roomHideChance(sp)) { roomSpotted(sp); return; }
+  sp.grabs = (sp.grabs || 0) + 1;
   if (typeof i === "string") {   // a special
-    if (sp.taken.has(i)) return;
     if (i === "prize") havoc("rarePrize", sp.R.specials.prize.points, "Confiscated stash!", { x: player.x, z: player.z });
     else if (!takeItem(i === "fakePass" ? "hallPass" : "masterKey")) return;
     sp.taken.add(i);
@@ -2794,7 +2815,6 @@ function grabLoot(i) {
   sp.raided = true;   // locked for a while from the next bell
   dareEvent("raid", { room: sp.room, type: sp.roomType });
   player.hideT += TT.grabSec ?? CFG.rooms.grabSec;
-  if (Math.random() < TT.backfire) roomBackfire(sp);
   updateHidePanel();
 }
 function grabRoll() {
@@ -2851,6 +2871,19 @@ function roomBackfire(sp) {
   }
   if (st) { const d = Math.hypot(st.x - f.x, st.z - f.z); st.state = "search"; st.searchT = -Math.min(16, d / (st.type.chaseSpeed * 0.8)); st.lastX = st.tx = f.x; st.lastZ = st.tz = f.z; }
   onRoomBackfire(sp);
+}
+// ---- step 44: the hide check for classrooms ----
+function roomHideChance(sp) {
+  const C = CFG.rooms.hideCheck;
+  return clamp(TEACHER_TYPES[sp.teacher].hideChance - (sp.grabs || 0) * C.grabPenalty + (player.hoodT > 0 ? C.hoodBonus : 0), C.min, C.max);
+}
+function roomSpotted(sp) {
+  const C = CFG.rooms.hideCheck;
+  const line = pick(sp.teacher === "sub" ? C.subLines : sp.teacher === "office" ? C.officeLines : C.lines);
+  sp.lockedUntil = Math.max(sp.lockedUntil, game.period + C.lockPeriods - 1);
+  sp.lockWhy = "spotted"; sp.raided = false;
+  exitSpot(true, `${TT_NAME(sp)}: ${line} Room ${sp.room} is locked for a while.`, "SPOTTED!");
+  roomBackfire(sp);
 }
 const TT_NAME = (sp) => (sp.teacher === "office" ? "The secretary" : sp.teacher === "sub" ? "The sub" : "The teacher");
 function onRoomBackfire(sp) { addHeat(CFG.heat.roomCall); }   // short-term heat only; the security level is for loud havoc
@@ -5030,6 +5063,7 @@ if (debug) {   // test-only helpers (only with ?debug in the URL)
     enter(i) { return enterSpot(SPOTS[i]); },
     leave() { exitSpot(false); },
     grab(i) { grabLoot(i); },
+    unlockAll() { for (const sp of SPOTS) { sp.used = false; sp.lockedUntil = 0; } player.graceT = 0; },
     unpost() { for (const st of staff) if (st.post) st.post = null; },
     hideT() { return player.hideT; },
     friends() { return crowd.filter((c) => c.friend).map((c) => ({ offer: c.friend.offer, cd: c.friend.cd, x: c.x, z: c.z, mode: c.mode, i: crowd.indexOf(c) })); },
