@@ -47,6 +47,7 @@
 // Step 43: stronger slow motion while you aim a throw by hand (a fifth of normal speed), easing in and out, with a blue edge.
 // Step 44: sneaking into a classroom is a hide check, and so is every grab. Spotted: out, security's called, room locked 3 periods.
 // Step 45: your kid: stealth, speed and strength (0-20, roll and reroll), on a character screen from the title.
+// Step 46: your kid's look: outfit, hair and color, skin, height, weight and build, on a jointed low-poly kid whose arms and legs swing.
 import * as THREE from "three";
 
 // =====================================================================================
@@ -1096,13 +1097,190 @@ function makePerson({ body, skin = 0xf1c27d, scale = 1, hat = null, hood = null 
   return g;
 }
 
+// ---------- step 46: your kid's look. A jointed low-poly kid (legs and arms swing), built from the look on the character screen ----------
+const SKIN_TONES = [0xffe0c4, 0xf1c27d, 0xe0ac69, 0xc68642, 0xa86b3c, 0x8d5524, 0x5c3a21, 0x3b2414];
+const HAIR_COLORS = [0x15110f, 0x3b2314, 0x6b4423, 0xa0522d, 0xd9b26a, 0xefe6c8, 0xc2502a, 0x9aa0a6, 0x2f6fde, 0xff6fb5, 0x3fbf6f, 0x8e5bd9];
+const HAIR_STYLES = { buzz: "Buzz", short: "Short", spiky: "Spiky", mohawk: "Mohawk", swoop: "Swoop", bob: "Bob", long: "Long", ponytail: "Ponytail", bun: "Bun", pigtails: "Pigtails", afro: "Afro", bald: "Bald" };
+function canvasTex(w, h, draw) {
+  const c = document.createElement("canvas"); c.width = w; c.height = h; draw(c.getContext("2d"), w, h);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+const kidTex = {};   // made the first time an outfit needs them
+const KID_TEX = {
+  // a cylinder's texture starts at the front (u = 0) and wraps around, so the back is the middle of the image
+  jersey: () => canvasTex(256, 128, (g, w, h) => {
+    g.fillStyle = "#c0262d"; g.fillRect(0, 0, w, h);
+    g.fillStyle = "#fff"; g.fillRect(0, 6, w, 8);   // shoulder stripe
+    g.font = "900 64px system-ui, sans-serif"; g.textAlign = "center"; g.textBaseline = "middle";
+    g.fillText("00", w / 2, h * 0.58);                        // back
+    g.font = "900 30px system-ui, sans-serif"; g.fillText("0", 12, h * 0.55); g.fillText("0", w - 12, h * 0.55);   // front, split across the seam
+  }),
+  jerseySleeve: () => canvasTex(64, 64, (g, w, h) => { g.fillStyle = "#c0262d"; g.fillRect(0, 0, w, h); g.fillStyle = "#fff"; g.fillRect(0, h * 0.55, w, h * 0.15); }),
+  baja: () => canvasTex(256, 64, (g, w, h) => {
+    const cols = ["#efe3c8", "#7a3b2e", "#efe3c8", "#3e6e8e", "#efe3c8", "#c9a227", "#efe3c8", "#3b3b3b", "#efe3c8", "#a33a3a"];
+    let x = 0; for (let i = 0; x < w; i++) { const sw = [14, 4, 10, 4, 18, 3, 8, 4, 12, 5][i % 10]; g.fillStyle = cols[i % cols.length]; g.fillRect(x, 0, sw, h); x += sw; }
+  }),
+  sparkle: () => canvasTex(128, 128, (g, w, h) => {
+    g.fillStyle = "#ff5fb0"; g.fillRect(0, 0, w, h);
+    for (let i = 0; i < 70; i++) { g.fillStyle = Math.random() < 0.5 ? "#fff" : "#ffd6ef"; const s = Math.random() < 0.2 ? 3 : 2; g.fillRect(Math.random() * w, Math.random() * h, s, s); }
+  }),
+  trackPants: () => canvasTex(64, 64, (g, w, h) => { g.fillStyle = "#ff5fb0"; g.fillRect(0, 0, w, h); g.fillStyle = "#fff"; g.fillRect(w * 0.22, 0, 4, h); g.fillRect(w * 0.72, 0, 4, h); }),
+  skirt: () => canvasTex(128, 32, (g, w, h) => { for (let i = 0; i < 16; i++) { g.fillStyle = i % 2 ? "#c0262d" : "#a51f25"; g.fillRect(i * 8, 0, 8, h); } g.fillStyle = "#fff"; g.fillRect(0, h - 5, w, 3); }),
+  cheerTop: () => canvasTex(128, 64, (g, w, h) => {
+    g.fillStyle = "#c0262d"; g.fillRect(0, 0, w, h);
+    g.strokeStyle = "#fff"; g.lineWidth = 5; g.beginPath(); g.moveTo(0, 6); g.lineTo(14, 34); g.lineTo(28, 6); g.stroke();   // V-neck, front (wraps)
+    g.beginPath(); g.moveTo(w, 6); g.lineTo(w - 14, 34); g.stroke();
+    g.fillStyle = "#fff"; g.fillRect(0, h - 8, w, 5);
+  }),
+};
+const ktex = (k) => (kidTex[k] ??= KID_TEX[k]());
+const kmat = (c) => (typeof c === "string" ? new THREE.MeshLambertMaterial({ map: ktex(c), flatShading: true }) : lambert(c));
+// Outfits. top/sleeve/pants are a color or a texture name; sleeves: "long", "short" or "none"; pants: "long", "shorts" or "skirt".
+const OUTFITS = {
+  punk:      { label: "Punk", top: 0x222222, sleeves: "short", pants: 0x3d5a80, legs: "long", shoes: 0x151515, extras: ["vest", "converse"], hood: 0x2a2a2a },
+  jock:      { label: "Jock", top: "jersey", belly: 0xc0262d, sleeve: "jerseySleeve", sleeves: "short", pants: 0x8f939a, legs: "long", shoes: 0xf2f2f2, hood: 0x8f939a },
+  goth:      { label: "Goth", top: 0x141414, sleeves: "long", pants: 0x101010, legs: "long", shoes: 0x080808, extras: ["boots", "chains"], hood: 0x141414 },
+  nerd:      { label: "Nerd", top: 0xf4f4f4, sleeves: "long", pants: 0xc8b07a, legs: "long", shoes: 0x5a3a22, extras: ["buttons", "suspenders", "glasses"], hood: 0x6b7a8f },
+  burnout:   { label: "Burnout", top: "baja", sleeves: "long", pants: 0x4a6a96, legs: "long", baggy: 1.35, shoes: 0x444444, extras: ["hoodBack", "pocket"], hood: "baja" },
+  fabulous:  { label: "Fabulous", top: "sparkle", sleeves: "long", pants: "trackPants", legs: "long", shoes: 0xffffff, extras: ["zip"], hood: "sparkle" },
+  cheer:     { label: "Cheerleader", top: "cheerTop", belly: 0xc0262d, sleeves: "none", pants: "skirt", legs: "skirt", shoes: 0xffffff, extras: ["socks"], hood: 0xc0262d },
+};
+// the build slider's ends and middle: an upside-down triangle, a rectangle and an hourglass
+const shapeSvg = (pts) => `<svg viewBox="0 0 20 24" width="18" height="22" aria-hidden="true"><polygon points="${pts}" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>`;
+const BUILD_ICONS = [shapeSvg("2,3 18,3 10,21"), shapeSvg("4,3 16,3 16,21 4,21"), shapeSvg("3,3 17,3 11,12 17,21 3,21 9,12")];
+function randomLook() {
+  return { outfit: pick(Object.keys(OUTFITS)), hair: pick(Object.keys(HAIR_STYLES)), hairColor: Math.floor(Math.random() * 7), skin: Math.floor(Math.random() * SKIN_TONES.length),
+    height: Math.round(rand(0.25, 0.75) * 100) / 100, weight: Math.round(rand(0.2, 0.6) * 100) / 100, build: Math.round(rand(-0.8, 0.8) * 100) / 100 };
+}
+// look: height and weight 0..1, build -1 (upside-down triangle) .. 0 (rectangle) .. 1 (hourglass)
+function buildKid(look) {
+  const O = OUTFITS[look.outfit] ?? OUTFITS.punk, skin = SKIN_TONES[look.skin] ?? SKIN_TONES[1], hc = HAIR_COLORS[look.hairColor] ?? HAIR_COLORS[1];
+  const H = 0.9 + 0.2 * (look.height ?? 0.5), W = 0.85 + 0.45 * (look.weight ?? 0.35), B = clamp(look.build ?? 0, -1, 1);
+  const g = new THREE.Group(), add = (m, parent = g) => { parent.add(m); return m; };
+  const mesh = (geo, mat, x, y, z, parent) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); return add(m, parent); };
+  const skinM = lambert(skin), topM = kmat(O.top), pantsM = kmat(O.pants), shoeM = lambert(O.shoes), hairM = lambert(hc);
+  // proportions
+  const legLen = 0.54 * H, hipY = 0.06 + legLen, torsoLen = 0.5 * H, waistY = hipY + 0.16 * H, shoulderY = hipY + torsoLen;
+  const shoulder = (B < 0 ? 0.21 - B * 0.07 : 0.21 - B * 0.015) * W, waist = (B < 0 ? 0.18 + B * 0.01 : 0.18 - B * 0.05) * W, hip = (B < 0 ? 0.18 + B * 0.035 : 0.18 + B * 0.04) * W;
+  const depth = 0.62, headR = 0.19, headY = shoulderY + 0.07 + headR;
+  // torso: chest (waist up to shoulders) and belly (hips up to waist), flattened front to back
+  const chest = mesh(new THREE.CylinderGeometry(shoulder, waist, shoulderY - waistY, 10), topM, 0, (shoulderY + waistY) / 2, 0); chest.scale.z = depth;
+  const belly = mesh(new THREE.CylinderGeometry(waist, hip, waistY - hipY + 0.04, 10), O.belly != null ? lambert(O.belly) : topM, 0, (waistY + hipY) / 2 - 0.02, 0); belly.scale.z = depth;
+  const shoulderCap = mesh(new THREE.SphereGeometry(shoulder, 10, 4, 0, Math.PI * 2, 0, Math.PI / 2), topM, 0, shoulderY - 0.005, 0); shoulderCap.scale.set(1, 0.32, depth);
+  const pelvis = mesh(new THREE.CylinderGeometry(hip, hip * 0.92, 0.12, 10), O.legs === "skirt" ? skinM : pantsM, 0, hipY - 0.04, 0); pelvis.scale.z = depth;
+  mesh(new THREE.CylinderGeometry(0.06, 0.07, 0.1, 6), skinM, 0, shoulderY + 0.04, 0);   // neck
+  // legs, each swinging from the hip
+  const legR = 0.075 * W * (O.baggy ?? 1), legs = [];
+  for (const sx of [-1, 1]) {
+    const pivot = add(new THREE.Group()); pivot.position.set(sx * hip * 0.5, hipY, 0); legs.push(pivot);
+    const covered = O.legs === "long" ? 1 : O.legs === "shorts" ? 0.4 : 0;
+    if (covered > 0) mesh(new THREE.CylinderGeometry(legR, legR * (O.baggy ? 1 : 0.85), legLen * covered, 7), pantsM, 0, -legLen * covered / 2, 0, pivot);
+    if (covered < 1) mesh(new THREE.CylinderGeometry(0.06 * W, 0.05 * W, legLen * (1 - covered), 7), skinM, 0, -legLen * covered - legLen * (1 - covered) / 2, 0, pivot);
+    if (O.extras?.includes("socks")) mesh(new THREE.CylinderGeometry(0.056 * W, 0.054 * W, 0.12, 7), lambert(0xffffff), 0, -legLen + 0.06, 0, pivot);
+    const boot = O.extras?.includes("boots");
+    if (boot) mesh(new THREE.CylinderGeometry(0.07 * W, 0.07 * W, 0.16, 7), shoeM, 0, -legLen + 0.06, 0, pivot);
+    mesh(new THREE.BoxGeometry(0.13, 0.08, 0.25), shoeM, 0, -legLen - 0.02, 0.04, pivot);
+    if (O.extras?.includes("converse")) { mesh(new THREE.BoxGeometry(0.135, 0.085, 0.07), lambert(0xf2f2f2), 0, -legLen - 0.02, 0.15, pivot); mesh(new THREE.BoxGeometry(0.14, 0.025, 0.26), lambert(0xf2f2f2), 0, -legLen - 0.055, 0.04, pivot); }
+  }
+  if (O.legs === "skirt") { const sk = mesh(new THREE.CylinderGeometry(hip * 0.95, hip * 1.45, 0.24, 16, 1, true), new THREE.MeshLambertMaterial({ map: ktex("skirt"), flatShading: true, side: THREE.DoubleSide }), 0, hipY - 0.06, 0); sk.scale.z = 0.8; }
+  // arms, each swinging from the shoulder
+  const armLen = 0.5 * H, armR = 0.052 * W, arms = [];
+  const sleeveLen = O.sleeves === "long" ? armLen - 0.04 : O.sleeves === "short" ? armLen * 0.36 : 0, sleeveM = O.sleeve ? kmat(O.sleeve) : topM;
+  for (const sx of [-1, 1]) {
+    const pivot = add(new THREE.Group()); pivot.position.set(sx * (shoulder + armR * 0.6), shoulderY - 0.04, 0); pivot.rotation.z = sx * 0.07; arms.push(pivot);
+    if (sleeveLen) mesh(new THREE.CylinderGeometry(armR * 1.15, armR * 1.05, sleeveLen, 7), sleeveM, 0, -sleeveLen / 2, 0, pivot);
+    if (armLen - sleeveLen > 0.01) mesh(new THREE.CylinderGeometry(armR * 0.9, armR * 0.8, armLen - sleeveLen, 7), skinM, 0, -sleeveLen - (armLen - sleeveLen) / 2, 0, pivot);
+    mesh(new THREE.IcosahedronGeometry(armR * 1.05, 0), skinM, 0, -armLen - 0.02, 0, pivot);
+  }
+  // head and face
+  const head = mesh(new THREE.IcosahedronGeometry(headR, 1), skinM, 0, headY, 0); head.scale.y = 1.08;
+  const eyes = add(new THREE.Group()), eyeM = lambert(0x1d1d1d);
+  for (const sx of [-1, 1]) mesh(new THREE.BoxGeometry(0.045, 0.04, 0.02), eyeM, sx * 0.07, headY + 0.02, headR - 0.01, eyes);
+  if (O.extras?.includes("glasses")) {
+    const gm = lambert(0x222222);
+    for (const sx of [-1, 1]) { mesh(new THREE.TorusGeometry(0.045, 0.01, 4, 10), gm, sx * 0.075, headY + 0.02, headR + 0.005, eyes); }
+    mesh(new THREE.BoxGeometry(0.06, 0.012, 0.012), gm, 0, headY + 0.03, headR + 0.005, eyes);
+  }
+  // outfit details
+  const ex = O.extras ?? [], frontZ = (r) => r * depth + 0.004;
+  // how far forward the body's surface is at height y, x to the side (so studs and straps sit on it, not in the air)
+  const bodyR = (y) => (y >= waistY ? waist + (shoulder - waist) * clamp((y - waistY) / (shoulderY - waistY), 0, 1) : hip + (waist - hip) * clamp((y - hipY) / (waistY - hipY), 0, 1));
+  const surfZ = (y, x, grow = 1) => { const r = bodyR(y) * grow; return depth * r * Math.sqrt(Math.max(0, 1 - (x / r) ** 2)) + 0.006; };
+  if (ex.includes("vest")) {   // denim vest: a shell over the shirt, open down the front
+    const v = mesh(new THREE.CylinderGeometry(shoulder * 1.07, waist * 1.08, shoulderY - waistY + 0.02, 10, 1, true, 0.5, Math.PI * 2 - 1.0), new THREE.MeshLambertMaterial({ color: 0x4f78b0, flatShading: true, side: THREE.DoubleSide }), 0, (shoulderY + waistY) / 2, 0);
+    v.scale.z = depth;
+    for (let i = 0; i < 6; i++) { const x = (i % 2 ? 1 : -1) * shoulder * 0.5, y = shoulderY - 0.07 - Math.floor(i / 2) * 0.07; mesh(new THREE.BoxGeometry(0.022, 0.022, 0.022), lambert(0xd8d8d8), x, y, surfZ(y, x, 1.07)); }   // studs
+  }
+  if (ex.includes("buttons")) for (let i = 0; i < 4; i++) { const y = shoulderY - 0.07 - i * 0.09; mesh(new THREE.BoxGeometry(0.02, 0.02, 0.01), lambert(0xbbbbbb), 0, y, surfZ(y, 0)); }
+  if (ex.includes("suspenders")) {
+    const sm = lambert(0x8b1e2d);
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+      for (let k = 0; k < 4; k++) {   // in four pieces, so each one hugs the body
+        const y0 = hipY + ((shoulderY - hipY) * k) / 4, y1 = hipY + ((shoulderY - hipY) * (k + 1)) / 4, ym = (y0 + y1) / 2, x = sx * bodyR(ym) * 0.45;
+        mesh(new THREE.BoxGeometry(0.035, y1 - y0 + 0.01, 0.012), sm, x, ym, sz * surfZ(ym, x));
+      }
+    }
+  }
+  if (ex.includes("chains")) {   // two loops of chain from the front belt loop around to the back pocket
+    const cm = new THREE.MeshLambertMaterial({ color: 0xc8ccd2, flatShading: true });
+    for (const [r, y] of [[0.16, hipY - 0.02], [0.22, hipY - 0.05]]) {
+      const c = mesh(new THREE.TorusGeometry(r * W, 0.012, 4, 14, Math.PI), cm, hip * 0.98, y, 0); c.rotation.set(0, Math.PI / 2, Math.PI);
+    }
+  }
+  if (ex.includes("hoodBack")) { const hb = mesh(new THREE.IcosahedronGeometry(0.15, 1), kmat("baja"), 0, shoulderY + 0.02, -shoulder * depth - 0.04); hb.scale.set(1.3, 0.75, 0.6); }
+  if (ex.includes("pocket")) mesh(new THREE.BoxGeometry(waist * 1.2, 0.1, 0.02), kmat("baja"), 0, waistY - 0.02, frontZ(waist) + 0.005);
+  if (ex.includes("zip")) mesh(new THREE.BoxGeometry(0.015, shoulderY - hipY - 0.02, 0.01), lambert(0xffffff), 0, (shoulderY + hipY) / 2, frontZ((shoulder + waist) / 2) + 0.004);
+  // hair
+  const hair = add(new THREE.Group());
+  buildHair(hair, look.hair ?? "short", hairM, headR, headY);
+  g.userData = { legs, arms, eyes, hair, headY, outfit: O, walk: 0 };
+  return g;
+}
+// a dome over the top of the head, open at the front, or a shell around the sides and back (for longer styles)
+const hairShell = (r, frontGap, down) => new THREE.SphereGeometry(r, 14, 8, Math.PI / 2 + frontGap / 2, Math.PI * 2 - frontGap, 0, down);
+function buildHair(hair, style, m, r, y) {
+  const mesh = (geo, x, yy, z) => { const o = new THREE.Mesh(geo, m); o.position.set(x, yy, z); hair.add(o); return o; };
+  const cap = (s = 1.07) => { const c = mesh(new THREE.SphereGeometry(r * s, 14, 6, 0, Math.PI * 2, 0, Math.PI * 0.42), 0, y + 0.02, -0.012); c.scale.y = 1.12; return c; };
+  if (style === "bald") return;
+  if (style === "buzz") { cap(1.03); return; }
+  if (style === "mohawk") {   // a strip following the curve of the head, front to back
+    for (let k = 0; k < 6; k++) { const a = -0.9 + k * 0.42, b = mesh(new THREE.BoxGeometry(0.05, 0.13, 0.09), 0, y + Math.cos(a) * r * 1.1, Math.sin(a) * r * 1.02); b.rotation.x = a; }
+    return;
+  }
+  cap();
+  if (style === "short") { const f = mesh(new THREE.SphereGeometry(r * 1.08, 12, 4, Math.PI * 0.2, Math.PI * 0.6, Math.PI * 0.3, Math.PI * 0.16), 0, y + 0.02, -0.012); f.scale.y = 1.12; }   // a fringe
+  if (style === "spiky") for (let i = 0; i < 8; i++) { const a = (i / 8) * Math.PI * 2, s = mesh(new THREE.ConeGeometry(0.045, 0.17, 4), Math.sin(a) * r * 0.6, y + r * 1.02, Math.cos(a) * r * 0.6 - 0.02); s.rotation.set(Math.cos(a) * 0.55, 0, -Math.sin(a) * 0.55); }
+  if (style === "spiky") mesh(new THREE.ConeGeometry(0.05, 0.18, 4), 0, y + r + 0.1, -0.02);
+  if (style === "swoop") { const s = mesh(new THREE.BoxGeometry(0.2, 0.06, 0.16), 0.05, y + 0.08, r * 0.78); s.rotation.set(-0.5, 0, -0.45); }
+  if (style === "bob") { const b = mesh(hairShell(r * 1.12, 1.6, Math.PI * 0.6), 0, y + 0.01, -0.01); b.scale.y = 1.1; }
+  if (style === "long") { const b = mesh(hairShell(r * 1.1, 1.6, Math.PI * 0.55), 0, y + 0.01, -0.01); b.scale.y = 1.1; mesh(new THREE.BoxGeometry(r * 1.9, 0.38, 0.07), 0, y - 0.2, -r * 0.82); }
+  if (style === "ponytail") { mesh(new THREE.IcosahedronGeometry(0.06, 0), 0, y + 0.06, -r - 0.02); const t = mesh(new THREE.CylinderGeometry(0.05, 0.025, 0.26, 6), 0, y - 0.08, -r - 0.06); t.rotation.x = 0.25; }
+  if (style === "bun") mesh(new THREE.IcosahedronGeometry(0.085, 1), 0, y + r + 0.02, -r * 0.45);
+  if (style === "pigtails") for (const sx of [-1, 1]) { mesh(new THREE.IcosahedronGeometry(0.045, 0), sx * r * 0.95, y + 0.04, -0.03); const t = mesh(new THREE.CylinderGeometry(0.045, 0.02, 0.24, 6), sx * (r + 0.03), y - 0.1, -0.03); t.rotation.z = -sx * 0.15; }
+  if (style === "afro") { const a = mesh(hairShell(r * 1.55, 1.9, Math.PI * 0.68), 0, y + 0.06, -0.03); a.scale.set(1, 0.95, 1); mesh(new THREE.IcosahedronGeometry(r * 1.45, 1), 0, y + 0.14, -0.06).scale.set(1, 0.7, 1); }
+}
+// swing the arms and legs while moving
+function animateKid(m, speed, dt) {
+  const u = m.userData; if (!u?.legs) return;
+  const amt = clamp(speed / 4.5, 0, 1);
+  u.walk += dt * (5 + speed * 1.6) * (amt > 0.05 ? 1 : 0);
+  const sw = Math.sin(u.walk) * 0.65 * amt;
+  u.legs[0].rotation.x = sw; u.legs[1].rotation.x = -sw;
+  u.arms[0].rotation.x = -sw * 0.8; u.arms[1].rotation.x = sw * 0.8;
+}
+
 // ---------- player ----------
 const player = {
   x: 0, z: 0, vx: 0, vz: 0, heading: 0, stamina: 1, staminaMax: 1, boostT: 0, sprinting: false, winded: false, shoveCD: 0,
   hidden: null, hideT: 0, hideArmed: false, graceT: 0, invisT: 0, pushSpot: null, pushT: 0, slipT: 0, dazeT: 0, stuckT: 0, ride: null,
-  mesh: makePerson({ body: 0x8a8f99, hood: 0x7b808a }),   // the gray hoodie
+  mesh: (() => { const g = new THREE.Group(); scene.add(g); return g; })(),   // holds your kid (step 46: built from your look) and the hood
+  kid: null,
   hoodT: 0, hoodCD: 0,
 };
+// the hood (step 40), pulled up over your kid's head
+const hoodUpMesh = new THREE.Mesh(new THREE.IcosahedronGeometry(0.25, 1), lambert(0x5d626b));
+hoodUpMesh.position.set(0, 1.37, -0.03); hoodUpMesh.scale.set(1.05, 1.1, 1.0); hoodUpMesh.visible = false; player.mesh.add(hoodUpMesh);
+const showHood = (up) => { hoodUpMesh.visible = up; if (player.kid) { player.kid.userData.eyes.visible = !up; player.kid.userData.hair.visible = !up; } };
 
 // ---------- crowd (instanced: one mesh for bodies, one for heads) ----------
 const crowd = [];
@@ -1840,12 +2018,22 @@ const STATS = [
 ];
 const rollStat = () => Math.round(Math.random() * 20 / 3 + Math.random() * 20 / 3 + Math.random() * 20 / 3);
 const rollStats = () => Object.fromEntries(STATS.map((S) => [S.k, rollStat()]));
-const character = { made: false, stats: rollStats() };
+const character = { made: false, stats: rollStats(), look: randomLook() };
 try { const c = JSON.parse(localStorage.getItem(CHAR_KEY)); if (c?.stats) Object.assign(character, c); } catch (e) { /* storage blocked: a fresh roll */ }
 function saveCharacter() { try { localStorage.setItem(CHAR_KEY, JSON.stringify(character)); } catch (e) { /* fine */ } }
 function statMod(k) { return (clamp(character.stats[k] ?? 10, 0, 20) - 10) / 10; }
 function speedMult() { return 1 + CFG.stats.speed.move * statMod("speed"); }
 function coneHalf(T) { return ((T.visionHalfAngleDeg * Math.PI) / 180) * (1 - CFG.stats.stealth.cone * statMod("stealth")); }
+// put your kid (from your look) into the game
+function applyLook() {
+  if (player.kid) { player.mesh.remove(player.kid); disposeTree(player.kid); }
+  player.kid = buildKid(character.look); player.mesh.add(player.kid);
+  const O = player.kid.userData.outfit, hy = player.kid.userData.headY;
+  hoodUpMesh.material = kmat(O.hood ?? 0x5d626b); hoodUpMesh.position.set(0, hy + 0.03, -0.03);
+  showHood(player.hoodT > 0);
+}
+function disposeTree(o) { o.traverse((m) => { if (m.geometry) m.geometry.dispose(); if (m.material && !m.material.map) m.material.dispose(); }); }
+applyLook();
 function renderCharSummary() { $("charSummary").textContent = STATS.map((S) => `${S.icon} ${character.stats[S.k]}`).join("  ·  "); }
 function renderStats() {
   $("statRows").innerHTML = STATS.map((S) => { const v = character.stats[S.k];
@@ -1857,7 +2045,74 @@ let charThen = null;   // what to do after "Done" (start the run, the first time
 function openCharacter(e, then = null) {
   e?.stopPropagation(); charThen = then;
   $("charDone").textContent = then ? "Let's go" : "Done";
-  renderStats(); $("charScreen").hidden = false;
+  renderStats(); renderLooks(); $("charScreen").hidden = false;
+  startPreview();
+}
+// ---- the Looks tab ----
+const hex = (c) => "#" + c.toString(16).padStart(6, "0");
+function renderLooks() {
+  const L = character.look, chip = (group, val, label, on, style = "") => `<button type="button" class="chip${on ? " on" : ""}" data-g="${group}" data-v="${val}"${style ? ` style="${style}"` : ""}>${label}</button>`;
+  const slider = (k, left, right, mid = "") => `<div class="lookSlider"><span>${left}</span><input type="range" min="${k === "build" ? -1 : 0}" max="1" step="0.01" value="${L[k]}" data-k="${k}"><span>${right}</span>${mid ? `<em>${mid}</em>` : ""}</div>`;
+  $("lookPane").innerHTML = `
+    <h3>Outfit</h3><div class="chips">${Object.entries(OUTFITS).map(([k, O]) => chip("outfit", k, O.label, L.outfit === k)).join("")}</div>
+    <h3>Hair</h3><div class="chips">${Object.entries(HAIR_STYLES).map(([k, n]) => chip("hair", k, n, L.hair === k)).join("")}</div>
+    <div class="chips swatches">${HAIR_COLORS.map((c, i) => chip("hairColor", i, "", L.hairColor === i, `background:${hex(c)}`)).join("")}</div>
+    <h3>Skin</h3><div class="chips swatches">${SKIN_TONES.map((c, i) => chip("skin", i, "", L.skin === i, `background:${hex(c)}`)).join("")}</div>
+    <h3>Body</h3>
+    ${slider("height", "Short", "Tall")}
+    ${slider("weight", "Thin", "Big")}
+    ${slider("build", BUILD_ICONS[0], BUILD_ICONS[2], BUILD_ICONS[1])}
+    <div class="buttons"><button type="button" class="go ghost" id="randomLookBtn">🎲 Random look</button></div>`;
+}
+$("lookPane").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  if (b.id === "randomLookBtn") character.look = randomLook();
+  else if (b.dataset.g) { const v = b.dataset.v; character.look[b.dataset.g] = /^\d+$/.test(v) ? +v : v; }
+  else return;
+  renderLooks(); lookChanged();
+});
+$("lookPane").addEventListener("input", (e) => { if (e.target.dataset.k) { character.look[e.target.dataset.k] = +e.target.value; lookChanged(); } });
+for (const b of document.querySelectorAll(".charTab")) b.addEventListener("click", () => {
+  for (const t of document.querySelectorAll(".charTab")) t.classList.toggle("on", t === b);
+  $("statPane").hidden = b.dataset.tab !== "stats"; $("lookPane").hidden = b.dataset.tab !== "looks";
+  $("rerollBtn").hidden = b.dataset.tab !== "stats";
+});
+// ---- the spinning preview on the character screen (its own small renderer, only running while the screen is open) ----
+const pv = { r: null, scene: null, cam: null, kid: null, yaw: 0.5, drag: null, last: 0 };
+function lookChanged() {
+  if (!pv.scene) return;
+  if (pv.kid) { pv.scene.remove(pv.kid); disposeTree(pv.kid); }
+  pv.kid = buildKid(character.look); pv.scene.add(pv.kid);
+}
+function startPreview() {
+  const cv = $("kidCanvas");
+  if (!pv.r) {
+    pv.r = new THREE.WebGLRenderer({ canvas: cv, antialias: true, alpha: true });
+    pv.r.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+    pv.scene = new THREE.Scene();
+    pv.scene.add(new THREE.HemisphereLight(0xffffff, 0x445066, 1.6));
+    const sun = new THREE.DirectionalLight(0xffffff, 1.6); sun.position.set(2, 4, 3); pv.scene.add(sun);
+    const floor = new THREE.Mesh(new THREE.CircleGeometry(0.7, 24), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.25 }));
+    floor.rotation.x = -Math.PI / 2; pv.scene.add(floor);
+    pv.cam = new THREE.PerspectiveCamera(30, 1, 0.1, 20);
+    cv.addEventListener("pointerdown", (e) => { pv.drag = e.clientX; cv.setPointerCapture?.(e.pointerId); });
+    cv.addEventListener("pointermove", (e) => { if (pv.drag != null) { pv.yaw += (e.clientX - pv.drag) * 0.012; pv.drag = e.clientX; } });
+    for (const ev of ["pointerup", "pointercancel"]) cv.addEventListener(ev, () => { pv.drag = null; });
+  }
+  lookChanged();
+  pv.last = performance.now();
+  const frame = (now) => {
+    if ($("charScreen").hidden) return;
+    const dt = Math.min(0.05, (now - pv.last) / 1000); pv.last = now;
+    const w = cv.clientWidth, h = cv.clientHeight;
+    if (w && h && (cv.width !== Math.round(w * pv.r.getPixelRatio()) || cv.height !== Math.round(h * pv.r.getPixelRatio()))) { pv.r.setSize(w, h, false); pv.cam.aspect = w / h; pv.cam.updateProjectionMatrix(); }
+    if (pv.drag == null) pv.yaw += dt * 0.5;
+    pv.kid.rotation.y = pv.yaw;
+    pv.cam.position.set(0, 1.05, 4.2); pv.cam.lookAt(0, 0.82, 0);
+    pv.r.render(pv.scene, pv.cam);
+    requestAnimationFrame(frame);
+  };
+  requestAnimationFrame(frame);
 }
 $("charBtn").addEventListener("click", openCharacter);
 $("charScreen").addEventListener("click", (e) => e.stopPropagation());
@@ -1866,7 +2121,7 @@ $("rerollBtn").addEventListener("click", () => {
   renderStats(); playBlip([500 + Math.random() * 300], 0.04, "square", 0.04);
 });
 $("charDone").addEventListener("click", () => {
-  character.made = true; saveCharacter(); renderCharSummary(); $("charScreen").hidden = true;
+  character.made = true; saveCharacter(); renderCharSummary(); applyLook(); $("charScreen").hidden = true;
   for (const k in rangeCache) delete rangeCache[k];
   const t = charThen; charThen = null; if (t) t();
 });
@@ -1913,6 +2168,7 @@ function updatePlayer(dt) {
   player.graceT = Math.max(0, player.graceT - dt);
   if (player.invisT > 0) { player.invisT -= dt; player.mesh.visible = !player.hidden && (player.invisT <= 0 || Math.sin(game.time * 22) > -0.3); }
   if (player.hidden) { updateHiding(dt); return; }
+  animateKid(player.kid, player.ride || player.board || player.slipT > 0 || player.dazeT > 0 || player.stuckT > 0 ? 0 : Math.hypot(player.vx, player.vz), dt);
   if (player.ride) { updateRide(dt); return; }
   if (player.board && (player.slipT > 0 || player.stuckT > 0)) dropBoard("You wipe out!");
   if (player.board) { updateBoard(dt); return; }
@@ -1955,7 +2211,7 @@ function updatePlayer(dt) {
   if (manualCamT <= 0 && input.m > 0 && input.y > -0.3) cam.yaw = lerpAngle(cam.yaw, player.heading, damp(CFG.camera.followRate * input.m, dt));
   // mesh
   const moving = Math.hypot(player.vx, player.vz) > 0.3;
-  player.mesh.position.set(player.x, moving ? Math.abs(Math.sin(game.time * 11)) * 0.07 : 0, player.z);
+  player.mesh.position.set(player.x, moving ? Math.abs(Math.sin(player.kid?.userData.walk ?? game.time * 11)) * 0.035 : 0, player.z);
   player.mesh.rotation.y = player.heading;
 }
 
@@ -2033,17 +2289,15 @@ function updateBoard(dt) {
 }
 
 // ---- hood up: harder to notice for a while ----
-const hoodUpMesh = new THREE.Mesh(new THREE.IcosahedronGeometry(0.27, 1), lambert(0x5d626b));
-hoodUpMesh.position.set(0, 1.37, -0.03); hoodUpMesh.scale.set(1.05, 1.08, 1.0); hoodUpMesh.visible = false; player.mesh.add(hoodUpMesh);
 function hoodUp() {
   if (game.state !== "playing" || player.hidden || player.hoodT > 0) return;
   if (player.board) { toast("Not while you're skating."); return; }
   if (player.hoodCD > 0) { toast(`Hood's cooling off (${Math.ceil(player.hoodCD)} s)`); return; }
-  player.hoodT = CFG.hoodie.sec; hoodUpMesh.visible = true; player.mesh.userData.eyes.visible = false;
+  player.hoodT = CFG.hoodie.sec; showHood(true);
   toast(`Hood up. Staff are slower to notice you for ${CFG.hoodie.sec} s. Don't run.`, 2.2); playBlip([300, 240], 0.06, "triangle", 0.04);
 }
 function hoodDown(msg) {
-  player.hoodT = 0; player.hoodCD = CFG.hoodie.cooldownSec; hoodUpMesh.visible = false; player.mesh.userData.eyes.visible = true;
+  player.hoodT = 0; player.hoodCD = CFG.hoodie.cooldownSec; showHood(false);
   if (msg) toast(msg);
 }
 function tickHood(dt) {
@@ -5119,6 +5373,9 @@ if (debug) {   // test-only helpers (only with ?debug in the URL)
     setStats(o) { Object.assign(character.stats, o); for (const k in rangeCache) delete rangeCache[k]; return { ...character.stats }; },
     rollMany(n) { const a = []; for (let i = 0; i < n; i++) a.push(rollStat()); return a; },
     speedMult() { return speedMult(); },
+    setLook(o) { Object.assign(character.look, o); applyLook(); if (!$("charScreen").hidden) { renderLooks(); lookChanged(); } return { ...character.look }; },
+    previewYaw(y) { pv.yaw = y; },
+    walkPhase() { return player.kid.userData.walk; },
     unlockAll() { for (const sp of SPOTS) { sp.used = false; sp.lockedUntil = 0; } player.graceT = 0; },
     unpost() { for (const st of staff) if (st.post) st.post = null; },
     hideT() { return player.hideT; },
