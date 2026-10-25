@@ -27,6 +27,7 @@
 //          a joystick guide on phones, a pause button; a bigger stamina bar, and the energy drink (twice the stamina for a minute).
 // Step 26: toilet paper drifts down like a streamer and snags on things (locker tops, the trophy case, new spirit-banner wires).
 // Step 27: staff take longer to go from suspicious (?) to chasing (!), and much longer during passing periods.
+// Step 28: the band room (room 206): the trumpet (every staff member comes running, big points) and the bass drum (roll it down the hall).
 import * as THREE from "three";
 
 // =====================================================================================
@@ -440,6 +441,7 @@ const ROOM_TYPES = {
   science:   { label: "Science lab", plaque: 0x2ecc71, loot: [["stinkBomb", 4], ["slime", 4], ["mentos", 3]], count: [1, 2] },
   art:       { label: "Art room", plaque: 0xe67e22, always: ["sprayPaint"], count: [1, 1],
                loot: [["kickMe", 3], ["paperAirplane", 3], ["gum", 3], ["spitball", 2], ["wheelieChair", 1]] },
+  music:     { label: "Band room", plaque: 0x9b59b6, loot: [["trumpet", 3], ["bassDrum", 3]], count: [1, 2] },
   gym:       { label: "Gym", plaque: 0xe74c3c, loot: [["basketball", 4], ["football", 3], ["frisbee", 3], ["energyDrink", 2]], count: [1, 2] },
   // The office always has a hall pass and the staff key (restocked whenever the door's open again), but the secretary
   // is jumpy: if she catches you, she calls every staff member to the office and your heat jumps.
@@ -504,6 +506,13 @@ const ITEM_TYPES = {
   hallPass:      { label: "Hall pass", icon: "🎫", kind: "pass" },   // grab it and it's your fake pass (cancels your next catch)
   wheelieChair:  { label: "Wheelie chair", icon: "🪑", kind: "ride", rideSpeed: 9.5, maxRideSec: 3, dazeSec: 1.5, leftoverSec: 3,
                    studentPoints: 40 },
+  // Band room. The trumpet: one big blast and every free staff member heads for where you're standing. Lots of points, some heat.
+  trumpet:       { label: "Trumpet", icon: "🎺", kind: "instrument", uses: 2, points: 350, heat: 8 },
+  // Band room. The bass drum: rolled along the floor like a bowling ball, it knocks over everyone in its path and keeps going.
+  // Loud as it rumbles along (staff turn to look). Pick it back up once it stops.
+  bassDrum:      { label: "Bass drum", icon: "🥁", kind: "throw", roll: true, recoverable: true, speed: [4.5, 9], friction: 0.35, radius: 0.75,
+                   noiseRadius: 8, rumbleSec: 0.6,
+                   hit: { student: 30, staff: 160, studentSec: 1.3, staffSec: 2.4, style: "fall", minSpeed: 1.2 } },
   energyDrink:   { label: "Energy drink", icon: "⚡", kind: "drink" },   // tap to drink: see CFG.energy
   gum:           { label: "Gum", icon: "🍬", kind: "instant", points: 100, line: "You stick gum under the water fountain. Gross. +havoc" },
   // Junk from lockers: takes up a slot until you toss it (select it to drop it). Staff tidy it up like anything else.
@@ -511,7 +520,7 @@ const ITEM_TYPES = {
   sandwich:      { label: "Moldy sandwich", icon: "🥪", kind: "junk", line: "You toss the sandwich. Something in it moved." },
   homework:      { label: "Crumpled homework", icon: "📄", kind: "junk", line: "You toss someone's homework. It's a D-minus anyway." },
 };
-const REST_Y = { basketball: 0.2, football: 0.14, wheelieChair: 0, whoopee: 0.08, frisbee: 0.03, slime: 0.02, mentos: 0 };   // how high items sit on the floor (default 0.04)
+const REST_Y = { bassDrum: 0.45, trumpet: 0.06, basketball: 0.2, football: 0.14, wheelieChair: 0, whoopee: 0.08, frisbee: 0.03, slime: 0.02, mentos: 0 };   // how high items sit on the floor (default 0.04)
 
 // Floor plan: a squared figure 8. An outer loop plus a main hall across the middle, around two classroom blocks.
 // Halls run node to node. "side" on a hall: +1 / -1 = which wall (+1 is the classroom side on the outer loop).
@@ -545,7 +554,7 @@ const LAYOUT = {
     { h: 1, t: 8.5, room: 104, type: "art" }, { h: 6, t: 29, side: -1, room: 105, type: "office" }, { h: 6, t: 10, side: -1, room: 106 },
     { h: 5, t: 8.5, room: 107 },
     { h: 6, t: 14, side: 1, room: 201, type: "gym" }, { h: 6, t: 25, side: 1, room: 202 }, { h: 2, t: 8.5, room: 203, type: "science" },
-    { h: 3, t: 9.75, room: 204 }, { h: 3, t: 19.5, room: 205, type: "art" }, { h: 3, t: 29.25, room: 206 }, { h: 4, t: 8.5, room: 207 },
+    { h: 3, t: 9.75, room: 204 }, { h: 3, t: 19.5, room: 205, type: "art" }, { h: 3, t: 29.25, room: 206, type: "music" }, { h: 4, t: 8.5, room: 207 },
   ],
   hideLockers: [ { h: 0, t: 4 }, { h: 0, t: 25 }, { h: 1, t: 13 }, { h: 2, t: 4 }, { h: 3, t: 27 }, { h: 4, t: 13 }, { h: 5, t: 4 } ],
   restrooms: [ { h: 2, t: 12 }, { h: 5, t: 12 } ],
@@ -2627,6 +2636,21 @@ function makeItemMesh(key) {
       break;
     }
     case "gum": m(new THREE.BoxGeometry(0.16, 0.05, 0.09), 0xff8fc8); break;
+    case "bassDrum": {   // a pivot that spins (rolling) inside the group that turns to face the way it's going
+      const pivot = new THREE.Group(); g.add(pivot); g.userData.pivot = pivot;
+      const add = (geo, color, y) => { const mesh = new THREE.Mesh(geo, lambert(color)); mesh.rotation.z = Math.PI / 2; mesh.position.x = y; pivot.add(mesh); return mesh; };
+      add(new THREE.CylinderGeometry(0.45, 0.45, 0.36, 18), 0xb03a2e, 0);
+      add(new THREE.CylinderGeometry(0.43, 0.43, 0.38, 18), 0xf4f1e8, 0);   // the white heads
+      add(new THREE.CylinderGeometry(0.46, 0.46, 0.05, 18), 0xd4ac0d, 0.18); add(new THREE.CylinderGeometry(0.46, 0.46, 0.05, 18), 0xd4ac0d, -0.18);
+      const band = new THREE.Mesh(new THREE.BoxGeometry(0.37, 0.1, 0.92), lambert(0x1d2230)); pivot.add(band);   // a stripe so you can see it roll
+      break;
+    }
+    case "trumpet": {
+      const t = m(new THREE.CylinderGeometry(0.025, 0.025, 0.4, 6), 0xe0b030); t.rotation.x = Math.PI / 2;
+      const bell = m(new THREE.CylinderGeometry(0.11, 0.025, 0.16, 10), 0xe0b030); bell.rotation.x = Math.PI / 2; bell.position.z = 0.26;
+      m(new THREE.BoxGeometry(0.06, 0.08, 0.1), 0xc8981e).position.y = 0.05;
+      break;
+    }
     case "oldSock": { m(new THREE.BoxGeometry(0.1, 0.06, 0.32), 0xe8e4d8); const toe = m(new THREE.BoxGeometry(0.2, 0.06, 0.1), 0xe8e4d8); toe.position.set(0.05, 0, 0.16);
       m(new THREE.BoxGeometry(0.105, 0.065, 0.05), 0xc0392b).position.z = -0.12; break; }
     case "sandwich": { m(new THREE.BoxGeometry(0.22, 0.04, 0.22), 0xd9b77a).position.y = 0.0; m(new THREE.BoxGeometry(0.21, 0.03, 0.21), 0x6b8e23).position.y = 0.035;
@@ -2708,6 +2732,7 @@ function selectSlot(i, fromKey = false) {
   }
   if (T.kind === "instant") { consumeSlot(i); toast(T.line); havoc(it.key, T.points, T.label, { x: player.x, z: player.z }); return; }
   if (T.kind === "drink") { consumeSlot(i); drinkEnergy(); return; }
+  if (T.kind === "instrument") { consumeSlot(i); playTrumpet(); return; }
   if (opts.autoAim) { autoThrow(i); return; }
   game.aim = { slot: i, key: it.key, id: null, sx: 0, sy: 0, cx: 0, cy: 0 };
   $("aim").hidden = false;
@@ -2758,7 +2783,7 @@ function throwRanges(key) {
 function autoTarget(key) {
   const T = ITEM_TYPES[key], A = CFG.autoAim;
   if (!T || T.kind !== "throw" || autoBehind(key)) return null;
-  const yaw = aimYaw(), cone = (A.coneDeg * Math.PI) / 180, ranges = throwRanges(key);
+  const yaw = aimYaw(), cone = (A.coneDeg * Math.PI) / 180, ranges = T.roll ? [[1, A.maxRange]] : throwRanges(key);
   const reach = Math.min(A.maxRange, ranges[ranges.length - 1][1] + 2);
   let best = null, bs = Infinity;
   for (const st of staff) {
@@ -2771,7 +2796,7 @@ function autoTarget(key) {
   }
   if (!best) return null;
   let power = 1, err = Infinity;
-  for (const [p, r] of ranges) if (Math.abs(r - best.d) < err) { err = Math.abs(r - best.d); power = p; }
+  if (!T.roll) for (const [p, r] of ranges) if (Math.abs(r - best.d) < err) { err = Math.abs(r - best.d); power = p; }
   best.power = power;
   return best;
 }
@@ -2836,6 +2861,7 @@ function release(a, L = flickLaunch(a)) {
   consumeSlot(a.slot);
   cancelAim();
   if (T.kind === "ride") { startRide(L); return; }
+  if (T.roll) { rollDrum(a.key, L); return; }
   const o = spawnObject(a.key, "flying", player.x + L.dx * 0.45, THROW_Y, player.z + L.dz * 0.45, launchVel(T, L));
   if (T.bounces) o.maxBounces = Math.floor(rand(T.bounces[0], T.bounces[1] + 1));
   if (T.flight === "glide2") initPlane(o, L.power, T);
@@ -2856,7 +2882,9 @@ function updateAimPreview() {
   if (!a || (!a.kb && (a.id === null || Math.hypot(a.cx - a.sx, a.cy - a.sy) < CFG.items.minFlickPx))) { arc.visible = false; return; }
   const T = ITEM_TYPES[a.key], L = a.kb ? keyLaunch(a) : flickLaunch(a), pos = arc.geometry.attributes.position, col = arc.geometry.attributes.color, step = 0.04;
   const sim = { x: player.x + L.dx * 0.45, y: T.kind === "ride" ? 0.1 : THROW_Y, z: player.z + L.dz * 0.45, vx: 0, vy: 0, vz: 0 };
-  if (T.kind === "ride") { sim.vx = L.dx * T.rideSpeed; sim.vz = L.dz * T.rideSpeed; } else Object.assign(sim, launchVel(T, L));
+  if (T.kind === "ride") { sim.vx = L.dx * T.rideSpeed; sim.vz = L.dz * T.rideSpeed; }
+  else if (T.roll) { const sp = rollSpeed(T, L.power); sim.y = 0.45; sim.vx = L.dx * sp; sim.vz = L.dz * sp; }
+  else Object.assign(sim, launchVel(T, L));
   const plane = T.flight === "glide2";
   if (plane) initPlane(sim, L.power, T);
   const every = plane ? 6 : 4;   // the plane flies farther, so space its dots out more
@@ -2864,7 +2892,7 @@ function updateAimPreview() {
   for (let k = 0; k < 200 && i < ARC_N; k++) {
     if (!stopped) {
       if (plane) planeStep(sim, step, T);
-      else if (T.kind !== "ride") { sim.vy -= T.gravity * step; if (T.glide) sim.vy = Math.max(sim.vy, -0.9); }
+      else if (T.kind !== "ride" && !T.roll) { sim.vy -= T.gravity * step; if (T.glide) sim.vy = Math.max(sim.vy, -0.9); }
       const nx = sim.x + sim.vx * step, nz = sim.z + sim.vz * step;
       if (!lineOfSight(sim.x, sim.z, nx, nz) || sim.y + sim.vy * step < 0.05) stopped = true;
       else { sim.x = nx; sim.z = nz; sim.y += sim.vy * step; }
@@ -2892,6 +2920,7 @@ function updateObjects(dt) {
     o.age += dt; o.noiseCD -= dt;
     if (o.state === "flying") flyObject(o, dt);
     else if (o.state === "rolling") rollObject(o, dt);
+    else if (o.state === "drum") drumRoll(o, dt);
     else if (o.state === "trap") (o.key === "slime" ? slimeCheck : trapCheck)(o);
     else if (o.state === "resting" && o.key === "whoopee") stepOnCushion(o);
     else if (o.state === "cloud") stinkCloud(o, dt);
@@ -3065,6 +3094,59 @@ function rollObject(o, dt) {
     if (p && hitPerson(o, p.who, p.isStaff)) { o.vx *= -0.35; o.vz *= -0.35; }
   }
   if (Math.hypot(o.vx, o.vz) < 0.25) { o.state = "resting"; capLying(); }
+}
+// ---- band room ----
+const rollSpeed = (T, power) => T.speed[0] + (T.speed[1] - T.speed[0]) * power;
+function rollDrum(key, L) {
+  const T = ITEM_TYPES[key], sp = rollSpeed(T, L.power);
+  const o = spawnObject(key, "drum", player.x + L.dx * 0.9, REST_Y[key], player.z + L.dz * 0.9, { vx: L.dx * sp, vz: L.dz * sp });
+  collide(o, 0.45);
+  o.mesh.rotation.y = Math.atan2(L.dx, L.dz);
+  playBlip([70, 55], 0.18, "sine", 0.12);   // boom
+}
+// it rolls on (slowly losing speed), bounces off walls, and bowls over everyone in its path
+function drumRoll(o, dt) {
+  const T = o.T, k = Math.exp(-T.friction * dt); o.vx *= k; o.vz *= k;
+  let bonk = false;   // bounce off walls at the drum's own size (wallBounce is for small things)
+  for (const ax of ["x", "z"]) {
+    const v = ax === "x" ? o.vx : o.vz; if (Math.abs(v) < 1e-4) continue;
+    const reach = Math.abs(v) * dt + 0.46, d = ax === "x" ? raycast(o.x, o.z, Math.sign(v), 0, reach) : raycast(o.x, o.z, 0, Math.sign(v), reach);
+    if (d < reach) { if (ax === "x") o.vx = -o.vx * 0.55; else o.vz = -o.vz * 0.55; bonk = true; }
+  }
+  if (bonk) { playBlip([60, 45], 0.15, "sine", 0.1); makeNoise(o.x, o.z, T.noiseRadius, false); }
+  o.x += o.vx * dt; o.z += o.vz * dt; o.y = REST_Y.bassDrum;
+  const sp = Math.hypot(o.vx, o.vz);
+  if (sp > 0.05) o.mesh.rotation.y = Math.atan2(o.vx, o.vz);
+  o.mesh.userData.pivot.rotation.x += (sp * dt) / 0.45;
+  o.rumbleT = (o.rumbleT ?? 0) - dt;
+  if (o.rumbleT <= 0 && sp > 1) { o.rumbleT = T.rumbleSec; playBlip([48], 0.12, "sine", 0.05); makeNoise(o.x, o.z, T.noiseRadius, false); }
+  if (sp > T.hit.minSpeed) {
+    let p;
+    while ((p = personHit(o, T.radius - 0.1, 2))) {
+      if (hitPerson(o, p.who, p.isStaff)) { o.vx *= 0.88; o.vz *= 0.88; }   // it barely slows down
+    }
+  }
+  if (sp < 0.3) { o.vx = o.vz = 0; o.state = "resting"; capLying(); }
+}
+// one big blast: points, a little heat, and every free staff member heads for where you're standing
+function playTrumpet() {
+  const T = ITEM_TYPES.trumpet;
+  playBlip([233, 233, 311, 233, 175, 175], 0.17, "sawtooth", 0.14);
+  const n = summonStaff(player.x, player.z);
+  banner(`🎺 BWAAAMP!<small>${n ? `${n} staff member${n === 1 ? "" : "s"} heard that. Get moving!` : "Nobody's around to hear it. Shame."}</small>`, 2.4);
+  havoc("trumpet", T.points, "Trumpet solo!", { x: player.x, z: player.z, loud: true });
+  addHeat(T.heat);
+  for (const c of crowd) if (isActive(c) && Math.hypot(c.x - player.x, c.z - player.z) < 6) { c.slipT = Math.max(c.slipT, 0.5); c.stunStyle = "flinch"; }   // kids jump
+}
+function summonStaff(x, z) {
+  let n = 0;
+  for (const o of staff) {
+    if (o.type.stationary || o.state === "chase" || o.state === "bust") continue;
+    const d = Math.hypot(o.x - x, o.z - z);
+    o.state = "search"; o.searchT = -Math.min(18, d / (o.type.chaseSpeed * 0.8)); o.suspicion = Math.max(o.suspicion, 0.6);
+    o.lastX = o.tx = x; o.lastZ = o.tz = z; n++;
+  }
+  return n;
 }
 function bounceNoise(o) {
   playFootstep(o.x, o.z, true);
