@@ -28,6 +28,7 @@
 // Step 26: toilet paper drifts down like a streamer and snags on things (locker tops, the trophy case, new spirit-banner wires).
 // Step 27: staff take longer to go from suspicious (?) to chasing (!), and much longer during passing periods.
 // Step 28: the band room (room 206): the trumpet (every staff member comes running, big points) and the bass drum (roll it down the hall).
+// Step 29: steer the wheelie chair a little (steering slows you down), and jump off before the crash (the chair rolls on without you).
 import * as THREE from "three";
 
 // =====================================================================================
@@ -504,8 +505,10 @@ const ITEM_TYPES = {
   sprayPaint:    { label: "Spray paint", icon: "🎨", kind: "spray", uses: 3, points: 100, wallRange: 1.7 },   // art rooms only
   masterKey:     { label: "Staff key", icon: "🔑", kind: "key", uses: 3 },
   hallPass:      { label: "Hall pass", icon: "🎫", kind: "pass" },   // grab it and it's your fake pass (cancels your next catch)
-  wheelieChair:  { label: "Wheelie chair", icon: "🪑", kind: "ride", rideSpeed: 9.5, maxRideSec: 3, dazeSec: 1.5, leftoverSec: 3,
-                   studentPoints: 40 },
+  // Push off and roll. Left/right steers a little, but steering scrubs off speed; too slow and you roll to a stop.
+  // Jump off (button, E or Space) to skip the crash: the chair rolls on without you and can still flatten someone.
+  wheelieChair:  { label: "Wheelie chair", icon: "🪑", kind: "ride", rideSpeed: 9.5, maxRideSec: 3.5, dazeSec: 1.5, leftoverSec: 3,
+                   studentPoints: 40, steerRate: 1.7, steerDrag: 4.5, minSpeed: 3.5, jumpSec: 0.35, emptyFriction: 0.5, emptyStaffPoints: 150, emptyStaffSec: 1.8 },
   // Band room. The trumpet: one big blast and every free staff member heads for where you're standing. Lots of points, some heat.
   trumpet:       { label: "Trumpet", icon: "🎺", kind: "instrument", uses: 2, points: 350, heat: 8 },
   // Band room. The bass drum: rolled along the floor like a bowling ball, it knocks over everyone in its path and keeps going.
@@ -1125,6 +1128,7 @@ window.addEventListener("keydown", (e) => {
     if (player.hidden) { lootEl.querySelectorAll("button")[+e.key - 1]?.click(); return; }   // grab the Nth thing on the desk
     selectSlot(+e.key - 1, true); return;
   }
+  if (player.ride && (k === "e" || k === " ") && !e.repeat) { e.preventDefault(); jumpOff(); return; }
   if (k === "e" && !e.repeat) doInteract();
 });
 window.addEventListener("keyup", (e) => keys.delete(e.key.toLowerCase()));
@@ -1277,7 +1281,7 @@ function morningSetup() {
   }
   clearStaff();
   clearObjects(); cancelAim(); clearGraffiti(); clearTrails();   // the custodian scrubs the walls (and takes down the TP) overnight
-  if (player.ride) { scene.remove(player.ride.chair); player.ride = null; }
+  if (player.ride) { scene.remove(player.ride.chair); player.ride = null; $("jumpBtn").hidden = true; }
   player.slipT = player.dazeT = player.stuckT = 0; player.mesh.rotation.z = 0; player.stamina = 1; player.staminaMax = 1; player.boostT = 0; player.winded = false;
   game.hotbar = Array(CFG.items.slots).fill(null); renderHotbar();
   rollSubs();             // first, so sub rooms get their extra desk loot
@@ -1596,6 +1600,7 @@ $("optStick").addEventListener("change", (e) => { opts.stickGuide = e.target.che
 $("options").addEventListener("click", (e) => e.stopPropagation());
 $("optionsClose").addEventListener("click", () => { $("options").hidden = true; });
 $("pauseBtn").addEventListener("pointerdown", (e) => e.stopPropagation());
+$("jumpBtn").addEventListener("pointerdown", (e) => { e.preventDefault(); e.stopPropagation(); jumpOff(); });
 $("pauseBtn").addEventListener("click", (e) => { e.stopPropagation(); pause(); });
 renderOptSummary();
 // the joystick guide (phones only) and hiding the play-only HUD bits on menus
@@ -2921,6 +2926,7 @@ function updateObjects(dt) {
     if (o.state === "flying") flyObject(o, dt);
     else if (o.state === "rolling") rollObject(o, dt);
     else if (o.state === "drum") drumRoll(o, dt);
+    else if (o.state === "chairRoll") chairRoll(o, dt);
     else if (o.state === "trap") (o.key === "slime" ? slimeCheck : trapCheck)(o);
     else if (o.state === "resting" && o.key === "whoopee") stepOnCushion(o);
     else if (o.state === "cloud") stinkCloud(o, dt);
@@ -3566,17 +3572,28 @@ function sprayPaint() {
 }
 function clearGraffiti() { for (const g of graffiti) { scene.remove(g.mesh); g.mesh.material.map.dispose(); g.mesh.material.dispose(); } graffiti.length = 0; }
 
-// ---- the wheelie chair: flick to launch yourself, no steering ----
+// ---- the wheelie chair: launch yourself, steer a little (it costs speed), jump off before the crash ----
+const jumpBtn = $("jumpBtn");
 function startRide(L) {
-  player.ride = { dx: L.dx, dz: L.dz, t: 0, chair: makeItemMesh("wheelieChair") };
+  player.ride = { dx: L.dx, dz: L.dz, t: 0, speed: ITEM_TYPES.wheelieChair.rideSpeed, chair: makeItemMesh("wheelieChair") };
   player.heading = Math.atan2(L.dx, L.dz);
-  toast("WHEEEEE!");
+  toast(isTouch ? "WHEEEEE! Steer with the stick · tap 🦘 to jump off" : "WHEEEEE! A/D steers · E or Space jumps off", 2.4);
   playBlip([400, 600, 800], 0.07, "triangle", 0.06);
+  jumpBtn.hidden = false;
 }
 function updateRide(dt) {
   const R = player.ride, T = ITEM_TYPES.wheelieChair;
   R.t += dt;
-  const ox = player.x, oz = player.z, want = T.rideSpeed * dt;
+  const steer = clamp(input.x, -1, 1);   // left/right on the stick (or A/D)
+  if (Math.abs(steer) > 0.15) {
+    const a = -steer * T.steerRate * dt, c = Math.cos(a), sn = Math.sin(a), dx = R.dx;
+    R.dx = dx * c + R.dz * sn; R.dz = -dx * sn + R.dz * c;
+    player.heading = Math.atan2(R.dx, R.dz);
+    R.speed = Math.max(0, R.speed - Math.abs(steer) * T.steerDrag * dt);
+    R.chair.rotation.z = steer * 0.12;   // leaning into the turn
+  } else R.chair.rotation.z = 0;
+  if (R.speed < T.minSpeed) { endRide(false); toast("You roll to a stop."); return; }
+  const ox = player.x, oz = player.z, want = R.speed * dt;
   player.x += R.dx * want; player.z += R.dz * want;
   collide(player, CFG.player.radius);
   const moved = Math.hypot(player.x - ox, player.z - oz);
@@ -3595,10 +3612,43 @@ function updateRide(dt) {
 function endRide(crash) {
   const R = player.ride, T = ITEM_TYPES.wheelieChair;
   if (!R) return;
-  player.ride = null; scene.remove(R.chair);
+  player.ride = null; scene.remove(R.chair); jumpBtn.hidden = true;
   spawnObject("wheelieChair", "spent", player.x - R.dx * 0.6, 0, player.z - R.dz * 0.6, { life: T.leftoverSec });
   player.mesh.position.y = 0;
   if (crash) { player.dazeT = T.dazeSec; playBlip([200, 120], 0.12, "sawtooth", 0.08); popup("CRASH!", "bad"); }
+}
+
+// bail out sideways: no crash for you, and the empty chair keeps rolling
+function jumpOff() {
+  const R = player.ride, T = ITEM_TYPES.wheelieChair;
+  if (!R || game.state !== "playing") return;
+  player.ride = null; scene.remove(R.chair); jumpBtn.hidden = true;
+  const o = spawnObject("wheelieChair", "chairRoll", player.x, 0, player.z, { vx: R.dx * R.speed, vz: R.dz * R.speed });
+  o.mesh.rotation.y = player.heading;
+  const side = input.x >= 0 ? 1 : -1;   // hop to whichever side you were steering toward
+  player.x += -R.dz * side * 0.7 + R.dx * 0.3; player.z += R.dx * side * 0.7 + R.dz * 0.3; collide(player, CFG.player.radius);
+  player.mesh.position.y = 0; player.dazeT = T.jumpSec;
+  toast("You bail out!"); playBlip([500, 300], 0.07, "triangle", 0.05);
+}
+// the empty chair rolls on until it hits something: a person goes flying, a wall just stops it
+function chairRoll(o, dt) {
+  const T = o.T, k = Math.exp(-T.emptyFriction * dt); o.vx *= k; o.vz *= k;
+  const hitWall = wallBounce(o, dt, 0);
+  o.x += o.vx * dt; o.z += o.vz * dt;
+  if (Math.hypot(o.vx, o.vz) > 0.1) o.mesh.rotation.y = Math.atan2(o.vx, o.vz);
+  const done = () => { o.vx = o.vz = 0; o.state = "spent"; o.life = T.leftoverSec; };
+  if (hitWall) { playBlip([180, 120], 0.08, "square", 0.05); done(); return; }
+  for (const st of staff) if (Math.hypot(st.x - o.x, st.z - o.z) < 0.7) {
+    stunStaff(st, T.emptyStaffSec, "fall"); bark(st, "slip", true);
+    havoc("chairStaff", T.emptyStaffPoints, `Runaway chair flattens the ${st.type.name}!`, { x: o.x, z: o.z, loud: true });
+    dareEvent("hit", { item: "wheelieChair", staff: st.key, chasing: st.state === "chase" });
+    done(); return;
+  }
+  for (const c of crowd) if (isActive(c) && Math.hypot(c.x - o.x, c.z - o.z) < 0.6) {
+    c.slipT = 1.2; c.stunStyle = "fall"; havoc("chairStudent", T.studentPoints, "Runaway chair vs. student!", { x: c.x, z: c.z, loud: true });
+    done(); return;
+  }
+  if (Math.hypot(o.vx, o.vz) < 0.6) done();
 }
 
 // ---- picking things up ----
@@ -4222,7 +4272,8 @@ if (debug) {   // test-only helpers (only with ?debug in the URL)
     objects() { return objects.filter((o) => !o.dead).map((o) => ({ key: o.key, state: o.state, x: o.x, y: o.y, z: o.z, bounces: o.bounces, life: o.life })); },
     dropItem(key, dx, dz) { const o = spawnObject(key, "pickup", player.x + dx, REST_Y[key] ?? 0.04, player.z + dz); return o.id; },
     hotbar() { return game.hotbar.map((s) => s && `${s.key}${s.uses > 1 ? "x" + s.uses : ""}`); },
-    playerState() { return { slipT: player.slipT, dazeT: player.dazeT, riding: !!player.ride, x: player.x, z: player.z }; },
+    playerState() { return { slipT: player.slipT, dazeT: player.dazeT, riding: !!player.ride, x: player.x, z: player.z, rideSpeed: player.ride?.speed ?? 0, heading: player.heading }; },
+    jumpOff() { jumpOff(); },
     staffFull(k) { const s = staff[k]; return { state: s.state, stunT: s.stunT, distractT: s.distractT, x: s.x, z: s.z, key: s.key }; },
     searchTo(k, x, z) { const st = staff[k]; st.state = "search"; st.searchT = -30; st.lastX = st.tx = x; st.lastZ = st.tz = z; },
     nodes() { return NODES.map((n) => ({ id: n.id, x: n.x, z: n.z })); },
