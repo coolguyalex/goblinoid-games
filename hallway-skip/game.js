@@ -1,4 +1,4 @@
-// Hallway Skip — build step 19 prototype.
+// Hallway Skip — build step 20 prototype.
 // Step 1: hallway, joystick, a hall monitor that chases, a crowd that thins, and the bell.
 // Step 2: tap-to-interact and hiding spots: lockers, restrooms, classrooms (teacher and sub boot timers).
 // Step 3: security guard, the three-strike ladder, and the PA announcer.
@@ -18,6 +18,7 @@
 // Step 17: slime (science: whoever steps in it is stuck), toilet paper (restrooms: flies like the airplane, leaves a streamer), frisbee (gym: long flight, pick it back up).
 // Step 18: no restroom sweep timer: staff walking past a restroom check it about half the time ("Hey, do you kids have a pass?").
 // Step 19: dares from the kid in the restroom (hold two at a time; some are tied to a period, a hall, or a combo).
+// Step 20: "they found you, run for it!", farther spitballs, slower heat (and a bigger heat bar), a bigger score, survival mode renamed Rebel Run.
 import * as THREE from "three";
 
 // =====================================================================================
@@ -149,15 +150,16 @@ const CFG = {
 
   // Short-term heat, 0-100: "they know it's me". Like a GTA wanted level.
   heat: {
-    seenHavocMult: 0.25,          // seen doing havoc: heat += the points it earned * this...
-    seenHavocMax: 25,             // ...but no more than this per event
-    seenRunning: 12,              // a chase starts (you were seen running away)
-    roomCall: 15,                 // a teacher calls security on you
+    seenHavocMult: 0.15,          // seen doing havoc: heat += the points it earned * this...  (step 20: was 0.25)
+    seenHavocMax: 15,             // ...but no more than this per event (was 25)
+    seenRunning: 8,               // a chase starts (you were seen running away) (was 12)
+    roomCall: 10,                 // a teacher calls security on you (was 15)
     bellDrop: 0.6,                // each bell takes away this fraction (steep, per the spec)
-    hiddenCoolPerSec: 1.0,        // slow cooling while hidden, to reward patience
+    hiddenCoolPerSec: 1.5,        // cooling while hidden, to reward patience (was 1.0)
+    calmCoolPerSec: 0.3,          // slow cooling any time nobody's chasing, searching or squinting at you
     maxRisePerSec: 30,            // heat can't climb faster than this, so one mistake can't blow past every threshold at once
     passingCatchAt: 50,           // at or above this, staff can detain you during passing periods (PA announces it)
-    shooHeat: 15,                 // caught in a passing period below that: no strike, just shooed to class (and a bit of heat)
+    shooHeat: 10,                 // caught in a passing period below that: no strike, just shooed to class (and a bit of heat)
     effect: { speed: 0.25, vision: 0.2, notice: 0.5 },   // at 100 heat: staff +25% speed, +20% vision range, +50% notice
   },
   // Persistent security level, 0-100: "they know something happened". Drops only between days.
@@ -188,7 +190,7 @@ const CFG = {
     stunSec: 3,                   // every staff member is stunned (hands over ears) this long
     items: 8,                     // items scattered around the halls; they don't vanish until picked up
   },
-  flood: { points: 400, heat: 60, noiseRadius: 16 },
+  flood: { points: 400, heat: 45, noiseRadius: 16 },
   dares: { max: 2, recentAvoid: 4 },   // dares you can hold at once; don't re-offer the last few you finished   // flooding a bathroom: points, heat, and that bathroom is closed for the day
 
   // Friends in the crowd raise a hand during passing periods: tap their bubble.
@@ -436,7 +438,7 @@ const ITEM_TYPES = {
                    cruiseY: 2.3, highSec: [1.0, 2.2], lowY: 1.3, sinkRate: 0.45, drag: 0.12,
                    perStudent: 8, crowdLandBonus: 30, crowdLandCount: 3,
                    hit: { student: 25, staff: 100, studentSec: 0.6, staffSec: 0.9, style: "flinch" } },
-  spitball:      { label: "Spitball", icon: "🫧", kind: "throw", uses: 3, speed: [12, 18], pitchDeg: 4, gravity: 6,
+  spitball:      { label: "Spitball", icon: "🫧", kind: "throw", uses: 3, speed: [16, 24], pitchDeg: 4, gravity: 5,
                    hit: { student: 25, staff: 75, studentSec: 0.4, staffSec: 0.8, style: "flinch" } },
   bananaPeel:    { label: "Banana peel", icon: "🍌", kind: "throw", speed: [2, 4.5], pitchDeg: 35, gravity: 9.8,
                    maxSlips: 5,   // stays down until a staff member slips on it (and cleans it up) or it's been slipped on 5 times
@@ -1275,7 +1277,7 @@ function dayOver() {
   const skip = Math.min(D.maxSkippingSec, CFG.skippingSec + D.skippingSecPerDay * (next - 1));
   const S = CFG.security, before = Math.round(game.security);
   game.security *= 1 - S.dayDecay;
-  $("dayNext").innerHTML = (game.survival ? `<b class="warn">You're still in SURVIVAL MODE. They'll be waiting for you tomorrow.</b> ` : "") +
+  $("dayNext").innerHTML = (game.survival ? `<b class="warn">You're still on a REBEL RUN. They'll be waiting for you tomorrow.</b> ` : "") +
     `Day ${next}: staff are faster and sharper. Passing ${pass}s, skipping ${skip}s. School alert ${before}% → ${Math.round(game.security)}% overnight` +
     (game.security >= S.extraGuardAt ? ` (${game.security >= S.secondGuardAt ? "two extra guards" : "an extra guard"} on duty).` : ".");
   $("dayPassBtn").hidden = !Ads.canRewarded("fakePass") || game.passShield;
@@ -1290,7 +1292,7 @@ function startNextDay() {
   morningSetup();
   game.state = "playing";
   if (game.survival) {
-    banner(`DAY ${game.day} · SURVIVAL<small>They didn't forget. Every staff member is looking for you.</small>`, 3.2);
+    banner(`DAY ${game.day} · REBEL RUN<small>They didn't forget. Every staff member is looking for you.</small>`, 3.2);
     setTimeout(() => game.state === "playing" && pa("survival"), 1500);
   } else {
     banner(`DAY ${game.day}<small>New day, same hoodie. New subs today.</small>`, 2.6);
@@ -1330,7 +1332,7 @@ function caught(st) {
     const E = game.survival || game.heat >= 100 ? RUN_ENDINGS.maxed : game.heat >= CFG.heat.passingCatchAt ? RUN_ENDINGS.high : RUN_ENDINGS.normal;
     $("caughtTitle").textContent = E.title;
     $("caughtText").innerHTML = `The ${st.type.name} walks you to the office. ${pick(E.lines)}<br>` +
-      (game.survival ? `You lasted ${Math.round(game.survivalT)} seconds in survival mode.<br>` : "") +
+      (game.survival ? `Your rebel run lasted ${Math.round(game.survivalT)} seconds.<br>` : "") +
       `<b>Score ${Math.floor(game.score)}</b> · Day ${game.day}, period ${game.period} · ${game.periodsSkipped} period${game.periodsSkipped === 1 ? "" : "s"} skipped`;
     $("caught").hidden = false;
     return;
@@ -1982,8 +1984,8 @@ let lastHud = "";
 function updateHud() {
   const left = Math.max(0, Math.ceil(phaseLen() - game.phaseT));
   const label = `DAY ${game.day} · PERIOD ${game.period} · ${game.phase === "passing" ? "PASSING" : "SKIPPING"}`;
-  const label2 = game.survival ? label.replace(/ · (PASSING|SKIPPING)$/, " · SURVIVAL") : label;
-  const multTxt = [streakMult() > 1 ? `STREAK ×${streakMult()}` : "", game.nearMissT > 0 ? "NEAR MISS ×2" : "", game.survival ? `SURVIVAL ×${CFG.survival.scoreMult}` : ""].filter(Boolean).join(" · ");
+  const label2 = game.survival ? label.replace(/ · (PASSING|SKIPPING)$/, " · REBEL RUN") : label;
+  const multTxt = [streakMult() > 1 ? `STREAK ×${streakMult()}` : "", game.nearMissT > 0 ? "NEAR MISS ×2" : "", game.survival ? `REBEL RUN ×${CFG.survival.scoreMult}` : ""].filter(Boolean).join(" · ");
   const key = multTxt + game.passShield + label2 + left + Math.floor(game.score) + "|" + game.lockerUses + "|" + game.strikes + game.highAlert + "|" + Math.round(game.heat) + "|" + Math.round(game.security);
   if (key === lastHud) return;
   lastHud = key;
@@ -1992,6 +1994,7 @@ function updateHud() {
   $("heatMeter").classList.toggle("hot", game.heat >= CFG.heat.passingCatchAt);
   ui.timer.textContent = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
   ui.phase.className = game.phase + (game.survival ? " survival" : "");
+  if (Math.floor(game.score) > (+ui.score.textContent || 0)) { ui.score.classList.remove("bump"); void ui.score.offsetWidth; ui.score.classList.add("bump"); }
   ui.score.textContent = Math.floor(game.score);
   ui.uses.textContent = `LOCKERS ×${game.lockerUses}`;
   ui.uses.classList.toggle("out", game.lockerUses === 0);
@@ -2277,7 +2280,8 @@ function updateCheck(st, dt) {   // returns the walking speed this frame
   if (st.checkT < CFG.hiding.restroomCheck.peekSec) return 0;
   if (player.hidden === sp) {   // found you
     exitSpot(true, `The ${T.name} pokes their head in: "Hey, do you kids have a pass?"`);
-    startChase(st); st.pauseT = CFG.hiding.bustPauseSec; bark(st, "bust", true);
+    banner(`THEY FOUND YOU!<small>RUN FOR IT!</small>`, 2.2);
+    startChase(st); st.pauseT = CFG.hiding.bustPauseSec + 0.4; bark(st, "check", true);
   } else { st.state = "return"; setReturnPoint(st); }
   return 0;
 }
@@ -3141,6 +3145,7 @@ function updateHeat(dt) {
   game.heat = Math.min(100, game.heat + flow);
   if (game.heat >= 100) { startSurvival(); return; }   // anything that maxes your heat
   if (player.hidden) game.heat = Math.max(0, game.heat - H.hiddenCoolPerSec * dt);
+  else if (!staff.some((st) => isAlarmed(st) || st.suspicion > 0.05)) game.heat = Math.max(0, game.heat - H.calmCoolPerSec * dt);
   if (before < H.passingCatchAt && game.heat >= H.passingCatchAt) {
     pa("heatHigh");
     banner("HEAT RISING<small>Staff can now detain you during passing periods too.</small>", 2.6);
@@ -3151,7 +3156,7 @@ function startSurvival() {
   if (game.survival) return;
   game.survival = true; game.survivalT = 0; game.heat = 100; game.heatPending = 0; game.highAlert = true;
   game.nextArrivalT = CFG.survival.staffEverySec; game.nextRadioT = 4;
-  banner(`SURVIVAL MODE<small>Heat maxed. Every staff member is after you. Points ×${CFG.survival.scoreMult} until they catch you.</small>`, 3.4);
+  banner(`REBEL RUN!<small>Heat maxed. Every staff member is after you. Points ×${CFG.survival.scoreMult} until they catch you.</small>`, 3.4);
   setTimeout(() => game.state === "playing" && pa("survival"), game.alarmT > 0 ? 6000 : 1200);
   playBlip([392, 330, 262, 196], 0.18, "sawtooth", 0.08);
   saveGame();
@@ -3202,7 +3207,7 @@ function nearestAlarm(range = CFG.interact.range) {
 // two taps to pull it (the first one arms it), so it never happens by accident
 function tryAlarm(a) {
   if (game.alarmPulled) { toast(game.alarmT > 0 ? "It's already ringing!" : "Someone already pulled it today. They're watching it now."); return; }
-  if (performance.now() > a.armT) { a.armT = performance.now() + 2500; toast("🔥 Tap the fire alarm again to PULL it. (This starts survival mode.)", 2.5); playBlip([300], 0.06, "square", 0.05); return; }
+  if (performance.now() > a.armT) { a.armT = performance.now() + 2500; toast("🔥 Tap the fire alarm again to PULL it. (This starts a rebel run.)", 2.5); playBlip([300], 0.06, "square", 0.05); return; }
   pullFireAlarm(a);
 }
 function pullFireAlarm(a) {
@@ -3573,7 +3578,7 @@ if (debug) {   // a small test panel for phone playtests (only with ?debug in th
   let gi = 0;
   add("Give item", () => { const k = Object.keys(ITEM_TYPES); addItem(k[gi++ % k.length]); });
   add("Heat +30", () => { addHeat(30); });
-  add("Max heat (survival)", () => { game.heat = 100; game.heatPending = 0; });
+  add("Max heat (rebel run)", () => { game.heat = 100; game.heatPending = 0; });
   add("School alert 100%", () => { game.security = 100; });
   add("Get a strike", () => { const st = staff.find((s) => !s.type.stationary) ?? staff[0], ph = game.phase; game.phase = "skipping"; caught(st); game.phase = ph; });
   add("Principal", () => { ensurePrincipal(true); });

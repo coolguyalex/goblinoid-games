@@ -18,12 +18,15 @@
   #phase .label { font-size: 13px; letter-spacing: .14em; font-weight: 700; opacity: .9; }
   #phase .timer { font-size: 30px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.1; }
   #phase.passing .label { color: #9fe0ff; } #phase.skipping .label { color: #ffd36b; } #phase.survival .label { color: #ff6b6b; }
-  #score { position: absolute; top: max(10px, env(safe-area-inset-top)); right: max(14px, env(safe-area-inset-right));
-    font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; text-shadow: 0 2px 4px rgba(0,0,0,.6); }
-  #uses { position: absolute; top: calc(max(10px, env(safe-area-inset-top)) + 30px); right: max(14px, env(safe-area-inset-right));
+  #score { position: absolute; top: max(8px, env(safe-area-inset-top)); right: max(14px, env(safe-area-inset-right)); text-align: right;
+    font-size: 32px; font-weight: 900; color: #ffd36b; font-variant-numeric: tabular-nums; line-height: 1; text-shadow: 0 2px 6px rgba(0,0,0,.75); }
+  #score::before { content: "SCORE"; display: block; font-size: 10px; letter-spacing: .16em; color: #fff; opacity: .75; margin-bottom: 1px; }
+  #score.bump { animation: bump .25s ease-out; transform-origin: right center; }
+  @keyframes bump { 40% { transform: scale(1.18); color: #fff3c4; } }
+  #uses { position: absolute; top: calc(max(10px, env(safe-area-inset-top)) + 42px); right: max(14px, env(safe-area-inset-right));
     font-size: 12px; font-weight: 800; letter-spacing: .08em; color: #b9e3c6; text-shadow: 0 2px 4px rgba(0,0,0,.6); }
   #uses.out { color: #ff8f8f; }
-  #mult { position: absolute; top: calc(max(10px, env(safe-area-inset-top)) + 46px); right: max(14px, env(safe-area-inset-right));
+  #mult { position: absolute; top: calc(max(10px, env(safe-area-inset-top)) + 52px); left: 50%; transform: translateX(-50%); white-space: nowrap;
     font-size: 12px; font-weight: 900; letter-spacing: .06em; color: #ffe066; text-shadow: 0 2px 4px rgba(0,0,0,.7); }
   #passIcon { position: absolute; top: max(8px, env(safe-area-inset-top)); left: calc(max(14px, env(safe-area-inset-left)) + 70px); font-size: 18px; }
   #passIcon[hidden] { display: none; }
@@ -49,13 +52,15 @@
   .meter i { position: relative; width: 84px; height: 6px; border-radius: 3px; background: rgba(255,255,255,.18); overflow: hidden; }
   .meter b { position: absolute; left: 0; top: 0; bottom: 0; width: 0; transition: width .3s; }
   #secMeter b { background: #6aa8ff; } #heatMeter b { background: #ff9a4d; } #heatMeter.hot b { background: #ff4d4d; }
+  #heatMeter i { width: 130px; height: 9px; border-radius: 5px; }
+  #heatMeter span { color: #ffb37a; }
   #heatMeter em { position: absolute; left: 50%; top: -1px; bottom: -1px; width: 2px; background: rgba(255,255,255,.7); }
-  #pa { position: absolute; top: calc(max(12px, env(safe-area-inset-top)) + 54px); left: max(14px, env(safe-area-inset-left));
+  #pa { position: absolute; top: calc(max(12px, env(safe-area-inset-top)) + 58px); left: max(14px, env(safe-area-inset-left));
     max-width: min(34vw, 300px); padding: 7px 10px; border-radius: 10px; background: rgba(20,24,36,.82); border-left: 3px solid #ffd36b;
     font-size: 12.5px; line-height: 1.35; opacity: 0; transform: translateY(-6px); transition: opacity .25s, transform .25s; }
   #pa.show { opacity: 1; transform: none; }
   /* dares from the kid in the restroom: under the meters, stepping aside while the PA talks */
-  #dares { position: absolute; top: calc(max(12px, env(safe-area-inset-top)) + 54px); left: max(14px, env(safe-area-inset-left));
+  #dares { position: absolute; top: calc(max(12px, env(safe-area-inset-top)) + 58px); left: max(14px, env(safe-area-inset-left));
     max-width: min(36vw, 290px); display: flex; flex-direction: column; gap: 3px; font-size: 11.5px; line-height: 1.3; font-weight: 700;
     text-shadow: 0 1px 3px rgba(0,0,0,.85); transition: opacity .25s; }
   #dares div { background: rgba(20,24,36,.55); border-radius: 7px; padding: 3px 7px; }
@@ -244,7 +249,7 @@
 
 <div class="overlay" id="title">
   <div>
-    <span class="tag">prototype · build step 19</span>
+    <span class="tag">prototype · build step 20</span>
     <h1>Hallway Skip</h1>
     <p>Skip class. Don't get caught.</p>
     <div class="buttons">
@@ -264,7 +269,7 @@
     <p>Items come from classrooms, lockers and restrooms (four slots, right edge). Whatever you throw stays where it lands until a staff member spots it and tidies it up, so you can pick some things back up. Tap a slot, then flick to throw. Anything you hit someone with scores, and hitting staff scores more. Banana peels trip anyone who steps on them (several people, until they wear out). Whoopee cushions go off when someone steps on them, pulling staff over. Basketballs knock people down and make noise on every bounce. Paper airplanes soar over heads, then drop low to hit someone (the orange dots). The wheelie chair launches you down the hall. The gym has basketballs, footballs (they fly far and bounce anywhere) and frisbees (they stay up a long time). Science labs have stink bombs (points for everyone who walks through the cloud) and slime (whoever steps in it is stuck for a few seconds). Art rooms have spray paint (tap it next to a wall). Restrooms have toilet paper: it flies like a paper airplane and leaves a streamer down the hall.</p>
     <p>The kid by the restroom sinks hands out dares (📜 on the restroom sign). You can hold two at a time. Some have to be done in a certain period.</p>
     <p>HEAT (they know it's you) rises when staff see you making mischief or running away, and drops at every bell. Above the line, staff can catch you during passing periods too. SCHOOL ALERT (they know something happened) rises with loud mischief and only drops overnight; the higher it is, the more guards are on duty.</p>
-    <p>Max out your HEAT and you're in SURVIVAL MODE: heat stays maxed, more staff keep arriving, and every point counts double, but the next catch ends your run. The fire alarm (red box on the wall, tap it twice) does this on purpose: staff are stunned, the halls flood with kids, items spill everywhere and every classroom locks. Flooding a bathroom (from inside it) is worth a lot of points and heat, and closes it for the day.</p>
+    <p>Max out your HEAT and you're on a REBEL RUN: heat stays maxed, more staff keep arriving, and every point counts double, but the next catch ends your run. The fire alarm (red box on the wall, tap it twice) does this on purpose: staff are stunned, the halls flood with kids, items spill everywhere and every classroom locks. Flooding a bathroom (from inside it) is worth a lot of points and heat, and closes it for the day.</p>
     <p>Friends (white tees) raise a hand during passing periods: get close and tap the bubble for a high five or a gum trade. Trading gum pays well and gets you a fake pass that cancels your next catch. Kids toss paper airplanes: walk into one to catch it. Points multiply while nobody has eyes on you (streak), and double for a few seconds after a near miss. After your second strike, the principal walks the halls.</p>
     <p>Three strikes and you're out. Survive six periods to finish the day. Each day gets harder. Your run saves at every bell.</p>
     <p class="keys">Phone: left thumb moves, drag on the right side to look around, hold 🏃 to sprint.<br>Desktop: WASD or arrow keys move, Shift sprints, drag the mouse to look. E does whatever the little E bubble says (pick up, hide, high five, catch). 1–4 pick an item, then aim with the arrow keys and throw with Space. While hiding, number keys grab things off the desks.</p>
