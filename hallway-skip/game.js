@@ -46,7 +46,7 @@
 //          each floor has its own custodian, closet, restrooms and rooms. Rooms are now numbered 101-114 and 201-214.
 // Step 43: stronger slow motion while you aim a throw by hand (a fifth of normal speed), easing in and out, with a blue edge.
 // Step 44: sneaking into a classroom is a hide check, and so is every grab. Spotted: out, security's called, room locked 3 periods.
-// Step 45: your kid: stealth, speed and strength (0-20, roll and reroll), on a character screen from the title.
+// Step 45: your kid: stealth, speed and strength (1-20 since step 59, roll and reroll), on a character screen from the title.
 // Step 46: your kid's look: outfit, hair and color, skin, height, weight and build, on a jointed low-poly kid whose arms and legs swing.
 // Step 47: easier classrooms (teacher 80%, sub 95%, secretary 65%); a grab is half as risky as walking in, +6% per grab after.
 // Step 48: the old sock and the moldy sandwich from lockers throw like spitballs and score when they hit someone.
@@ -2321,14 +2321,16 @@ $("jumpBtn").addEventListener("pointerdown", (e) => { e.preventDefault(); e.stop
 $("pauseBtn").addEventListener("click", (e) => { e.stopPropagation(); pause(); });
 renderOptSummary();
 
-// ---- step 45: your kid. Three stats, 0-20, rolled like 3d6 but stretched to 0-20; reroll as often as you like. ----
+// ---- step 45: your kid. Three stats, 1-20; reroll as often as you like. ----
 const CHAR_KEY = "hallwaySkip.character.v1";
 const STATS = [
   { k: "stealth", icon: "🥷", label: "Stealth", what: "Staff see less far, with narrower cones, and take longer to notice you. Better odds sneaking into rooms, and staff check the restroom less often." },
   { k: "speed", icon: "👟", label: "Speed", what: "Faster walking and sprinting, and faster on a wheelie chair or skateboard. Your sprint lasts longer and refills faster." },
   { k: "strength", icon: "💪", label: "Strength", what: "Throws go farther, hits keep staff down longer, and bursting out of a locker knocks over more of them. Easier to push through crowds. 15 or more: carry a fifth item." },
 ];
-const rollStat = () => Math.round(Math.random() * 20 / 3 + Math.random() * 20 / 3 + Math.random() * 20 / 3);
+// Step 59: a bell curve centered on 10 with a standard deviation of 4 (the old 3-dice roll was so narrow that 18+ came up under 1% of the time).
+// About 1 stat in 5 is 6 or lower, 1 in 5 is 14 or higher, and 1s and 20s turn up now and then. Never 0 (that would look broken).
+const rollStat = () => clamp(Math.round(10 + 4 * Math.sqrt(-2 * Math.log(1 - Math.random())) * Math.cos(2 * Math.PI * Math.random())), 1, 20);
 const rollStats = () => Object.fromEntries(STATS.map((S) => [S.k, rollStat()]));
 const character = { made: false, stats: rollStats(), look: randomLook() };
 try { const c = JSON.parse(localStorage.getItem(CHAR_KEY)); if (c?.stats) Object.assign(character, c); } catch (e) { /* storage blocked: a fresh roll */ }
