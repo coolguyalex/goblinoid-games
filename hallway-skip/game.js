@@ -41,6 +41,7 @@
 //          staff who aren't onto you turn around when they see it. 10 s after you take one, he drops everything to get it back.
 // Step 39: toilet paper flies higher (clears the banners), the plunger lasts much longer, and the kick-me sign works on kids too.
 // Step 40: hood up (🧥 button or H): staff are slower to notice you for a while; running pulls it down; then a cooldown.
+// Step 41: skateboards (lockers): tap to hop on, glide fast; bowl kids over; crash into staff or a wall and you're off (and the board's on the floor).
 import * as THREE from "three";
 
 // =====================================================================================
@@ -107,7 +108,7 @@ const CFG = {
     mopSec: 7,                    // mopping a flooded restroom (it reopens)
     airSec: 2.5,                  // airing out what's left of a stink bomb
     radioCooldownSec: 15, radioHeat: 5, radioStaff: 2,
-    kidsTake: ["basketball", "football", "frisbee", "paperAirplane", "bassDrum", "globe"],
+    kidsTake: ["basketball", "football", "frisbee", "paperAirplane", "bassDrum", "globe", "skateboard"],
     kidGrabRange: 0.9, kidGrabAfterSec: 1.5,
     lingerRadius: 0.55,           // a stink cloud shrinks to this fraction once it fades, and hangs around until he airs it out
   },
@@ -204,7 +205,7 @@ const CFG = {
     // Burst out: slam the door open. Staff close by are stunned and you get a head start, but the locker's busted
     // for the rest of the day. Only while you've still got locker time left.
     burst: { radius: 4.5, stunSec: 3, graceSec: 1.2, points: 75, noiseRadius: 12 },
-    loot: [["spitball", 4], ["gum", 4], ["paperAirplane", 3], ["whoopee", 2], ["bananaPeel", 2], ["kickMe", 1], ["energyDrink", 2], ["basketball", 1.5], ["football", 1], ["frisbee", 1.5],
+    loot: [["spitball", 4], ["gum", 4], ["paperAirplane", 3], ["whoopee", 2], ["bananaPeel", 2], ["kickMe", 1], ["energyDrink", 2], ["basketball", 1.5], ["football", 1], ["frisbee", 1.5], ["skateboard", 1.5],
            ["oldSock", 3], ["sandwich", 3], ["homework", 3]],
   },
 
@@ -597,6 +598,10 @@ const ITEM_TYPES = {
   // Hits someone: it sticks on their head and they stumble around blind, bumping into people. Misses: it sticks to the wall.
   plunger:       { label: "Plunger", icon: "🪠", kind: "throw", recoverable: true, speed: [9, 15], pitchDeg: 6, gravity: 6, blindSec: 12, blindSpeed: 2.6,
                    staffPoints: 200, studentPoints: 25, bumpPoints: 20, studentSec: 1.8 },
+  // Lockers. Tap to hop on (tap again, the 🛹 button or Space to hop off). Fast and floaty; staff notice a kid on a board quicker.
+  // Kids in the way go flying. Staff or a wall at speed: you go flying, and the board ends up on the floor (kids love skateboards).
+  skateboard:    { label: "Skateboard", icon: "🛹", kind: "board", recoverable: true, speed: 6.8, accel: 3.2, coast: 0.5, noticeMult: 1.4,
+                   kidSec: 1.2, kidPoints: 20, staffSec: 2.4, staffPoints: 120, crashDaze: 1.2, wallCrashSpeed: 4.5 },
   energyDrink:   { label: "Energy drink", icon: "⚡", kind: "drink" },   // tap to drink: see CFG.energy
   gum:           { label: "Gum", icon: "🍬", kind: "instant", points: 100, line: "You stick gum under the water fountain. Gross. +havoc" },
   // Junk from lockers: takes up a slot until you toss it (select it to drop it). Staff tidy it up like anything else.
@@ -604,7 +609,7 @@ const ITEM_TYPES = {
   sandwich:      { label: "Moldy sandwich", icon: "🥪", kind: "junk", line: "You toss the sandwich. Something in it moved." },
   homework:      { label: "Crumpled homework", icon: "📄", kind: "junk", line: "You toss someone's homework. It's a D-minus anyway." },
 };
-const REST_Y = { wetFloor: 0, mopBucket: 0, globe: 0.3, bassDrum: 0.45, trumpet: 0.06, basketball: 0.2, football: 0.14, wheelieChair: 0, whoopee: 0.08, frisbee: 0.03, slime: 0.02, mentos: 0 };   // how high items sit on the floor (default 0.04)
+const REST_Y = { skateboard: 0.06, wetFloor: 0, mopBucket: 0, globe: 0.3, bassDrum: 0.45, trumpet: 0.06, basketball: 0.2, football: 0.14, wheelieChair: 0, whoopee: 0.08, frisbee: 0.03, slime: 0.02, mentos: 0 };   // how high items sit on the floor (default 0.04)
 
 // Floor plan: a squared figure 8. An outer loop plus a main hall across the middle, around two classroom blocks.
 // Halls run node to node. "side" on a hall: +1 / -1 = which wall (+1 is the classroom side on the outer loop).
@@ -902,8 +907,9 @@ for (const b of BANNERS) {
   g.fillStyle = b.fg; g.font = "900 54px system-ui, sans-serif"; g.textAlign = "center"; g.textBaseline = "middle"; g.fillText(b.text, 512, 43);
   const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
   const w = LAYOUT.hallHalf * 2 - 0.1, p = hallPos(b.h, b.t, 0), rot = hallHeading(b.h, 1);
+  b.mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true }); b.x = p.x; b.z = p.z;
   for (const flip of [0, Math.PI]) {   // printed on both sides
-    const flag = new THREE.Mesh(new THREE.PlaneGeometry(w * 0.9, w * 0.9 * 80 / 1024 * 1.6), new THREE.MeshBasicMaterial({ map: tex }));
+    const flag = new THREE.Mesh(new THREE.PlaneGeometry(w * 0.9, w * 0.9 * 80 / 1024 * 1.6), b.mat);
     flag.position.set(p.x, 2.2, p.z); flag.rotation.y = rot + flip; scene.add(flag);
   }
   const wire = box(w, 0.03, 0.03, 0x555555, p.x, b.wireY, p.z); wire.rotation.y = rot;
@@ -1224,6 +1230,7 @@ window.addEventListener("keydown", (e) => {
     selectSlot(+e.key - 1, true); return;
   }
   if (player.ride && (k === "e" || k === " ") && !e.repeat) { e.preventDefault(); jumpOff(); return; }
+  if (player.board && k === " " && !game.aim && !e.repeat) { e.preventDefault(); hopOff(); return; }
   if (k === "e" && !e.repeat) doInteract();
   if (k === "h" && !e.repeat) hoodUp();
 });
@@ -1381,6 +1388,7 @@ function morningSetup() {
   if (player.ride) { scene.remove(player.ride.chair); player.ride = null; $("jumpBtn").hidden = true; }
   player.slipT = player.dazeT = player.stuckT = 0; player.mesh.rotation.z = 0; player.stamina = 1; player.staminaMax = 1; player.boostT = 0; player.winded = false;
   if (player.hoodT > 0) hoodDown(); player.hoodCD = 0;
+  hopOff(true);
   game.hotbar = Array(CFG.items.slots).fill(null); renderHotbar();
   rollSubs();             // first, so sub rooms get their extra desk loot
   resetSpotsForPeriod();
@@ -1526,6 +1534,7 @@ const RELEASE_LINES = ["Now get to class!!!", "Get out of my sight!!!", "Go. GO.
 function caught(st) {
   cancelAim();
   game.catcher = st;
+  hopOff(true);
   if (player.ride) endRide(false);
   if (game.phase === "passing" && game.heat < CFG.heat.passingCatchAt && !game.survival) { shoo(st); return; }
   game.unseenT = 0;
@@ -1716,7 +1725,7 @@ $("options").addEventListener("click", (e) => e.stopPropagation());
 $("optionsClose").addEventListener("click", () => { $("options").hidden = true; });
 $("pauseBtn").addEventListener("pointerdown", (e) => e.stopPropagation());
 $("hoodBtn").addEventListener("pointerdown", (e) => { e.preventDefault(); e.stopPropagation(); hoodUp(); });
-$("jumpBtn").addEventListener("pointerdown", (e) => { e.preventDefault(); e.stopPropagation(); jumpOff(); });
+$("jumpBtn").addEventListener("pointerdown", (e) => { e.preventDefault(); e.stopPropagation(); if (player.board) hopOff(); else jumpOff(); });
 $("pauseBtn").addEventListener("click", (e) => { e.stopPropagation(); pause(); });
 renderOptSummary();
 // the joystick guide (phones only) and hiding the play-only HUD bits on menus
@@ -1762,6 +1771,8 @@ function updatePlayer(dt) {
   if (player.invisT > 0) { player.invisT -= dt; player.mesh.visible = !player.hidden && (player.invisT <= 0 || Math.sin(game.time * 22) > -0.3); }
   if (player.hidden) { updateHiding(dt); return; }
   if (player.ride) { updateRide(dt); return; }
+  if (player.board && (player.slipT > 0 || player.stuckT > 0)) dropBoard("You wipe out!");
+  if (player.board) { updateBoard(dt); return; }
   if (player.slipT > 0 || player.dazeT > 0) {   // flat on your back, or seeing stars
     player.slipT = Math.max(0, player.slipT - dt); player.dazeT = Math.max(0, player.dazeT - dt);
     player.vx = player.vz = 0;
@@ -1813,11 +1824,77 @@ function updateSprint(dt) {
   if (player.sprinting) { player.stamina = Math.max(0, player.stamina - dt / S.staminaSec); if (player.stamina <= 0) { player.winded = true; toast("Out of breath!"); } }
   else player.stamina = Math.min(player.staminaMax, player.stamina + (dt / S.rechargeSec) * (player.boostT > 0 ? CFG.energy.rechargeMult : 1));
 }
+// ---- skateboard ----
+const boardMesh = makeItemMesh("skateboard"); boardMesh.visible = false;
+function hopOn() {
+  if (player.ride || player.hidden) return;
+  if (player.hoodT > 0) hoodDown("Hood down: you can't skate with your hood up.");
+  player.board = { vx: player.vx, vz: player.vz }; boardMesh.visible = true;
+  $("jumpBtn").textContent = "🛹 Hop off"; $("jumpBtn").hidden = false;
+  toast(isTouch ? "Skating! Steer with the stick. Tap 🛹 to hop off." : "Skating! Space (or 🛹 in your items) hops off.", 2.2);
+  playBlip([300, 450], 0.06, "triangle", 0.05); renderHotbar();
+}
+function hopOff(quiet = false) {
+  if (!player.board) return;
+  player.board = null; boardMesh.visible = false; $("jumpBtn").hidden = true; $("jumpBtn").textContent = "🦘 Jump off";
+  player.mesh.position.y = 0; player.mesh.rotation.z = 0;
+  if (!quiet) playBlip([400, 300], 0.05, "triangle", 0.04);
+  renderHotbar();
+}
+// fell off: the board ends up on the floor (go get it before a kid does)
+function dropBoard(msg) {
+  if (!player.board) return;
+  const b = player.board, sp = Math.hypot(b.vx, b.vz) || 1;
+  hopOff(true);
+  const i = game.hotbar.findIndex((it) => it?.key === "skateboard"); if (i >= 0) consumeSlot(i);
+  const o = spawnObject("skateboard", "resting", player.x + (b.vx / sp) * 1.2, REST_Y.skateboard, player.z + (b.vz / sp) * 1.2);
+  collide(o, 0.3); o.mesh.rotation.y = Math.atan2(b.vx, b.vz); capLying();
+  player.dazeT = Math.max(player.dazeT, ITEM_TYPES.skateboard.crashDaze); player.graceT = Math.max(player.graceT, 1.2);
+  popup("WIPEOUT!", "bad"); playBlip([220, 120], 0.12, "sawtooth", 0.08);
+  if (msg) toast(msg);
+}
+function updateBoard(dt) {
+  const T = ITEM_TYPES.skateboard, B = player.board;
+  const f = { x: Math.sin(cam.yaw), z: Math.cos(cam.yaw) }, r = { x: -Math.cos(cam.yaw), z: Math.sin(cam.yaw) };
+  const mx = r.x * input.x + f.x * input.y, mz = r.z * input.x + f.z * input.y;
+  if (input.m > 0) { const k = damp(T.accel, dt); B.vx += (mx * T.speed - B.vx) * k; B.vz += (mz * T.speed - B.vz) * k; }
+  else { const k = Math.exp(-T.coast * dt); B.vx *= k; B.vz *= k; }   // coasting
+  player.sprinting = false; player.stamina = Math.min(player.staminaMax, player.stamina + dt / CFG.sprint.rechargeSec);
+  const ox = player.x, oz = player.z, sp = Math.hypot(B.vx, B.vz);
+  player.x += B.vx * dt; player.z += B.vz * dt;
+  // staff: a crash (they go down, and so do you)
+  for (const st of staff) {
+    if (st.stunT > 0 || Math.hypot(st.x - player.x, st.z - player.z) > 0.95 || sp < 1.5) continue;
+    stunStaff(st, T.staffSec, "fall"); bark(st, "slip", true);
+    havoc("boardStaff", T.staffPoints, `Skateboard vs. the ${st.type.name}!`, { x: st.x, z: st.z, loud: true });
+    dareEvent("hit", { item: "skateboard", staff: st.key, chasing: st.state === "chase" });
+    dropBoard(); return;
+  }
+  // kids: they go flying, you keep rolling (a bit slower)
+  for (const c of crowd) {
+    if (!isActive(c) || c.slipT > 0 || Math.hypot(c.x - player.x, c.z - player.z) > CFG.player.radius + CFG.crowd.radius) continue;
+    if (sp > 2) { c.slipT = T.kidSec; c.stunStyle = "fall"; havoc("boardStudent", T.kidPoints, "Coming through!", { x: c.x, z: c.z }); B.vx *= 0.75; B.vz *= 0.75; }
+  }
+  collide(player, CFG.player.radius);
+  const moved = Math.hypot(player.x - ox, player.z - oz);
+  if (sp > T.wallCrashSpeed && moved < sp * dt * 0.35) { dropBoard("You skate straight into the wall."); return; }
+  if (moved < sp * dt * 0.8) { const k = moved / Math.max(sp * dt, 1e-4); B.vx *= k; B.vz *= k; }   // scraping along a wall
+  player.vx = (player.x - ox) / Math.max(dt, 1e-4); player.vz = (player.z - oz) / Math.max(dt, 1e-4);
+  if (sp > 0.3) player.heading = lerpAngle(player.heading, Math.atan2(B.vx, B.vz), damp(6, dt));
+  if (input.m > 0) checkWalkIn(mx, mz, dt);
+  manualCamT -= dt;
+  if (manualCamT <= 0 && sp > 1) cam.yaw = lerpAngle(cam.yaw, player.heading, damp(CFG.camera.followRate, dt));
+  boardMesh.position.set(player.x, 0, player.z); boardMesh.rotation.y = player.heading;
+  player.mesh.position.set(player.x, 0.1, player.z); player.mesh.rotation.y = player.heading + Math.PI / 2 * 0.6;   // standing sideways on the deck
+  player.mesh.rotation.z = clamp(input.x * 0.15, -0.15, 0.15);
+}
+
 // ---- hood up: harder to notice for a while ----
 const hoodUpMesh = new THREE.Mesh(new THREE.IcosahedronGeometry(0.27, 1), lambert(0x5d626b));
 hoodUpMesh.position.set(0, 1.37, -0.03); hoodUpMesh.scale.set(1.05, 1.08, 1.0); hoodUpMesh.visible = false; player.mesh.add(hoodUpMesh);
 function hoodUp() {
   if (game.state !== "playing" || player.hidden || player.hoodT > 0) return;
+  if (player.board) { toast("Not while you're skating."); return; }
   if (player.hoodCD > 0) { toast(`Hood's cooling off (${Math.ceil(player.hoodCD)} s)`); return; }
   player.hoodT = CFG.hoodie.sec; hoodUpMesh.visible = true; player.mesh.userData.eyes.visible = false;
   toast(`Hood up. Staff are slower to notice you for ${CFG.hoodie.sec} s. Don't run.`, 2.2); playBlip([300, 240], 0.06, "triangle", 0.04);
@@ -2008,6 +2085,7 @@ function noticeRate(st, d, cover) {
   if (player.sprinting) rate *= CFG.sprint.noticeMult;   // a running kid stands out
   if (game.phase === "passing") rate /= D.passingBeatMult;
   if (player.hoodT > 0) rate *= CFG.hoodie.noticeMult;   // hood up: just another kid in a hoodie
+  if (player.board) rate *= ITEM_TYPES.skateboard.noticeMult;   // a kid on a skateboard stands out
   return rate;
 }
 
@@ -2382,6 +2460,7 @@ function enterSpot(sp) {
     playBlip([1200, 900], 0.05, "square", 0.05);
   } else if (why) { toast(why); playBlip([180], 0.08, "square", 0.04); return false; }
   if (sp.kind === "locker") game.lockerUses--; else sp.used = true;
+  if (player.board) hopOff(true);
   const f = spotFront(sp, {});
   player.hidden = sp; player.hideT = 0; player.hideArmed = false; player.pushT = 0; player.pushSpot = null;
   player.x = f.x; player.z = f.z; player.vx = player.vz = 0;
@@ -2839,6 +2918,11 @@ function makeItemMesh(key) {
       const band = new THREE.Mesh(new THREE.BoxGeometry(0.37, 0.1, 0.92), lambert(0x1d2230)); pivot.add(band);   // a stripe so you can see it roll
       break;
     }
+    case "skateboard": {
+      m(new THREE.BoxGeometry(0.24, 0.03, 0.78), 0x2d3436).position.y = 0.06;
+      for (const z of [-0.26, 0.26]) for (const x of [-0.1, 0.1]) m(new THREE.CylinderGeometry(0.035, 0.035, 0.04, 8), 0xf1c40f).position.set(x, 0.035, z);
+      break;
+    }
     case "mop": { const pole = m(new THREE.CylinderGeometry(0.025, 0.025, 1.2, 5), 0xc8a46a); pole.rotation.z = Math.PI / 2; m(new THREE.BoxGeometry(0.18, 0.1, 0.2), 0xe8e2d0).position.x = 0.62; break; }
     case "wetFloor": {
       for (const a of [-0.32, 0.32]) { const p = m(new THREE.BoxGeometry(0.34, 0.62, 0.02), 0xf1c40f); p.position.y = 0.3; p.rotation.x = a; p.position.z = -a * 0.3; }
@@ -2918,7 +3002,7 @@ function renderHotbar() {
   [...hotbarEl.children].forEach((b, i) => {
     const it = game.hotbar[i];
     b.innerHTML = it ? `${ITEM_TYPES[it.key].icon}${it.uses > 1 ? `<small>${it.uses}</small>` : ""}` : "";
-    b.classList.toggle("empty", !it); b.classList.toggle("active", game.aim?.slot === i);
+    b.classList.toggle("empty", !it); b.classList.toggle("active", game.aim?.slot === i || (it?.key === "skateboard" && !!player.board));
     b.title = it ? ITEM_TYPES[it.key].label : "Empty slot";
   });
 }
@@ -2951,6 +3035,7 @@ function selectSlot(i, fromKey = false) {
     capLying(); playBlip([300, 200], 0.06, "triangle", 0.04); return;
   }
   if (T.kind === "instant") { consumeSlot(i); toast(T.line); havoc(it.key, T.points, T.label, { x: player.x, z: player.z }); return; }
+  if (T.kind === "board") { if (player.board) hopOff(); else hopOn(); return; }
   if (T.kind === "drink") { consumeSlot(i); drinkEnergy(); return; }
   if (T.kind === "instrument") { consumeSlot(i); playTrumpet(); return; }
   if (T.kind === "mop") { if (jamDoor()) consumeSlot(i); return; }
@@ -3957,6 +4042,7 @@ function clearGraffiti() { for (const g of graffiti) { scene.remove(g.mesh); g.m
 // ---- the wheelie chair: launch yourself, steer a little (it costs speed), jump off before the crash ----
 const jumpBtn = $("jumpBtn");
 function startRide(L) {
+  if (player.board) hopOff(true);
   player.ride = { dx: L.dx, dz: L.dz, t: 0, speed: ITEM_TYPES.wheelieChair.rideSpeed, chair: makeItemMesh("wheelieChair") };
   player.heading = Math.atan2(L.dx, L.dz);
   toast(isTouch ? "WHEEEEE! Steer with the stick · tap 🦘 to jump off" : "WHEEEEE! A/D steers · E or Space jumps off", 2.4);
@@ -4659,6 +4745,10 @@ renderer.setAnimationLoop(() => {
   updateKeyHint();
   updateAutoTarget();
   updateGuides();
+  for (const b of BANNERS) {   // fade a banner out when the camera's right up against it (it would fill the screen)
+    const o = clamp((Math.hypot(camera.position.x - b.x, camera.position.z - b.z) - 2.2) / 2.5, 0.06, 1);
+    if (Math.abs(b.mat.opacity - o) > 0.01) { b.mat.opacity = o; b.mat.depthWrite = o > 0.99; }
+  }
   drawStamina();
   drawObjects();
   updateMarkers();
@@ -4822,6 +4912,7 @@ if (debug) {   // test-only helpers (only with ?debug in the URL)
     hotbar() { return game.hotbar.map((s) => s && `${s.key}${s.uses > 1 ? "x" + s.uses : ""}`); },
     playerState() { return { slipT: player.slipT, dazeT: player.dazeT, riding: !!player.ride, x: player.x, z: player.z, rideSpeed: player.ride?.speed ?? 0, heading: player.heading }; },
     jumpOff() { jumpOff(); },
+    board() { return player.board ? { vx: player.board.vx, vz: player.board.vz } : null; },
     staffFull(k) { const s = staff[k]; return { camping: !!s.camping, state: s.state, stunT: s.stunT, distractT: s.distractT, x: s.x, z: s.z, key: s.key }; },
     searchTo(k, x, z) { const st = staff[k]; st.state = "search"; st.searchT = -30; st.lastX = st.tx = x; st.lastZ = st.tz = z; },
     nodes() { return NODES.map((n) => ({ id: n.id, x: n.x, z: n.z })); },
