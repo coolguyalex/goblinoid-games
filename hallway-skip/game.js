@@ -42,6 +42,8 @@
 // Step 39: toilet paper flies higher (clears the banners), the plunger lasts much longer, and the kick-me sign works on kids too.
 // Step 40: hood up (🧥 button or H): staff are slower to notice you for a while; running pulls it down; then a cooldown.
 // Step 41: skateboards (lockers): tap to hop on, glide fast; bowl kids over; crash into staff or a wall and you're off (and the board's on the floor).
+// Step 42: a second floor. Two stairwells (northwest and southeast corners) connect them; staff follow you up and down,
+//          each floor has its own custodian, closet, restrooms and rooms. Rooms are now numbered 101-114 and 201-214.
 import * as THREE from "three";
 
 // =====================================================================================
@@ -55,10 +57,10 @@ const CFG = {
   pointsPerPeriod: 100,           // earned across the skipping phase (~5/3 per second)
 
   // Within-day curve: index = period - 1. Period 1 is easy, period 6 is very hard but possible.
-  monitorsPerPeriod: [1, 1, 2, 2, 2, 3],
-  guardsPerPeriod:   [0, 1, 1, 1, 1, 2],
-  teachersPerPeriod: [0, 0, 1, 1, 2, 3],
-  custodiansPerPeriod: [1, 1, 1, 1, 1, 1],   // one per floor (more once there are more floors)   // teachers standing guard at their doors
+  monitorsPerPeriod: [2, 2, 3, 3, 4, 4],   // (two floors' worth)
+  guardsPerPeriod:   [0, 1, 1, 2, 2, 2],
+  teachersPerPeriod: [0, 0, 1, 2, 3, 4],   // teachers standing guard at their doors
+  custodiansPerPeriod: [2, 2, 2, 2, 2, 2],   // one per floor   // teachers standing guard at their doors
 
   // Across-days curve, kept separate so the two are easy to tune independently.
   days: {
@@ -138,7 +140,7 @@ const CFG = {
   joystick: { radiusPx: 60, deadZone: 0.12 },
 
   crowd: {
-    count: 110,                   // try other sizes with ?crowd=N in the URL (20-250)
+    count: 150,                   // across both floors; try other sizes with ?crowd=N in the URL (20-250)
     cullDistance: 46,             // kids farther than this (in the fog) or out of view aren't drawn at all
     speedMin: 1.0, speedMax: 1.8, radius: 0.3,
     leaveStartFrac: 0.12,         // during passing, students head into class between these
@@ -318,7 +320,7 @@ const STAFF_TYPES = {
     visionRange: 9, visionHalfAngleDeg: 50,   // slow, wide vision cone
     sweepDeg: 25, sweepRate: 0.9,             // looks side to side while patrolling
     notice: 1.0,                              // how fast suspicion builds (multiplier)
-    routes: ["outer", "eight", "top", "bottom"],   // fixed patrol loops, handed out in this order
+    routes: ["outer", "outer2", "eight", "eight2", "top", "top2", "bottom", "bottom2"],   // fixed patrol loops, handed out in this order (alternating floors)
     vestColor: 0xe8c547, hatColor: 0x2c3e66, scale: 1.12,
     caughtLine: "\"You better get to class.\"",
   },
@@ -449,7 +451,7 @@ const DARES = {
                    if (d.sp.roomType !== "gym" || !game.hotbar.some((it) => it?.key === "loveNote")) return false;
                    if (game.period !== m.p.period) { toast(`💌 Not yet: the note's for period ${m.p.period}.`); return false; }
                    consumeSlot(game.hotbar.findIndex((it) => it?.key === "loveNote")); return true; } } },
-  tagHalls:    { need: 7, points: 800, text: () => "Tag every hallway with graffiti", on: { tag: (m, d) => (m.got.includes(d.h) ? false : (m.got.push(d.h), true)) } },
+  tagHalls:    { need: 7, points: 800, text: () => "Tag 7 different hallways with graffiti", on: { tag: (m, d) => (m.got.includes(d.h) ? false : (m.got.push(d.h), true)) } },
   floodPeriod: { need: 1, points: 350,
                  setup(m) { if (!RESTROOMS.some((sp) => !sp.closed)) return false; m.p.period = Math.min(periodsToday(), game.period + Math.floor(Math.random() * 3)); return true; },
                  text: (m) => `Flood a bathroom during period ${m.p.period}`, on: { flood: (m) => game.period === m.p.period } },
@@ -479,6 +481,7 @@ const SPOT_TYPES = {
   restroom:  { label: "Restroom", halfW: 0.75, maxStaySec: 45,
                stayLine: "Staff passing by sometimes check the stalls. Keep your feet up.", timeoutLine: "Someone's pounding on the stall door. Time to go." },
   classroom: { label: "Room", halfW: 0.6 },   // stay time comes from who's teaching
+  stairs:    { label: "Stairs", halfW: 0.75, maxStaySec: 99 },
   closet:    { label: "Custodian's closet", halfW: 0.7, maxStaySec: 30,
                stayLine: "Mops, buckets, a breaker box. Smells like bleach. The custodian checks in here now and then.", timeoutLine: "Keys jingling outside. Time to go." },
 };
@@ -642,16 +645,51 @@ const LAYOUT = {
     { h: 0, t: 9.75, room: 101, type: "math" }, { h: 0, t: 19.5, room: 102, type: "science" }, { h: 0, t: 29.25, room: 103, type: "english" },
     { h: 1, t: 8.5, room: 104, type: "art" }, { h: 6, t: 29, side: -1, room: 105, type: "office" }, { h: 6, t: 10, side: -1, room: 106, type: "history" },
     { h: 5, t: 8.5, room: 107, type: "english" },
-    { h: 6, t: 14, side: 1, room: 201, type: "gym" }, { h: 6, t: 25, side: 1, room: 202, type: "math" }, { h: 2, t: 8.5, room: 203, type: "science" },
-    { h: 3, t: 9.75, room: 204, type: "history" }, { h: 3, t: 19.5, room: 205, type: "art" }, { h: 3, t: 29.25, room: 206, type: "music" }, { h: 4, t: 8.5, room: 207, type: "math" },
+    { h: 6, t: 14, side: 1, room: 108, type: "gym" }, { h: 6, t: 25, side: 1, room: 109, type: "math" }, { h: 2, t: 8.5, room: 110, type: "science" },
+    { h: 3, t: 9.75, room: 111, type: "history" }, { h: 3, t: 19.5, room: 112, type: "art" }, { h: 3, t: 29.25, room: 113, type: "music" }, { h: 4, t: 8.5, room: 114, type: "math" },
   ],
   hideLockers: [ { h: 0, t: 4 }, { h: 0, t: 25 }, { h: 1, t: 13 }, { h: 2, t: 4 }, { h: 3, t: 27 }, { h: 4, t: 13 }, { h: 5, t: 4 } ],
   restrooms: [ { h: 2, t: 12 }, { h: 5, t: 12 } ],
   closets: [ { h: 1, t: 4 } ],   // the custodian's closet (one per floor)
   fireAlarms: [ { h: 6, t: 14.5, side: -1 }, { h: 1, t: 13.5 }, { h: 3, t: 24.5 } ],   // side defaults to the classroom wall
+  stairs: [ { h: 0, t: 1.9 }, { h: 3, t: 1.9 } ],   // stairwell doors (northwest and southeast corners), same spot on both floors
+  // The second floor: same footprint (it's the same building), its own rooms and stuff. Hall numbers here are per floor (0-6).
+  floor2: {
+    doors: [
+      { h: 0, t: 9.75, room: 201, type: "english" }, { h: 0, t: 19.5, room: 202, type: "science" }, { h: 0, t: 29.25, room: 203, type: "history" },
+      { h: 1, t: 8.5, room: 204, type: "art" }, { h: 6, t: 29, side: -1, room: 205, type: "science" }, { h: 6, t: 10, side: -1, room: 206, type: "math" },
+      { h: 5, t: 8.5, room: 207, type: "english" },
+      { h: 6, t: 14, side: 1, room: 208, type: "music" }, { h: 6, t: 25, side: 1, room: 209, type: "history" }, { h: 2, t: 8.5, room: 210, type: "math" },
+      { h: 3, t: 9.75, room: 211, type: "english" }, { h: 3, t: 19.5, room: 212, type: "history" }, { h: 3, t: 29.25, room: 213, type: "art" }, { h: 4, t: 8.5, room: 214, type: "math" },
+    ],
+    hideLockers: [ { h: 0, t: 14 }, { h: 1, t: 13 }, { h: 2, t: 4 }, { h: 3, t: 14 }, { h: 4, t: 13 }, { h: 5, t: 4 } ],
+    restrooms: [ { h: 2, t: 12 }, { h: 5, t: 12 } ],
+    closets: [ { h: 4, t: 4 } ],
+    fireAlarms: [ { h: 6, t: 20, side: -1 }, { h: 4, t: 10.5 } ],
+  },
 };
+// ---- the two floors sit side by side in world space, far enough apart that they never see or hear each other ----
+const FLOOR_DX = 100, BASE_HALLS = LAYOUT.halls.length;
+const floorOf = (x) => (x > FLOOR_DX / 2 ? 1 : 0);
+const FLOOR_NAMES = ["1st floor", "2nd floor"];
+{
+  const L = LAYOUT;
+  for (const id of Object.keys(L.nodes)) L.nodes[id + "2"] = [L.nodes[id][0] + FLOOR_DX, L.nodes[id][1]];
+  for (const def of L.halls.slice(0, BASE_HALLS)) L.halls.push({ name: def.name + " (2nd floor)", from: def.from + "2", to: def.to + "2", floor: 1 });
+  L.blocks.push(...L.blocks.map((b) => ({ ...b, x0: b.x0 + FLOOR_DX, x1: b.x1 + FLOOR_DX, color: b.color - 0x0a0400 })));
+  for (const [name, r] of Object.entries(L.routes)) L.routes[name + "2"] = r.map((id) => id + "2");
+  const up = (arr) => arr.map((o) => ({ ...o, h: o.h + BASE_HALLS }));
+  for (const k of ["doors", "hideLockers", "restrooms", "closets", "fireAlarms"]) L[k].push(...up(L.floor2[k]));
+  L.stairs.push(...up(L.stairs));
+}
 
 // Things pushed against a wall. Side defaults to the outer (locker) wall.
+const OBSTACLES_2F = [   // the second floor's things against the walls (per-floor hall numbers)
+  { name: "vending machine", h: 0, t: 19.5, halfLen: 0.7, depth: 0.85, height: 2.0, color: 0x27ae60 },
+  { name: "trophy case",     h: 6, t: 4.5, side: 1, halfLen: 1.4, depth: 0.7, height: 1.9, color: 0x8e6b3e },
+  { name: "water fountain",  h: 2, t: 8.5, halfLen: 0.45, depth: 0.5, height: 1.0, color: 0xbfc9d1 },
+  { name: "bench",           h: 3, t: 22, halfLen: 1.3, depth: 0.55, height: 0.5, color: 0x7a5230 },
+];
 const OBSTACLES = [
   { name: "vending machine", h: 0, t: 18.7, halfLen: 0.7, depth: 0.85, height: 2.0, color: 0xc0392b },
   { name: "vending machine", h: 0, t: 20.3, halfLen: 0.7, depth: 0.85, height: 2.0, color: 0x2e86c1 },
@@ -660,6 +698,7 @@ const OBSTACLES = [
   { name: "bench",           h: 3, t: 12, halfLen: 1.3, depth: 0.55, height: 0.5, color: 0x7a5230 },
   { name: "bench",           h: 4, t: 8.5, halfLen: 1.3, depth: 0.55, height: 0.5, color: 0x7a5230 },
 ];
+OBSTACLES.push(...OBSTACLES_2F.map((o) => ({ ...o, h: o.h + BASE_HALLS })));
 
 const SHIRT_COLORS = [0xe74c3c, 0x3498db, 0x2ecc71, 0x9b59b6, 0xf39c12, 0x1abc9c, 0xe84393, 0x34495e, 0xd35400, 0x16a085, 0xf1c40f, 0x6c5ce7];
 const SKIN_COLORS = [0xf1c27d, 0xe0ac69, 0xc68642, 0x8d5524, 0xffdbac, 0x5c3a21];
@@ -686,7 +725,7 @@ const inBlock = (x, z) => LAYOUT.blocks.some((b) => x > b.x0 && x < b.x1 && z > 
 const HALLS = LAYOUT.halls.map((def) => {
   const a = nodeIndex(def.from), b = nodeIndex(def.to), A = NODES[a], B = NODES[b];
   const len = Math.hypot(B.x - A.x, B.z - A.z), dx = (B.x - A.x) / len, dz = (B.z - A.z) / len;
-  const H = { name: def.name, a, b, ax: A.x, az: A.z, len, dx, dz, nx: -dz, nz: dx };
+  const H = { name: def.name, a, b, ax: A.x, az: A.z, len, dx, dz, nx: -dz, nz: dx, floor: def.floor ?? 0 };
   // what's on each wall: a classroom block, or the outer wall (with lockers)
   const mx = A.x + dx * len / 2, mz = A.z + dz * len / 2;
   H.sideType = {};
@@ -771,6 +810,9 @@ const WALLS = [];
   WALLS.push({ x0: -ox - T, z0: oz, x1: ox + T, z1: oz + T });             // south
   WALLS.push({ x0: -ox - T, z0: -oz - T, x1: -ox, z1: oz + T });           // west
   WALLS.push({ x0: ox, z0: -oz - T, x1: ox + T, z1: oz + T });             // east
+  const X = FLOOR_DX;   // the second floor's outer walls
+  WALLS.push({ x0: X - ox - T, z0: -oz - T, x1: X + ox + T, z1: -oz }, { x0: X - ox - T, z0: oz, x1: X + ox + T, z1: oz + T },
+             { x0: X - ox - T, z0: -oz - T, x1: X - ox, z1: oz + T }, { x0: X + ox, z0: -oz - T, x1: X + ox + T, z1: oz + T });
   for (const ob of OBSTACLES) {
     ob.side = ob.side ?? HALLS[ob.h].outerSide;
     const wl = wallLat(ob.h, ob.side);
@@ -822,7 +864,7 @@ document.body.prepend(renderer.domElement);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x1d2230);
 scene.fog = new THREE.Fog(0x1d2230, 22, 48);
-const camera = new THREE.PerspectiveCamera(CFG.camera.fov, 1, 0.1, 120);
+const camera = new THREE.PerspectiveCamera(CFG.camera.fov, 1, 0.1, 53);   // (the other floor is 56+ m away: never drawn)
 const hemi = new THREE.HemisphereLight(0xffffff, 0x8a7f6a, 1.15); scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xffffff, 0.75);
 sun.position.set(6, 14, 9);
@@ -851,6 +893,7 @@ function wallBox(h, t, lat, w, hgt, d, color, y) { const p = hallPos(h, t, lat);
   }
   g.setAttribute("color", new THREE.BufferAttribute(colors, 3));
   scene.add(new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true })));
+  const up = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true, color: 0xdde4ee })); up.position.x = FLOOR_DX; scene.add(up);   // upstairs: a cooler tint
 }
 
 // Walls
@@ -865,6 +908,9 @@ function wallBox(h, t, lat, w, hgt, d, color, y) { const p = hallPos(h, t, lat);
   box(ox * 2 + 1, H, 0.5, 0xcfc5ad, 0, H / 2, oz + 0.25);
   box(0.5, H, oz * 2 + 1, 0xcfc5ad, -ox - 0.25, H / 2, 0);
   box(0.5, H, oz * 2 + 1, 0xcfc5ad, ox + 0.25, H / 2, 0);
+  const X = FLOOR_DX, c2 = 0xc9c7bd;
+  box(ox * 2 + 1, H, 0.5, c2, X, H / 2, -oz - 0.25); box(ox * 2 + 1, H, 0.5, c2, X, H / 2, oz + 0.25);
+  box(0.5, H, oz * 2 + 1, c2, X - ox - 0.25, H / 2, 0); box(0.5, H, oz * 2 + 1, c2, X + ox + 0.25, H / 2, 0);
 }
 
 // Lockers along the outer walls (one instanced mesh), skipping obstacles, hiding spots and the entrance.
@@ -876,7 +922,7 @@ function wallBox(h, t, lat, w, hgt, d, color, y) { const p = hallPos(h, t, lat);
     for (let t = 0.4; t < H.len - 0.4; t += spacing) {
       if (h === LAYOUT.entrance.h && Math.abs(t - LAYOUT.entrance.t) < 2.0) continue;
       if (OBSTACLES.some((o) => o.h === h && o.side === H.outerSide && Math.abs(o.t - t) < o.halfLen + 0.35)) continue;
-      if (near(LAYOUT.hideLockers, h, t, 0.75) || near(LAYOUT.restrooms, h, t, 1.0) || near(LAYOUT.closets, h, t, 1.0)) continue;
+      if (near(LAYOUT.hideLockers, h, t, 0.75) || near(LAYOUT.restrooms, h, t, 1.0) || near(LAYOUT.closets, h, t, 1.0) || near(LAYOUT.stairs, h, t, 1.1)) continue;
       positions.push({ h, t });
     }
   });
@@ -899,6 +945,9 @@ const BANNERS = [
   { h: 6, f: 0.62, text: "SPIRIT WEEK", bg: "#2e86c1", fg: "#ffffff" },
   { h: 3, f: 0.55, text: "HOMECOMING FRIDAY", bg: "#27ae60", fg: "#ffffff" },
   { h: 6, f: 0.2, text: "NO RUNNING IN THE HALLS", bg: "#f4f4ee", fg: "#c0392b" },
+  { h: 0 + BASE_HALLS, f: 0.55, text: "SCIENCE FAIR THURSDAY", bg: "#8e44ad", fg: "#ffffff" },
+  { h: 6 + BASE_HALLS, f: 0.45, text: "BE KIND · BE ON TIME", bg: "#f1c40f", fg: "#1d2230" },
+  { h: 3 + BASE_HALLS, f: 0.6, text: "GO GOBLINS!", bg: "#c0392b", fg: "#ffd36b" },
 ];
 for (const b of BANNERS) {
   b.t = HALLS[b.h].len * b.f; b.wireY = 2.44;
@@ -948,6 +997,25 @@ for (const { h, t } of LAYOUT.closets) {
   wallBox(h, t + 0.35, wl + side * (LAYOUT.lockerDepth - 0.1), 0.06, 0.06, 0.04, 0xd4ac0d, 1.05);   // the knob
 }
 const CLOSETS = SPOTS.filter((sp) => sp.kind === "closet");
+// stairwells: walk in and you come out at the same stairwell on the other floor
+const signTexCache = {};
+function signTex(text, bg, fg) {
+  const k = text + bg; if (signTexCache[k]) return signTexCache[k];
+  const cv = document.createElement("canvas"); cv.width = 256; cv.height = 96; const g = cv.getContext("2d");
+  g.fillStyle = bg; g.fillRect(0, 0, 256, 96); g.fillStyle = fg; g.font = "900 44px system-ui, sans-serif"; g.textAlign = "center"; g.textBaseline = "middle"; g.fillText(text, 128, 50);
+  const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; return (signTexCache[k] = t);
+}
+const STAIRS = LAYOUT.stairs.map(({ h, t }) => {
+  const side = HALLS[h].outerSide, wl = wallLat(h, side), sp = addSpot("stairs", h, t, side, { floor: HALLS[h].floor });
+  sp.glow.push(wallBox(h, t, wl + side * (LAYOUT.lockerDepth - 0.04), 1.4, 2.3, 0.08, 0x34495e, 1.15).material);
+  wallBox(h, t, wl + side * (LAYOUT.lockerDepth - 0.08), 0.5, 0.7, 0.03, 0xa8d8ff, 1.5);   // the little window
+  const p = hallPos(h, t, wl - side * 0.02 + side * (LAYOUT.lockerDepth - 0.12));
+  const sign = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.34), new THREE.MeshBasicMaterial({ map: signTex(sp.floor ? "STAIRS ↓ 1" : "STAIRS ↑ 2", "#1e8449", "#ffffff") }));
+  sign.position.set(p.x, 2.5, p.z); sign.rotation.y = Math.atan2(-side * HALLS[h].nx, -side * HALLS[h].nz); scene.add(sign);
+  return sp;
+});
+STAIRS.forEach((sp, i) => { sp.pair = STAIRS[(i + STAIRS.length / 2) % STAIRS.length]; });
+const spotFloor = (sp) => HALLS[sp.h].floor;
 for (const d of LAYOUT.doors) {
   const H = HALLS[d.h], side = d.side ?? (H.sideType[1] === "block" ? 1 : -1), wl = wallLat(d.h, side);
   const R = ROOM_TYPES[d.type ?? "classroom"];
@@ -982,9 +1050,9 @@ for (const ob of OBSTACLES) {
   const b = ob.box;
   box(b.x1 - b.x0, ob.height, b.z1 - b.z0, ob.color, (b.x0 + b.x1) / 2, ob.height / 2, (b.z0 + b.z1) / 2);
 }
-for (const t of [5, 19.5, 34]) {   // the main hall's bare walls get bulletin boards
-  wallBox(6, t, wallLat(6, 1) - 0.03, 2.2, 1.1, 0.05, 0xc49a6c, 1.7);
-  for (let k = 0; k < 4; k++) wallBox(6, t - 0.75 + k * 0.5, wallLat(6, 1) - 0.06, 0.32, 0.42, 0.02, pick([0xffffff, 0xfff1a8, 0xa8e6ff, 0xffc2d4]), 1.7 + (k % 2 ? 0.15 : -0.12));
+for (const [mh, t] of [[6, 5], [6, 19.5], [6, 34], [6 + BASE_HALLS, 9], [6 + BASE_HALLS, 34]]) {   // the main halls' bare walls get bulletin boards
+  wallBox(mh, t, wallLat(mh, 1) - 0.03, 2.2, 1.1, 0.05, 0xc49a6c, 1.7);
+  for (let k = 0; k < 4; k++) wallBox(mh, t - 0.75 + k * 0.5, wallLat(mh, 1) - 0.06, 0.32, 0.42, 0.02, pick([0xffffff, 0xfff1a8, 0xa8e6ff, 0xffc2d4]), 1.7 + (k % 2 ? 0.15 : -0.12));
 }
 
 // =====================================================================================
@@ -1026,6 +1094,7 @@ crowdHeads.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 crowdBodies.frustumCulled = crowdHeads.frustumCulled = false;
 scene.add(crowdBodies, crowdHeads);
 const DOOR_SPOTS = () => SPOTS.filter((sp) => sp.kind === "classroom");
+const floorDoors = (f) => SPOTS.filter((sp) => sp.kind === "classroom" && HALLS[sp.h].floor === f && !sp.jammed);
 {
   for (let i = 0; i < CFG.crowd.count; i++) {
     crowd.push({ shirt: new THREE.Color(pick(SHIRT_COLORS)), skin: new THREE.Color(pick(SKIN_COLORS)), h: 0, t: 0, to: 0, lat: 0, x: 0, z: 0, targetLat: 0, speed: 1, mode: "gone", leaveAt: 0, door: null,
@@ -1070,6 +1139,7 @@ function spawnStaff(typeKey, place) {
     post: place.post ?? null, mesh, cone, alert, edge, bubble, barkUntil: 0, barkAt: -99, wasSus: false };
   if (T.stationary) { st.x = place.x; st.z = place.z; st.facing = place.facing; st.state = "post"; }
   else { hallPos(st.h, st.t, 0, st); st.facing = hallHeading(st.h, st.to === HALLS[st.h].b ? 1 : -1); }
+  st.homeFloor = HALLS[place.h ?? 0].floor;
   staff.push(st);
   return st;
 }
@@ -1086,9 +1156,13 @@ function pickStaffPlace(typeKey) {
     doors.sort((a, b) => spotDist(b) - spotDist(a));
     const sp = pick(doors.slice(0, Math.max(1, Math.ceil(doors.length / 2))));
     const p = hallPos(sp.h, sp.t + 0.95, sp.wallLat - sp.side * 0.55);
-    return { post: sp, x: p.x, z: p.z, facing: Math.atan2(-sp.side * HALLS[sp.h].nx, -sp.side * HALLS[sp.h].nz) };
+    return { post: sp, h: sp.h, x: p.x, z: p.z, facing: Math.atan2(-sp.side * HALLS[sp.h].nx, -sp.side * HALLS[sp.h].nz) };
   }
   const n = staff.filter((s) => s.key === typeKey).length;
+  if (T.custodian) {   // one per floor: the first downstairs, the second upstairs
+    const h = Math.floor(Math.random() * BASE_HALLS) + (n % 2) * BASE_HALLS;
+    return { h, t: rand(0, HALLS[h].len), to: Math.random() < 0.5 ? HALLS[h].a : HALLS[h].b };
+  }
   const routeName = T.routes ? T.routes[n % T.routes.length] : null;
   let best = null, bestD = -1;
   for (let k = 0; k < 12; k++) {
@@ -1097,11 +1171,15 @@ function pickStaffPlace(typeKey) {
       const R = LAYOUT.routes[routeName].map(nodeIndex), rstep = Math.random() < 0.5 ? 1 : -1, i = Math.floor(Math.random() * R.length);
       const from = R[i], to = R[mod(i + rstep, R.length)], h = hallBetween(from, to);
       place = { h, t: rand(0, HALLS[h].len), to, route: R, ri: mod(i + rstep, R.length), rstep };
-    } else {
-      const h = Math.floor(Math.random() * HALLS.length);
+    } else {   // roamers: on whichever floor has fewer chasers right now
+      const per = [0, 1].map((f) => staff.filter((o) => chaser(o) && floorOf(o.x) === f).length);
+      const f = per[0] === per[1] ? Math.floor(Math.random() * 2) : per[0] < per[1] ? 0 : 1;
+      const h = Math.floor(Math.random() * BASE_HALLS) + f * BASE_HALLS;
       place = { h, t: rand(0, HALLS[h].len), to: Math.random() < 0.5 ? HALLS[h].a : HALLS[h].b };
     }
-    const p = hallPos(place.h, place.t, 0), d = Math.hypot(p.x - player.x, p.z - player.z);
+    const p = hallPos(place.h, place.t, 0);
+    let d = Math.hypot(p.x - player.x, p.z - player.z);
+    if (floorOf(p.x) !== floorOf(player.x)) d = 30 + Math.random();   // the other floor counts as far, but no farther than far
     if (d > bestD) { bestD = d; best = place; }
   }
   return best;
@@ -1254,7 +1332,7 @@ function interactTarget() {
   const al = nearestAlarm();
   if (al && !game.alarmPulled) { const p = hallPos(al.h, al.t, al.wl - al.side * 0.2, {}); return { kind: "alarm", a: al, x: p.x, y: 1.9, z: p.z, label: performance.now() < al.armT ? "PULL IT" : "fire alarm" }; }
   const sp = nearestSpot();
-  if (sp && (!spotBlocked(sp) || (keyOpens(sp) && hasKey()))) { const p = hallPos(sp.h, sp.t, sp.wallLat - sp.side * 0.1, {}); return { kind: "spot", sp, x: p.x, y: 2.0, z: p.z, label: spotBlocked(sp) ? "unlock 🔑" : "hide" }; }
+  if (sp && (!spotBlocked(sp) || (keyOpens(sp) && hasKey()))) { const p = hallPos(sp.h, sp.t, sp.wallLat - sp.side * 0.1, {}); return { kind: "spot", sp, x: p.x, y: 2.0, z: p.z, label: sp.kind === "stairs" ? (sp.floor ? "stairs down" : "stairs up") : spotBlocked(sp) ? "unlock 🔑" : "hide" }; }
   return null;
 }
 function doInteract() {
@@ -1443,7 +1521,7 @@ function startPassing(first) {
   const P = phaseLen("passing"), doors = DOOR_SPOTS();
   for (const c of crowd) {
     c.leaveAt = game.alarmT > 0 ? Infinity : rand(CFG.crowd.leaveStartFrac, CFG.crowd.leaveEndFrac) * P;   // nobody goes to class during a fire alarm
-    c.door = pick(doors.filter((d) => !d.jammed));
+    c.door = first || c.mode !== "gone" ? pick(floorDoors(floorOf(c.x))) : pick(doors.filter((d) => !d.jammed));   // (kids already out stay on their floor)
     if (!first) { c.mode = "spawning"; c.spawnAt = rand(0, CFG.crowd.floodSpreadSec); c.speed = rand(CFG.crowd.speedMin, CFG.crowd.speedMax); }
   }
   // staff for this period (the within-day curve); they stay on for the rest of the day
@@ -1951,7 +2029,7 @@ function updateCrowd(dt) {
       const [lo, hi] = latLimits(c.h, c.t);
       c.targetLat = rand(lo, hi);
       c.to = Math.random() < 0.5 ? HALLS[c.h].a : HALLS[c.h].b;
-      c.door = pick(DOOR_SPOTS());
+      c.door = pick(floorDoors(HALLS[d.h].floor));   // a class on the floor they came out on
       hallPos(c.h, c.t, c.lat, c);
     }
     if (c.mode === "exiting") {
@@ -2046,6 +2124,15 @@ function moveToward(st, tx, tz, speed, dt) {
 }
 // Head for a point anywhere in the school: straight there if it's in view, otherwise via the hall junctions.
 function navToward(st, tx, tz, speed, dt) {
+  const fa = floorOf(st.x), fb = floorOf(tx);
+  if (fa !== fb) {   // wrong floor: to the stairs first, then up (or down) them
+    const sp = nearestStairs(st.x, st.z, fa), f = spotFront(sp, {});
+    if (Math.hypot(f.x - st.x, f.z - st.z) < 0.8) {
+      const g = spotFront(sp.pair, {}); st.x = g.x; st.z = g.z;
+      const pr = hallProject(g.x, g.z); st.h = pr.h; st.t = pr.t; st.to = HALLS[pr.h].b; st.offHall = true;
+    } else navToward(st, f.x, f.z, speed, dt);
+    return Infinity;
+  }
   if (lineOfSight(st.x, st.z, tx, tz)) return moveToward(st, tx, tz, speed, dt);
   const me = hallProject(st.x, st.z), tg = hallProject(tx, tz);
   if (me.h === tg.h) return moveToward(st, tx, tz, speed, dt);
@@ -2061,6 +2148,10 @@ function navToward(st, tx, tz, speed, dt) {
 }
 // after a chase, staff walk back to the nearest point of their hall and pick their patrol up again
 function setReturnPoint(st) {
+  if (st.route && floorOf(NODES[st.route[0]].x) !== floorOf(st.x)) {   // followed you to the other floor: back to their own rounds
+    const R = st.route, i = Math.floor(Math.random() * R.length), j = mod(i + st.rstep, R.length), h = hallBetween(R[i], R[j]);
+    st.h = h; st.t = HALLS[h].len / 2; st.to = R[j]; st.ri = j; return;
+  }
   const pr = hallProject(st.x, st.z);
   st.h = pr.h; st.t = pr.t;
   st.to = Math.random() < 0.5 ? HALLS[pr.h].a : HALLS[pr.h].b;
@@ -2095,7 +2186,8 @@ function patrolChooser(st) {
     const R = st.route;
     if (node === R[st.ri]) st.ri = mod(st.ri + st.rstep, R.length);
     const target = R[st.ri];
-    return target === node ? randomOnward(w, node) : NEXT[node][target];
+    const next = NEXT[node][target];
+    return target === node || next < 0 ? randomOnward(w, node) : next;   // (next < 0: their route's on the other floor)
   };
 }
 
@@ -2331,8 +2423,10 @@ function updateCamera(dt) {
 const proj = new THREE.Vector3();
 function updateMarkers() {
   const w = window.innerWidth, h = window.innerHeight;
+  const pf = floorOf(player.x);
   for (const st of staff) {
     const chasing = isAlarmed(st);
+    if (floorOf(st.x) !== pf) { st.alert.style.display = st.edge.style.display = st.bubble.style.display = "none"; continue; }   // other floor
     const color = chasing ? "#ff4d4d" : st.suspicion > 0.05 ? "#ffa94d" : "#ffe066";
     proj.set(st.x, 2.0 * st.type.scale, st.z).applyMatrix4(camera.matrixWorldInverse);
     const behind = proj.z > -0.2;
@@ -2386,7 +2480,7 @@ function drawStamina() {
 let lastHud = "";
 function updateHud() {
   const left = Math.max(0, Math.ceil(phaseLen() - game.phaseT));
-  const label = `DAY ${game.day} · PERIOD ${game.period} · ${game.phase === "passing" ? "PASSING" : "SKIPPING"}`;
+  const label = `DAY ${game.day} · PERIOD ${game.period} · ${game.phase === "passing" ? "PASSING" : "SKIPPING"} · ${floorOf(player.x) ? "2F" : "1F"}`;
   const label2 = game.survival ? label.replace(/ · (PASSING|SKIPPING)$/, " · REBEL RUN") : label;
   const multTxt = [streakMult() > 1 ? `STREAK ×${streakMult()}` : "", game.nearMissT > 0 ? "NEAR MISS ×2" : "", game.survival ? `REBEL RUN ×${CFG.survival.scoreMult}` : ""].filter(Boolean).join(" · ");
   const key = multTxt + game.passShield + label2 + left + Math.floor(game.score) + "|" + game.lockerUses + "|" + game.strikes + game.highAlert + "|" + Math.round(game.heat) + "|" + Math.round(game.security);
@@ -2432,7 +2526,33 @@ function keyOpens(sp) {
   if (sp.kind === "closet") return sp.locked;
   return sp.kind === "restroom" && sp.used;
 }
+// ---- the stairs: out at the same stairwell on the other floor. Staff chasing you who saw you go follow you up (or down). ----
+let stairsCD = 0;
+function takeStairs(sp) {
+  if (game.state !== "playing" || stairsCD > game.time) return;
+  if (player.board) hopOff(true);
+  if (player.ride) endRide(false);
+  cancelAim();
+  const to = sp.pair, from = spotFront(sp, {}), f = spotFront(to, {});
+  const followers = staff.filter((st) => chaser(st) && (st.state === "chase" || st.state === "search" || st.state === "bust") && st.stunT <= 0 && !(st.plungerT > 0) &&
+    Math.hypot(st.x - from.x, st.z - from.z) < st.type.visionRange * CFG.detection.chaseSightRangeMult && lineOfSight(st.x, st.z, from.x, from.z));
+  player.x = f.x; player.z = f.z; player.vx = player.vz = 0;
+  const H = HALLS[to.h];
+  player.heading = Math.atan2(-to.side * H.nx, -to.side * H.nz); cam.yaw = player.heading; manualCamT = 0;
+  stairsCD = game.time + 1.2;
+  for (const st of followers) { st.state = "search"; st.searchT = -6; st.lastX = st.tx = f.x; st.lastZ = st.tz = f.z; st.camping = false; }
+  banner(`${FLOOR_NAMES[spotFloor(to)].toUpperCase()}<small>${followers.length ? `${followers.length === 1 ? "Someone's" : "They're"} right behind you!` : "Nobody saw you take the stairs."}</small>`, 1.8);
+  playBlip([300, 360, 420, 480], 0.05, "triangle", 0.05);
+  dareEvent("stairs", { floor: spotFloor(to) });
+}
+// where a staff member on the wrong floor heads: the nearest stairwell on their floor
+function nearestStairs(x, z, f) {
+  let best = null, bd = Infinity;
+  for (const sp of STAIRS) { if (sp.floor !== f) continue; const p = spotFront(sp, {}), d = Math.hypot(p.x - x, p.z - z); if (d < bd) { bd = d; best = sp; } }
+  return best;
+}
 function spotBlocked(sp) {   // why this spot can't be used right now ("" if it can)
+  if (sp.kind === "stairs") return "";
   if (sp.kind === "locker") return sp.busted ? "This locker's busted (you burst out of it)" : game.lockerUses > 0 ? "" : "No locker uses left this period";
   if (sp.kind === "classroom" && game.alarmT > 0) return "Fire alarm! Every classroom is locked";
   if (sp.closed) return "Out of order (somebody flooded it)";
@@ -2453,6 +2573,7 @@ function nearestSpot() {
 }
 
 function enterSpot(sp) {
+  if (sp.kind === "stairs") { takeStairs(sp); return true; }
   const why = spotBlocked(sp);
   if (why && keyOpens(sp) && hasKey()) {   // the master key
     const i = game.hotbar.findIndex((it) => it && it.key === "masterKey");
@@ -2842,6 +2963,7 @@ function updateSpotsUI() {
     if (!show) continue;
     let text, cls = "itag";
     if (sp.kind === "locker") text = sp.busted ? "Locker · busted" : blocked ? "Locker · none left" : "Locker";
+    else if (sp.kind === "stairs") text = sp.floor ? "Stairs ↓ 1st floor" : "Stairs ↑ 2nd floor";
     else if (sp.kind === "closet") text = sp.locked ? "Custodian's closet · locked 🔒" : blocked ? "Custodian's closet · used" : "Custodian's closet";
     else if (sp.kind === "restroom") text = sp.closed ? "Restroom · out of order" : blocked ? "Restroom · used" : game.dares.length < CFG.dares.max ? "Restroom · 📜" : "Restroom";
     else { text = `Room ${sp.room}${sp.R.label ? " · " + sp.R.label : ""} · ${TEACHER_TYPES[sp.teacher].label}${blocked ? (game.alarmT > 0 ? " · locked (fire alarm)" : sp.jammed ? " · jammed 🧹" : roomLocked(sp) ? " · locked" : sp.used ? " · used" : " · guarded") : ""}`; if (sp.teacher === "sub") cls += " sub"; }
@@ -3333,9 +3455,12 @@ function updateCustodian(st, dt, cover, stuck) {
     st.jobScanT = 0.6;
     const taken = new Set(staff.filter((o) => o !== st && o.job).map((o) => jobKey(o.job)));
     let best = null, bd = Infinity;
-    for (const j of custodianJobs()) { if (taken.has(jobKey(j))) continue; const d = Math.hypot(j.x - st.x, j.z - st.z); if (d < bd) { bd = d; best = j; } }
+    for (const j of custodianJobs()) {   // (only on his own floor)
+      if (taken.has(jobKey(j)) || floorOf(j.x) !== st.homeFloor) continue;
+      const d = Math.hypot(j.x - st.x, j.z - st.z); if (d < bd) { bd = d; best = j; }
+    }
     if (!best && st.closetCD <= 0 && CLOSETS.length) {   // nothing to clean: back to his closet for a bit
-      const cl2 = CLOSETS.reduce((a, b) => (spotDist(a) < spotDist(b) ? a : b)), f = spotFront(cl2, {});
+      const cl2 = CLOSETS.find((c) => spotFloor(c) === st.homeFloor) ?? CLOSETS[0], f = spotFront(cl2, {});
       best = { kind: "closet", sp: cl2, x: f.x, z: f.z, sec: 2.5, reach: 0.9 };
     }
     st.job = best; st.workT = 0;
@@ -3585,7 +3710,7 @@ function playTrumpet() {
 function summonStaff(x, z) {
   let n = 0;
   for (const o of staff) {
-    if (!chaser(o) || o.state === "chase" || o.state === "bust") continue;
+    if (!chaser(o) || o.state === "chase" || o.state === "bust" || floorOf(o.x) !== floorOf(x)) continue;   // (only your floor hears it)
     const d = Math.hypot(o.x - x, o.z - z);
     o.state = "search"; o.searchT = -Math.min(18, d / (o.type.chaseSpeed * 0.8)); o.suspicion = Math.max(o.suspicion, 0.6);
     o.lastX = o.tx = x; o.lastZ = o.tz = z; n++;
@@ -3704,7 +3829,7 @@ function tpSupport(x, z) {
   for (const ob of OBSTACLES) if (ob.h === pr.h && ob.side === side && Math.abs(pr.t - ob.t) < ob.halfLen + 0.1 && fromWall < ob.depth + 0.15) s = Math.max(s, ob.height);
   if (H.outerSide === side && fromWall < 0.2) {   // the row of lockers along the outer wall (and the hide lockers, a bit taller)
     const hide = LAYOUT.hideLockers.some((l) => l.h === pr.h && Math.abs(l.t - pr.t) < 0.5);
-    const gap = [...LAYOUT.restrooms, ...LAYOUT.closets].some((r) => r.h === pr.h && Math.abs(r.t - pr.t) < 1.2) || (LAYOUT.entrance.h === pr.h && Math.abs(LAYOUT.entrance.t - pr.t) < 2);
+    const gap = [...LAYOUT.restrooms, ...LAYOUT.closets, ...LAYOUT.stairs].some((r) => r.h === pr.h && Math.abs(r.t - pr.t) < 1.2) || (LAYOUT.entrance.h === pr.h && Math.abs(LAYOUT.entrance.t - pr.t) < 2);
     if (hide) s = Math.max(s, 2.1); else if (!gap) s = Math.max(s, 2.0);
   }
   return s;
@@ -4421,7 +4546,7 @@ function pullFireAlarm(a) {
   for (const st of staff) { stunStaff(st, F.stunSec, "flinch"); st.suspicion = 0; st.bubble.textContent = pick(["MY EARS!", "Is that real?!", "Not again..."]); st.barkUntil = performance.now() + 1800; }
   // students pour out of every classroom and stay out while it rings
   for (const c of crowd) {
-    if (c.mode === "gone" || c.mode === "spawning") { c.mode = "spawning"; c.spawnAt = game.phaseT + rand(0, 2.5); c.door = pick(DOOR_SPOTS()); c.speed = rand(CFG.crowd.speedMin, CFG.crowd.speedMax) * 1.3; }
+    if (c.mode === "gone" || c.mode === "spawning") { c.mode = "spawning"; c.spawnAt = game.phaseT + rand(0, 2.5); c.door = pick(DOOR_SPOTS()); c.speed = rand(CFG.crowd.speedMin, CFG.crowd.speedMax) * 1.3; }   // (comes out of any door)
     else if (c.mode === "toClass") { c.mode = "wander"; c.retargetT = 0; }
     c.leaveAt = Infinity;
   }
@@ -4450,7 +4575,7 @@ function updateAlarm(dt) {
   if (alarmBeepT <= 0) { alarmBeepT = 0.7; playBlip([880, 660], 0.16, "square", 0.045); }   // whoop-whoop
   if (game.alarmT <= 0) {   // false alarm. Everyone back to class
     stopAlarm();
-    for (const c of crowd) if (isActive(c)) { if (game.phase === "skipping") { c.mode = "toClass"; c.door = pick(DOOR_SPOTS()); } else c.leaveAt = game.phaseT + rand(2, 8); }
+    for (const c of crowd) if (isActive(c)) { if (game.phase === "skipping") { c.mode = "toClass"; c.door = pick(floorDoors(floorOf(c.x))); } else c.leaveAt = game.phaseT + rand(2, 8); }
     pa(null, "Okay, false alarm. Everyone back to class. And whoever did this: we WILL find you.", 4.5);
   }
 }
@@ -4935,6 +5060,8 @@ if (debug) {   // test-only helpers (only with ?debug in the URL)
       maxY: Math.round(Math.max(...tr.pts.map((p) => p.y)) * 100) / 100, minY: Math.round(Math.min(...tr.pts.map((p) => p.y)) * 100) / 100,
       snagged: tr.pts.filter((p) => p.held && p.y > 0.5).length })); },
     noticeTime(k, d, phase) { const ph = game.phase; game.phase = phase; const r = noticeRate(staff[k], d, 0); game.phase = ph; return Math.round(10 / r) / 10; },
+    stairs() { return STAIRS.map((sp) => ({ i: SPOTS.indexOf(sp), floor: sp.floor, h: sp.h, t: sp.t })); },
+    floor() { return floorOf(player.x); },
     banners() { return BANNERS.map((b) => { const p = hallPos(b.h, b.t, 0); return { h: b.h, t: b.t, x: p.x, z: p.z, text: b.text }; }); },
     stuck() { return { player: player.stuckT, staff: staff.map((s) => s.stuckT ?? 0) }; },
     lockers() { return SPOTS.map((sp, i) => ({ i, kind: sp.kind })).filter((x) => x.kind === "locker").map((x) => x.i); },
