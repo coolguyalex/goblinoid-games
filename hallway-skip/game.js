@@ -52,6 +52,7 @@
 // Step 48: the old sock and the moldy sandwich from lockers throw like spitballs and score when they hit someone.
 // Step 49: more stat effects: speed helps stamina, strength pushes through crowds (and 15+ carries a fifth item), stealth means fewer restroom checks.
 // Step 50: five more outfits (skater, theater kid, prep, pajama kid, band kid, with hats) and dreadlocks and a flat top.
+// Step 51: small phones: controls and HUD sized by screen height, items wrap to a second column, overlays scroll, How to play fixed.
 import * as THREE from "three";
 
 // =====================================================================================
@@ -2878,7 +2879,7 @@ function drawStamina() {
   lastStam = key;
   const el = $("staminaMeter");
   el.style.visibility = player.hidden ? "hidden" : "";   // out of the way of the hiding panel
-  el.querySelector("i").style.width = 190 * player.staminaMax + "px";
+  el.querySelector("i").style.width = `calc(clamp(100px, 26vw, 190px) * ${player.staminaMax})`;   // step 51: scales with the screen
   $("staminaFill").style.width = (v / player.staminaMax) * 100 + "%";
   el.classList.toggle("out", player.winded); el.classList.toggle("full", v >= player.staminaMax && !player.boostT);
   el.classList.toggle("boost", player.boostT > 0);

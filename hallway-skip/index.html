@@ -6,6 +6,8 @@
 <meta name="theme-color" content="#1d2230">
 <title>Hallway Skip</title>
 <style>
+  /* step 51: control sizes follow the screen height, so small phones aren't cramped */
+  :root { --slot: clamp(40px, 13.5vh, 54px); --gap: clamp(5px, 2vh, 8px); --btn: clamp(42px, 14vh, 54px); }
   html, body { margin: 0; height: 100%; overflow: hidden; background: #1d2230; color: #fff;
     font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; touch-action: none; }
@@ -15,15 +17,15 @@
   #hud { position: fixed; inset: 0; pointer-events: none; }
   #phase { position: absolute; top: max(10px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%);
     text-align: center; text-shadow: 0 2px 4px rgba(0,0,0,.6); }
-  #phase .label { font-size: 13px; letter-spacing: .14em; font-weight: 700; opacity: .9; }
-  #phase .timer { font-size: 30px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.1; }
+  #phase .label { font-size: clamp(10.5px, 3.4vh, 13px); letter-spacing: .14em; font-weight: 700; opacity: .9; }
+  #phase .timer { font-size: clamp(21px, 7.7vh, 30px); font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.1; }
   #phase.passing .label { color: #9fe0ff; } #phase.skipping .label { color: #ffd36b; } #phase.survival .label { color: #ff6b6b; }
   #score { position: absolute; top: max(8px, env(safe-area-inset-top)); right: max(14px, env(safe-area-inset-right)); text-align: right;
-    font-size: 32px; font-weight: 900; color: #ffd36b; font-variant-numeric: tabular-nums; line-height: 1; text-shadow: 0 2px 6px rgba(0,0,0,.75); }
+    font-size: clamp(23px, 8.2vh, 32px); font-weight: 900; color: #ffd36b; font-variant-numeric: tabular-nums; line-height: 1; text-shadow: 0 2px 6px rgba(0,0,0,.75); }
   #score::before { content: "SCORE"; display: block; font-size: 10px; letter-spacing: .16em; color: #fff; opacity: .75; margin-bottom: 1px; }
   #score.bump { animation: bump .25s ease-out; transform-origin: right center; }
   @keyframes bump { 40% { transform: scale(1.18); color: #fff3c4; } }
-  #uses { position: absolute; top: calc(max(10px, env(safe-area-inset-top)) + 42px); right: max(14px, env(safe-area-inset-right));
+  #uses { position: absolute; top: calc(max(10px, env(safe-area-inset-top)) + clamp(33px, 10.8vh, 42px)); right: max(14px, env(safe-area-inset-right));
     font-size: 12px; font-weight: 800; letter-spacing: .08em; color: #b9e3c6; text-shadow: 0 2px 4px rgba(0,0,0,.6); }
   #uses.out { color: #ff8f8f; }
   #mult { position: absolute; top: calc(max(10px, env(safe-area-inset-top)) + 52px); left: 50%; transform: translateX(-50%); white-space: nowrap;
@@ -70,14 +72,16 @@
   #pa .who { font-size: 10px; font-weight: 800; letter-spacing: .14em; color: #ffd36b; display: block; }
   #pa.quiet { border-left-color: #8ea3c0; } #pa.quiet .who { display: none; }
   #fps { position: absolute; bottom: 6px; right: 8px; font: 11px ui-monospace, monospace; opacity: .7; }
-  #banner { position: absolute; top: 28%; left: 0; right: 0; text-align: center; font-size: 30px; font-weight: 900;
+  #banner { position: absolute; top: 28%; left: 0; right: 0; text-align: center; font-size: clamp(20px, 7.7vh, 30px); font-weight: 900;
     letter-spacing: .04em; text-shadow: 0 3px 8px rgba(0,0,0,.7); opacity: 0; transition: opacity .25s; padding: 0 16px; }
   #banner small { display: block; font-size: 15px; font-weight: 600; opacity: .9; margin-top: 4px; }
   #banner.show { opacity: 1; }
 
   #toast { position: absolute; bottom: 18%; left: 50%; transform: translateX(-50%); padding: 7px 14px; border-radius: 10px;
-    background: rgba(20,24,36,.8); font-size: 14px; font-weight: 600; white-space: nowrap; opacity: 0; transition: opacity .2s; }
+    background: rgba(20,24,36,.8); font-size: 14px; font-weight: 600; opacity: 0; transition: opacity .2s;
+    width: max-content; max-width: calc(100vw - 2 * var(--btn) - 60px); text-align: center; }   /* step 51: long lines wrap instead of running off a small screen */
   #toast.show { opacity: 1; }
+  body:has(#hidePanel:not([hidden])) #toast { bottom: auto; top: 24%; }   /* step 51: above the hiding panel, not behind it */
 
   /* name tags over hiding spots */
   .itag { position: absolute; transform: translate(-50%, -100%); padding: 3px 9px; border-radius: 8px; white-space: nowrap;
@@ -127,11 +131,11 @@
 
   /* hotbar (right edge) and aiming */
   #hotbar { position: fixed; right: max(10px, env(safe-area-inset-right)); top: 50%; transform: translateY(-50%); display: flex;
-    flex-direction: column; gap: 8px; z-index: 4; }
-  #hotbar .slot { width: 54px; height: 54px; border-radius: 14px; border: 2px solid rgba(255,255,255,.35); background: rgba(20,24,36,.72);
-    font-size: 27px; position: relative; color: #fff; padding: 0; touch-action: none; cursor: pointer; }
-  /* step 49: a strong kid's fifth slot: a bit smaller and lower on short screens, clear of the score */
-  @media (max-height: 500px) { #hotbar.five { gap: 6px; top: calc(50% + 26px); } #hotbar.five .slot { width: 48px; height: 48px; font-size: 24px; } }
+    flex-direction: column; gap: var(--gap); z-index: 4;
+    max-height: calc(100vh - var(--btn) - 80px); flex-wrap: wrap-reverse; align-content: flex-start; }   /* step 51: too tall? the rest wrap into a column to the left */
+  #hotbar .slot { width: var(--slot); height: var(--slot); border-radius: 14px; border: 2px solid rgba(255,255,255,.35); background: rgba(20,24,36,.72);
+    font-size: calc(var(--slot) * .5); position: relative; color: #fff; padding: 0; touch-action: none; cursor: pointer; }
+  #hotbar.five { --slot: clamp(36px, 11.5vh, 54px); --gap: clamp(4px, 1.5vh, 8px); }   /* a strong kid's fifth slot: a little smaller to fit */
   #hotbar .slot.empty { opacity: .4; }
   #hotbar .slot.active { border-color: #ffd36b; box-shadow: 0 0 0 3px rgba(255,211,107,.5); }
   #hotbar .slot small { position: absolute; right: 4px; bottom: 1px; font-size: 12px; font-weight: 800; }
@@ -150,7 +154,7 @@
   #staminaMeter { position: fixed; left: 50%; bottom: max(12px, env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 2;
     display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 900; letter-spacing: .1em; text-shadow: 0 1px 2px rgba(0,0,0,.8);
     pointer-events: none; transition: opacity .4s; white-space: nowrap; }
-  #staminaMeter i { position: relative; width: 190px; height: 14px; border-radius: 7px; background: rgba(0,0,0,.4);
+  #staminaMeter i { position: relative; width: clamp(100px, 26vw, 190px); height: 14px; border-radius: 7px; background: rgba(0,0,0,.4);
     box-shadow: inset 0 0 0 2px rgba(255,255,255,.35); overflow: hidden; transition: width .5s; }
   #staminaMeter b { position: absolute; left: 0; top: 0; bottom: 0; width: 100%; background: #8ef0a0; border-radius: 7px; }
   #staminaMeter.out b { background: #ff8f8f; }
@@ -166,7 +170,7 @@
   #stickGuide { position: fixed; left: calc(max(16px, env(safe-area-inset-left)) + 40px); bottom: calc(max(16px, env(safe-area-inset-bottom)) + 34px);
     pointer-events: none; text-align: center; font-size: 11px; font-weight: 900; letter-spacing: .14em; text-transform: uppercase; opacity: .7; z-index: 1; }
   #stickGuide[hidden], #lookGuide[hidden] { display: none; }
-  #stickGuide .gBase { width: 110px; height: 110px; border-radius: 50%; border: 2px dashed rgba(255,255,255,.45); background: rgba(255,255,255,.06);
+  #stickGuide .gBase { width: clamp(76px, 28vh, 110px); height: clamp(76px, 28vh, 110px); border-radius: 50%; border: 2px dashed rgba(255,255,255,.45); background: rgba(255,255,255,.06);
     display: flex; align-items: center; justify-content: center; margin-bottom: 4px; }
   #stickGuide .gKnob { width: 46px; height: 46px; border-radius: 50%; background: rgba(255,255,255,.3); animation: nudge 2.4s ease-in-out infinite; }
   @keyframes nudge { 0%, 100% { transform: none; } 25% { transform: translateY(-18px); } 50% { transform: none; } 75% { transform: translateX(18px); } }
@@ -175,10 +179,10 @@
   #pauseBtn { position: fixed; left: max(10px, env(safe-area-inset-left)); bottom: max(10px, env(safe-area-inset-bottom)); width: 38px; height: 38px;
     border-radius: 50%; border: 2px solid rgba(255,255,255,.3); background: rgba(20,24,36,.6); color: #fff; font-size: 15px; padding: 0; z-index: 4; display: none; }
   @media (pointer: coarse) { #pauseBtn { display: block; } }
-  #jumpBtn { position: fixed; right: calc(max(10px, env(safe-area-inset-right)) + 128px); bottom: max(12px, env(safe-area-inset-bottom)); z-index: 4;
+  #jumpBtn { position: fixed; right: calc(max(10px, env(safe-area-inset-right)) + 2 * var(--btn) + 20px); bottom: max(12px, env(safe-area-inset-bottom)); z-index: 4;
     padding: 12px 18px; border: 0; border-radius: 999px; background: #ffd36b; color: #1d2230; font: 900 16px system-ui, sans-serif; box-shadow: 0 3px 10px rgba(0,0,0,.4); }
   #jumpBtn[hidden] { display: none; }
-  #hoodBtn { position: fixed; right: calc(max(10px, env(safe-area-inset-right)) + 64px); bottom: max(10px, env(safe-area-inset-bottom)); width: 54px; height: 54px;
+  #hoodBtn { position: fixed; right: calc(max(10px, env(safe-area-inset-right)) + var(--btn) + 10px); bottom: max(10px, env(safe-area-inset-bottom)); width: var(--btn); height: var(--btn);
     border-radius: 50%; border: 2px solid rgba(255,255,255,.35); background: rgba(20,24,36,.72); color: #fff; font: 800 15px system-ui, sans-serif; z-index: 4; padding: 0; display: none; touch-action: none; }
   #hoodBtn.on { border-color: #b8a6ff; background: rgba(150,130,255,.35); } #hoodBtn.cd { opacity: .45; }
   @media (pointer: coarse) { #hoodBtn { display: block; } }
@@ -217,8 +221,8 @@
   .lookSlider span { width: 3.2em; text-align: center; opacity: .85; font-size: 15px; } .lookSlider input { flex: 1; accent-color: #ffd36b; }
   .lookSlider em { position: absolute; left: 50%; top: -16px; line-height: 0; transform: translateX(-50%); font-style: normal; font-size: 14px; opacity: .7; }
   @media (max-width: 560px) { .charGrid { grid-template-columns: 1fr; } .kidCol { position: static; } #kidCanvas { height: 220px; } }
-  #sprintBtn { position: fixed; right: max(10px, env(safe-area-inset-right)); bottom: max(10px, env(safe-area-inset-bottom)); width: 54px; height: 54px;
-    border-radius: 50%; border: 2px solid rgba(255,255,255,.35); background: rgba(20,24,36,.72); font-size: 24px; z-index: 4; touch-action: none; display: none; padding: 0; }
+  #sprintBtn { position: fixed; right: max(10px, env(safe-area-inset-right)); bottom: max(10px, env(safe-area-inset-bottom)); width: var(--btn); height: var(--btn);
+    border-radius: 50%; border: 2px solid rgba(255,255,255,.35); background: rgba(20,24,36,.72); font-size: calc(var(--btn) * .44); z-index: 4; touch-action: none; display: none; padding: 0; }
   #sprintBtn.on { border-color: #8ef0a0; background: rgba(142,240,160,.3); }
   @media (pointer: coarse) { #sprintBtn { display: block; } }
   #aim { position: fixed; inset: 0; background: rgba(10,12,20,.45); z-index: 3; touch-action: none; }
@@ -238,7 +242,7 @@
   .overlay { z-index: 6; position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
     background: rgba(12, 14, 22, .72); padding: 16px; text-align: center; cursor: pointer; }
   .overlay[hidden] { display: none; }
-  .overlay h1 { margin: 0 0 4px; font-size: clamp(34px, 7vw, 58px); letter-spacing: .03em; }
+  .overlay h1 { margin: 0 0 4px; font-size: clamp(26px, min(7vw, 12vh), 58px); letter-spacing: .03em; }
   .overlay p { margin: 6px auto; max-width: 30em; line-height: 1.45; opacity: .9; }
   .overlay .tag { display: inline-block; font-size: 12px; letter-spacing: .14em; text-transform: uppercase;
     opacity: .65; margin-bottom: 10px; }
@@ -265,11 +269,13 @@
   .overlay.scroll { align-items: flex-start; overflow-y: auto; cursor: default; -webkit-overflow-scrolling: touch; touch-action: pan-y; }
   .overlay.scroll .aboutBox { margin: auto; max-width: 36em; padding: 4px 34px 12px; font-size: 14px; }
   .overlay.scroll .aboutBox p { margin: 5px auto; line-height: 1.4; }
-  #about { background: rgba(18, 21, 31, .97); z-index: 3; }
+  #about { background: rgba(18, 21, 31, .97); z-index: 7; }   /* above the title screen it opens from */
   #aboutX { position: fixed; top: max(10px, env(safe-area-inset-top)); right: max(12px, env(safe-area-inset-right)); width: 40px; height: 40px;
     border-radius: 50%; border: 0; background: rgba(255,255,255,.14); color: #fff; font: 700 22px system-ui, sans-serif; cursor: pointer; }
   .overlay h2 { margin: 0 0 6px; font-size: 24px; }
   .overlay { overflow-y: auto; }
+  /* step 51: center the content, but when it's taller than the screen, start at the top and scroll (plain centering cuts off the top) */
+  .overlay > div { margin: auto 0; }
   #strike h1 { font-size: clamp(26px, 5vw, 40px); }
   #strike.warning h1 { color: #ffd36b; } #strike.office h1 { color: #ff8f5c; }
   #strikeDots { display: flex; gap: 8px; justify-content: center; margin: 8px 0; }
@@ -279,6 +285,23 @@
   @media (orientation: portrait) and (pointer: coarse) { #rotate { display: flex; } }
   #error { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; padding: 24px;
     text-align: center; background: #1d2230; z-index: 10; }
+  /* step 51: short screens (small phones sideways) */
+  @media (max-height: 430px) {
+    .overlay { padding: 10px 16px; }
+    .overlay .go { padding: 9px 18px; }
+    .overlay .buttons { gap: 8px; margin-top: 8px; }
+    .overlay p { margin: 4px auto; }
+    .overlay .tag { margin-bottom: 4px; }
+    #pa { font-size: 11.5px; padding: 5px 8px; max-width: min(32vw, 280px); }
+    #dares { font-size: 10.5px; }
+    #hidePanel .box { padding: 7px 12px; width: min(440px, calc(100% - 2 * var(--btn) - 40px)); }
+    #hpTitle { font-size: 14px; } #hpLine, #hpWarn { font-size: 12px; } .hpBar { margin: 5px 0; }
+    #hpLoot button { padding: 5px 8px; font-size: 12px; } #hpLeave { margin-top: 6px; padding: 7px 18px; }
+    #hidePanel .hint { display: none; }
+    #staminaMeter span { display: none; }
+    .opt { margin: 8px auto; padding: 8px 12px; } .statRow { margin: 8px auto; padding: 8px 12px; }
+    .pop { font-size: 15px; }
+  }
 </style>
 </head>
 <body>
@@ -336,7 +359,7 @@
 
 <div class="overlay" id="title">
   <div>
-    <span class="tag">prototype · build step 50</span>
+    <span class="tag">prototype · build step 51</span>
     <h1>Hallway Skip</h1>
     <p>Skip class. Don't get caught.</p>
     <div class="buttons">
