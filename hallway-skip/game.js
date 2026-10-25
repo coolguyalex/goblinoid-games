@@ -26,6 +26,7 @@
 // Step 25: easier controls: an options menu (saved), auto-aim on by default (tap an item to throw it; banana peels go behind you),
 //          a joystick guide on phones, a pause button; a bigger stamina bar, and the energy drink (twice the stamina for a minute).
 // Step 26: toilet paper drifts down like a streamer and snags on things (locker tops, the trophy case, new spirit-banner wires).
+// Step 27: staff take longer to go from suspicious (?) to chasing (!), and much longer during passing periods.
 import * as THREE from "three";
 
 // =====================================================================================
@@ -106,11 +107,11 @@ const CFG = {
   },
 
   detection: {
-    suspicionRate: 1.7,           // meter per second at point-blank range, no cover
+    suspicionRate: 1.1,           // meter per second at point-blank range, no cover (was 1.7 before step 27)
     farRateFrac: 0.35,            // fraction of that rate at the edge of vision range
     decayRate: 0.6,               // meter drain per second when not seen
     instantRange: 1.3,            // closer than this and in the cone = spotted immediately
-    passingBeatMult: 2.6,         // passing period: "did I just see that?" takes this much longer
+    passingBeatMult: 4.5,         // passing period: "did I just see that?" takes this much longer (was 2.6 before step 27)
     suspiciousSlow: 0.25,         // patrol speed multiplier while squinting at you
     chaseSightRangeMult: 1.4,     // once chasing, they track you this much farther (no cone needed)
     catchRadius: 0.85,
@@ -4161,6 +4162,7 @@ if (debug) {   // test-only helpers (only with ?debug in the URL)
     trailInfo() { return tpTrails.map((tr) => ({ n: tr.pts.length, done: tr.done, held: tr.pts.filter((p) => p.held).length,
       maxY: Math.round(Math.max(...tr.pts.map((p) => p.y)) * 100) / 100, minY: Math.round(Math.min(...tr.pts.map((p) => p.y)) * 100) / 100,
       snagged: tr.pts.filter((p) => p.held && p.y > 0.5).length })); },
+    noticeTime(k, d, phase) { const ph = game.phase; game.phase = phase; const r = noticeRate(staff[k], d, 0); game.phase = ph; return Math.round(10 / r) / 10; },
     banners() { return BANNERS.map((b) => { const p = hallPos(b.h, b.t, 0); return { h: b.h, t: b.t, x: p.x, z: p.z, text: b.text }; }); },
     stuck() { return { player: player.stuckT, staff: staff.map((s) => s.stuckT ?? 0) }; },
     lockers() { return SPOTS.map((sp, i) => ({ i, kind: sp.kind })).filter((x) => x.kind === "locker").map((x) => x.i); },
