@@ -226,6 +226,7 @@ const CFG = {
 
   rooms: {
     grabSec: 1.5,                 // grabbing an item off a desk eats this much of your hiding time (subs: see TEACHER_TYPES)
+    minStaySec: 4,                // step 56: sneak back into a room and you get the rest of its clock, but at least this long
     raidLockPeriods: 2,           // grab anything from a room and its door is locked for this many periods (no restock either)
     hideCheck: {                  // step 44: sneaking in, and each grab, is a roll against the teacher's hideChance
       grabRisk: 0.5,              // step 47: a grab is half as risky as walking in...
@@ -1942,7 +1943,7 @@ function resetGame(save = null) {
 function resetSpotsForPeriod() {
   game.lockerUses = CFG.hiding.lockerUsesPerPeriod;
   for (const sp of SPOTS) {
-    sp.used = false; sp.rummaged = false; sp.tpTaken = false;
+    sp.used = false; sp.stayT = 0; sp.rummaged = false; sp.tpTaken = false;
     if (sp.kind === "closet") sp.taken.clear();   // (restocked, but still locked if you stole from it today)
     if (sp.kind === "classroom") {
       // raided last period: locked for a while, and nothing gets restocked until it opens again
@@ -3147,7 +3148,7 @@ function enterSpot(sp) {
     consumeSlot(i); toast("🔑 The staff key works.");
     playBlip([1200, 900], 0.05, "square", 0.05);
   } else if (why) { toast(why); playBlip([180], 0.08, "square", 0.04); return false; }
-  if (sp.kind === "locker") game.lockerUses--; else sp.used = true;
+  if (sp.kind === "locker") game.lockerUses--; else if (sp.kind !== "classroom") sp.used = true;   // step 56: classrooms only lock once they kick you out
   if (player.board) hopOff(true);
   const f = spotFront(sp, {});
   player.hidden = sp; player.hideT = 0; player.hideArmed = false; player.pushT = 0; player.pushSpot = null;
@@ -3185,6 +3186,7 @@ function exitSpot(booted, msg = "", title = "BOOTED!") {
   const sp = player.hidden;
   if (!sp) return;
   player.hidden = null; player.mesh.visible = true; player.pushT = 0;
+  if (sp.kind === "classroom") { sp.stayT = (sp.stayT || 0) + player.hideT; if (booted) sp.used = true; }   // sneaking back in keeps the teacher's clock running
   const f = hallPos(sp.h, sp.t, sp.frontLat - sp.side * 0.1);
   player.x = f.x; player.z = f.z;
   const H = HALLS[sp.h];
@@ -3214,7 +3216,7 @@ function checkWalkIn(mx, mz, dt) {
   } else { player.pushSpot = target; player.pushT = 0; }
 }
 
-function hideLimit(sp) { return sp.kind === "classroom" ? TEACHER_TYPES[sp.teacher].bootSec : sp.T.maxStaySec; }
+function hideLimit(sp) { return sp.kind === "classroom" ? Math.max(CFG.rooms.minStaySec, TEACHER_TYPES[sp.teacher].bootSec - (sp.stayT || 0)) : sp.T.maxStaySec; }
 function updateHiding(dt) {
   const sp = player.hidden;
   player.hideT += dt;
