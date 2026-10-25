@@ -1,4 +1,4 @@
-// Hallway Skip — build step 20 prototype.
+// Hallway Skip — build step 21 prototype.
 // Step 1: hallway, joystick, a hall monitor that chases, a crowd that thins, and the bell.
 // Step 2: tap-to-interact and hiding spots: lockers, restrooms, classrooms (teacher and sub boot timers).
 // Step 3: security guard, the three-strike ladder, and the PA announcer.
@@ -19,6 +19,7 @@
 // Step 18: no restroom sweep timer: staff walking past a restroom check it about half the time ("Hey, do you kids have a pass?").
 // Step 19: dares from the kid in the restroom (hold two at a time; some are tied to a period, a hall, or a combo).
 // Step 20: "they found you, run for it!", farther spitballs, slower heat (and a bigger heat bar), a bigger score, survival mode renamed Rebel Run.
+// Step 21: loot by room and rarity (specialty items only from their room; hall passes and staff keys are rare finds), the office always has a pass and a key but its alarm calls everyone.
 import * as THREE from "three";
 
 // =====================================================================================
@@ -139,7 +140,7 @@ const CFG = {
   // Lockers: hide in one, and you can rummage through it once per period. It's a blind grab: you might get junk.
   lockers: {
     rummageSec: 2,                // eats this much of your hiding time
-    loot: [["spitball", 4], ["gum", 4], ["paperAirplane", 3], ["whoopee", 2], ["bananaPeel", 2], ["sprayPaint", 1], ["toiletPaper", 1],
+    loot: [["spitball", 4], ["gum", 4], ["paperAirplane", 3], ["whoopee", 2], ["bananaPeel", 2],
            ["oldSock", 3], ["sandwich", 3], ["homework", 3]],
   },
 
@@ -406,17 +407,23 @@ const TEACHER_TYPES = {
              stayLine: "The secretary is on hold with the district. You duck behind the counter.", bootLine: "\"Do you have an appointment? No? Out.\"" },
 };
 // Rooms as shops: what's lying on the desks, by room type. A new room type is one line.
+// Specialty items only come from their room (spray paint: art, balls and frisbees: the gym, stink bombs and slime: science).
+// Ordinary classrooms have the everyday stuff, with rare finds: wheelie chairs are uncommon, hall passes very rare,
+// a staff key extremely rare. always: put on the desk every time the room restocks (art always has spray paint).
 const ROOM_TYPES = {
-  classroom: { label: "", loot: [["spitball", 4], ["paperAirplane", 4], ["gum", 3], ["bananaPeel", 1]], count: [1, 2] },
-  science:   { label: "Science lab", plaque: 0x2ecc71, loot: [["stinkBomb", 4], ["slime", 3], ["whoopee", 2], ["bananaPeel", 1]], count: [1, 2] },
-  art:       { label: "Art room", plaque: 0xe67e22, loot: [["sprayPaint", 4], ["wheelieChair", 3], ["paperAirplane", 2], ["gum", 1]], count: [1, 2] },
+  classroom: { label: "", count: [1, 2],
+               loot: [["spitball", 5], ["paperAirplane", 5], ["gum", 4], ["wheelieChair", 1.2], ["hallPass", 0.35], ["masterKey", 0.12]] },
+  science:   { label: "Science lab", plaque: 0x2ecc71, loot: [["stinkBomb", 4], ["slime", 4]], count: [1, 2] },
+  art:       { label: "Art room", plaque: 0xe67e22, always: ["sprayPaint"], count: [1, 1],
+               loot: [["paperAirplane", 3], ["gum", 3], ["spitball", 2], ["wheelieChair", 1]] },
   gym:       { label: "Gym", plaque: 0xe74c3c, loot: [["basketball", 4], ["football", 3], ["frisbee", 3]], count: [1, 2] },
-  office:    { label: "Main office", plaque: 0x34495e, door: 0x4a3426, staff: "office", count: [2, 3],
-               loot: [["wheelieChair", 2], ["whoopee", 2], ["gum", 2], ["bananaPeel", 2]],
-               // once-per-day specials: the confiscated drawer (points), a fake hall pass, and the master key
-               specials: { prize: { icon: "🗄️", label: "Raid the confiscated-stuff drawer", points: 300 },
+  // The office always has a hall pass and the staff key (restocked whenever the door's open again), but the secretary
+  // is jumpy: if she catches you, she calls every staff member to the office and your heat jumps.
+  office:    { label: "Main office", plaque: 0x34495e, door: 0x4a3426, staff: "office", count: [0, 0], loot: [], alarmHeat: 25,
+               // specials: the confiscated drawer (points, once a day), a fake hall pass and the staff key (back whenever the room restocks)
+               specials: { prize: { icon: "🗄️", label: "Raid the confiscated-stuff drawer", points: 300, daily: true },
                            fakePass: { icon: "🎫", label: "Swipe a hall pass" },
-                           masterKey: { icon: "🔑", label: "Lift the master key" } } },
+                           masterKey: { icon: "🔑", label: "Lift the staff key" } } },
 };
 
 // Items are data. kind: "throw" (flick it), "ride" (flick to launch yourself), "instant" (tap to use).
@@ -461,7 +468,8 @@ const ITEM_TYPES = {
                    radius: 0.6, maxSticks: 3, stickStaffSec: 4, stickStudentSec: 2.5, stickPlayerSec: 1.5, staffPoints: 120, studentPoints: 30 },
   loveNote:      { label: "Love note", icon: "💌", kind: "note" },   // for the love-note dare: can't be thrown, just delivered
   sprayPaint:    { label: "Spray paint", icon: "🎨", kind: "spray", uses: 3, points: 100, wallRange: 1.7 },   // art rooms only
-  masterKey:     { label: "Master key", icon: "🔑", kind: "key", uses: 3 },   // the principal's office only: opens locked or used doors
+  masterKey:     { label: "Staff key", icon: "🔑", kind: "key", uses: 3 },
+  hallPass:      { label: "Hall pass", icon: "🎫", kind: "pass" },   // grab it and it's your fake pass (cancels your next catch)
   wheelieChair:  { label: "Wheelie chair", icon: "🪑", kind: "ride", rideSpeed: 9.5, maxRideSec: 3, dazeSec: 1.5, leftoverSec: 3,
                    studentPoints: 40 },
   gum:           { label: "Gum", icon: "🍬", kind: "instant", points: 100, line: "You stick gum under the water fountain. Gross. +havoc" },
@@ -1209,8 +1217,9 @@ function resetSpotsForPeriod() {
       // raided last period: locked for a while, and nothing gets restocked until it opens again
       if (sp.raided) { sp.lockedUntil = game.period + CFG.rooms.raidLockPeriods - 1; sp.raided = false; }
       if (!roomLocked(sp)) {   // restock the desks
-        const [lo, hi] = sp.R.count, n = lo + Math.floor(Math.random() * (hi - lo + 1)) + (sp.teacher === "sub" ? 1 : 0);
-        sp.loot = Array.from({ length: n }, () => pickWeighted(sp.R.loot));
+        const [lo, hi] = sp.R.count, n = lo + Math.floor(Math.random() * (hi - lo + 1)) + (sp.teacher === "sub" && sp.R.loot.length ? 1 : 0);
+        sp.loot = [...(sp.R.always ?? []), ...Array.from({ length: n }, () => pickWeighted(sp.R.loot))];
+        for (const [id, X] of Object.entries(sp.R.specials ?? {})) if (!X.daily) sp.taken.delete(id);
       }
       sp.lootVer = (sp.lootVer ?? 0) + 1;
       sp.lockSign.visible = roomLocked(sp);
@@ -2022,7 +2031,7 @@ function update(dt) {
 // =====================================================================================
 const roomLocked = (sp) => sp.kind === "classroom" && game.period <= sp.lockedUntil;
 const hasKey = () => game.hotbar.some((it) => it && it.key === "masterKey");
-// the master key opens doors that are locked or already used (not a teacher standing in the doorway)
+// the staff key opens doors that are locked or already used (not a teacher standing in the doorway)
 function keyOpens(sp) {
   if (game.alarmT > 0 || sp.closed) return false;   // not during a fire alarm, and not a flooded bathroom
   if (sp.kind === "classroom") return (roomLocked(sp) || sp.used) && !staff.some((s) => s.post === sp);
@@ -2049,7 +2058,7 @@ function enterSpot(sp) {
   const why = spotBlocked(sp);
   if (why && keyOpens(sp) && hasKey()) {   // the master key
     const i = game.hotbar.findIndex((it) => it && it.key === "masterKey");
-    consumeSlot(i); toast("🔑 The master key works.");
+    consumeSlot(i); toast("🔑 The staff key works.");
     playBlip([1200, 900], 0.05, "square", 0.05);
   } else if (why) { toast(why); playBlip([180], 0.08, "square", 0.04); return false; }
   if (sp.kind === "locker") game.lockerUses--; else sp.used = true;
@@ -2190,7 +2199,7 @@ function renderLoot(sp) {
     b.addEventListener("click", () => grabLoot(i));
     lootEl.appendChild(b);
   });
-  for (const [id, X] of Object.entries(sp.R.specials ?? {})) {   // once-per-day specials (the principal's office)
+  for (const [id, X] of Object.entries(sp.R.specials ?? {})) {   // the office specials
     if (sp.taken.has(id)) continue;
     const b = document.createElement("button"); b.type = "button"; b.className = "prize";
     const note = id === "prize" ? `+${X.points} · ` : id === "fakePass" && game.passShield ? "you have one · " : "";
@@ -2200,6 +2209,19 @@ function renderLoot(sp) {
   }
   if (!lootEl.children.length) lootEl.innerHTML = `<span class="none">Nothing left on the desks.</span>`;
 }
+// Take an item (desk, special, locker): a hall pass becomes your fake pass, a second staff key tops up the one you have.
+function takeItem(key) {
+  if (ITEM_TYPES[key].kind === "pass") {
+    if (game.passShield) { toast("You already have a fake pass."); return false; }
+    game.passShield = true; popup("🎫 Hall pass! Your next catch doesn't count.", "item"); playBlip([523, 659, 784], 0.08, "triangle", 0.06);
+    return true;
+  }
+  if (key === "masterKey") {
+    const k = game.hotbar.find((it) => it && it.key === "masterKey");
+    if (k) { k.uses = ITEM_TYPES.masterKey.uses; renderHotbar(); popup("🔑 Staff key (topped up)", "item"); return true; }
+  }
+  return addItem(key);
+}
 function grabLoot(i) {
   const sp = player.hidden;
   if (!sp || sp.kind !== "classroom" || game.state !== "playing") return;
@@ -2207,17 +2229,10 @@ function grabLoot(i) {
   if (typeof i === "string") {   // a special
     if (sp.taken.has(i)) return;
     if (i === "prize") havoc("rarePrize", sp.R.specials.prize.points, "Confiscated stash!", { x: player.x, z: player.z });
-    else if (i === "fakePass") {
-      if (game.passShield) { toast("You already have a fake pass."); return; }
-      game.passShield = true; popup("🎫 Fake pass! Your next catch doesn't count.", "item"); playBlip([523, 659, 784], 0.08, "triangle", 0.06);
-    } else if (i === "masterKey") {   // already have one: it's topped back up instead of taking a second slot
-      const k = game.hotbar.find((it) => it && it.key === "masterKey");
-      if (k) { k.uses = ITEM_TYPES.masterKey.uses; renderHotbar(); popup("🔑 Master key (topped up)", "item"); }
-      else if (!addItem("masterKey")) return;
-    }
+    else if (!takeItem(i === "fakePass" ? "hallPass" : "masterKey")) return;
     sp.taken.add(i);
   } else {
-    if (!addItem(sp.loot[i])) return;   // inventory full: nothing happens
+    if (!takeItem(sp.loot[i])) return;   // inventory full (or already have a pass): nothing happens
     sp.loot.splice(i, 1);
   }
   sp.raided = true;   // locked for a while from the next bell
@@ -2237,7 +2252,7 @@ function rummageLocker() {
   const sp = player.hidden;
   if (!sp || sp.kind !== "locker" || sp.rummaged || game.state !== "playing") return;
   const key = pickWeighted(CFG.lockers.loot);
-  if (!addItem(key)) return;   // inventory full: nothing happens
+  if (!takeItem(key)) return;   // inventory full: nothing happens
   sp.rummaged = true;
   player.hideT += CFG.lockers.rummageSec;
   if (ITEM_TYPES[key].kind === "junk") toast(`${ITEM_TYPES[key].icon} Junk. Great. (Select it to toss it.)`);
@@ -2251,6 +2266,13 @@ function roomBackfire(sp) {
   const free = staff.filter((s) => !s.type.stationary && s.state !== "chase" && s.state !== "bust")
     .sort((a, b) => (b.key === "securityGuard") - (a.key === "securityGuard") || Math.hypot(a.x - f.x, a.z - f.z) - Math.hypot(b.x - f.x, b.z - f.z));
   const st = free[0];
+  if (sp.R.alarmHeat) {   // the main office: every staff member on the floor comes running, and it's a lot of heat
+    toast(`The secretary hits the button: "ALL STAFF TO THE MAIN OFFICE."`, 2.8);
+    pa(null, "All staff, report to the main office. ALL staff.", 4);
+    for (const o of free) { const d = Math.hypot(o.x - f.x, o.z - f.z); o.state = "search"; o.suspicion = 0.6; o.searchT = -Math.min(18, d / (o.type.chaseSpeed * 0.8)); o.lastX = o.tx = f.x; o.lastZ = o.tz = f.z; }
+    addHeat(sp.R.alarmHeat);
+    return;
+  }
   if (st) { const d = Math.hypot(st.x - f.x, st.z - f.z); st.state = "search"; st.searchT = -Math.min(16, d / (st.type.chaseSpeed * 0.8)); st.lastX = st.tx = f.x; st.lastZ = st.tz = f.z; }
   onRoomBackfire(sp);
 }
@@ -2491,8 +2513,9 @@ function selectSlot(i, fromKey = false) {
   if (game.aim?.slot === i) { cancelAim(); return; }
   const T = ITEM_TYPES[it.key];
   if (T.kind === "spray") { if (sprayPaint()) consumeSlot(i); return; }
+  if (T.kind === "pass") { if (game.passShield) toast("You already have a fake pass."); else { consumeSlot(i); takeItem("hallPass"); } return; }
   if (T.kind === "note") { const m = game.dares.find((x) => x.id === "loveNote"); toast(m ? `💌 Deliver it: hide in the gym during period ${m.p.period}.` : "A love note. It's not for you."); return; }
-  if (T.kind === "key") { toast(`Master key: walk into a locked door to open it (${it.uses} use${it.uses === 1 ? "" : "s"} left)`, 2.4); return; }
+  if (T.kind === "key") { toast(`Staff key: walk into a locked door to open it (${it.uses} use${it.uses === 1 ? "" : "s"} left)`, 2.4); return; }
   if (T.kind === "junk") {   // toss it: it lands at your feet, and staff will tidy it up
     consumeSlot(i); toast(T.line);
     spawnObject(it.key, "resting", player.x + Math.sin(player.heading) * 0.6, 0.04, player.z + Math.cos(player.heading) * 0.6);
