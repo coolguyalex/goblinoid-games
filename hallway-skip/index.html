@@ -130,6 +130,8 @@
     flex-direction: column; gap: 8px; z-index: 4; }
   #hotbar .slot { width: 54px; height: 54px; border-radius: 14px; border: 2px solid rgba(255,255,255,.35); background: rgba(20,24,36,.72);
     font-size: 27px; position: relative; color: #fff; padding: 0; touch-action: none; cursor: pointer; }
+  /* step 49: a strong kid's fifth slot: a bit smaller and lower on short screens, clear of the score */
+  @media (max-height: 500px) { #hotbar.five { gap: 6px; top: calc(50% + 26px); } #hotbar.five .slot { width: 48px; height: 48px; font-size: 24px; } }
   #hotbar .slot.empty { opacity: .4; }
   #hotbar .slot.active { border-color: #ffd36b; box-shadow: 0 0 0 3px rgba(255,211,107,.5); }
   #hotbar .slot small { position: absolute; right: 4px; bottom: 1px; font-size: 12px; font-weight: 800; }
@@ -334,7 +336,7 @@
 
 <div class="overlay" id="title">
   <div>
-    <span class="tag">prototype · build step 48</span>
+    <span class="tag">prototype · build step 49</span>
     <h1>Hallway Skip</h1>
     <p>Skip class. Don't get caught.</p>
     <div class="buttons">

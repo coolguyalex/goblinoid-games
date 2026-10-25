@@ -50,6 +50,7 @@
 // Step 46: your kid's look: outfit, hair and color, skin, height, weight and build, on a jointed low-poly kid whose arms and legs swing.
 // Step 47: easier classrooms (teacher 80%, sub 95%, secretary 65%); a grab is half as risky as walking in, +6% per grab after.
 // Step 48: the old sock and the moldy sandwich from lockers throw like spitballs and score when they hit someone.
+// Step 49: more stat effects: speed helps stamina, strength pushes through crowds (and 15+ carries a fifth item), stealth means fewer restroom checks.
 import * as THREE from "three";
 
 // =====================================================================================
@@ -236,9 +237,12 @@ const CFG = {
 
   // Step 45: your kid's stats, 0-20 (10 = the game as it was). Each number is the change at 20 (or the opposite at 0).
   stats: {
-    stealth:  { vision: 0.15, cone: 0.15, notice: 0.3, hide: 0.15 },   // staff see 15% less far, 15% narrower, notice 30% slower; +15% room hide checks
-    speed:    { move: 0.15 },                                          // walking, sprinting, wheelie chair, skateboard
-    strength: { throw: 0.1, stun: 0.3, burstRadius: 0.2 },             // throws 10% faster (about 20% farther), stuns 30% longer, bigger locker burst
+    stealth:  { vision: 0.15, cone: 0.15, notice: 0.3, hide: 0.15,     // staff see 15% less far, 15% narrower, notice 30% slower; +15% room hide checks
+                restroomCheck: 0.3 },                                  // step 49: staff walking past check the restroom 30% less often
+    speed:    { move: 0.15, stamina: 0.25 },                           // walking, sprinting, wheelie chair, skateboard; sprint lasts and refills 25% better
+    strength: { throw: 0.1, stun: 0.3, burstRadius: 0.2,               // throws 10% faster (about 20% farther), stuns 30% longer, bigger locker burst
+                shove: 0.5,                                            // step 49: kids push you back half as much (at 0: half again more)
+                extraSlotAt: 15 },                                     // step 49: strength 15+ carries a fifth item
   },
 
   // Short-term heat, 0-100: "they know it's me". Like a GTA wanted level.
@@ -1675,7 +1679,7 @@ function morningSetup() {
   player.slipT = player.dazeT = player.stuckT = 0; player.mesh.rotation.z = 0; player.stamina = 1; player.staminaMax = 1; player.boostT = 0; player.winded = false;
   if (player.hoodT > 0) hoodDown(); player.hoodCD = 0;
   hopOff(true);
-  game.hotbar = Array(CFG.items.slots).fill(null); renderHotbar();
+  game.hotbar = Array(slotCount()).fill(null); renderHotbar();
   rollSubs();             // first, so sub rooms get their extra desk loot
   resetSpotsForPeriod();
   for (const sp of SPOTS) if (sp.kind === "locker" && sp.busted) { sp.busted = false; sp.door.material.color.setHex(0x7d9a86); sp.door.rotation.y = sp.doorRot; }   // the custodian fixes the lockers
@@ -2019,9 +2023,9 @@ renderOptSummary();
 // ---- step 45: your kid. Three stats, 0-20, rolled like 3d6 but stretched to 0-20; reroll as often as you like. ----
 const CHAR_KEY = "hallwaySkip.character.v1";
 const STATS = [
-  { k: "stealth", icon: "🥷", label: "Stealth", what: "Staff see less far, with narrower cones, and take longer to notice you. Better odds sneaking into rooms." },
-  { k: "speed", icon: "👟", label: "Speed", what: "Faster walking and sprinting, and faster on a wheelie chair or skateboard." },
-  { k: "strength", icon: "💪", label: "Strength", what: "Throws go farther, hits keep staff down longer, and bursting out of a locker knocks over more of them." },
+  { k: "stealth", icon: "🥷", label: "Stealth", what: "Staff see less far, with narrower cones, and take longer to notice you. Better odds sneaking into rooms, and staff check the restroom less often." },
+  { k: "speed", icon: "👟", label: "Speed", what: "Faster walking and sprinting, and faster on a wheelie chair or skateboard. Your sprint lasts longer and refills faster." },
+  { k: "strength", icon: "💪", label: "Strength", what: "Throws go farther, hits keep staff down longer, and bursting out of a locker knocks over more of them. Easier to push through crowds. 15 or more: carry a fifth item." },
 ];
 const rollStat = () => Math.round(Math.random() * 20 / 3 + Math.random() * 20 / 3 + Math.random() * 20 / 3);
 const rollStats = () => Object.fromEntries(STATS.map((S) => [S.k, rollStat()]));
@@ -2205,8 +2209,9 @@ function updatePlayer(dt) {
     if (c.mode === "gone" || c.mode === "spawning") continue;
     const dx = player.x - c.x, dz = player.z - c.z, d = Math.hypot(dx, dz), min = CFG.player.radius + CFG.crowd.radius;
     if (d < min && d > 1e-4) {
-      if (player.sprinting) { shove(c); player.x += (dx / d) * (min - d) * 0.3; player.z += (dz / d) * (min - d) * 0.3; }
-      else { player.x += (dx / d) * (min - d); player.z += (dz / d) * (min - d); }
+      const k = (player.sprinting ? 0.3 : 1) * (1 - CFG.stats.strength.shove * statMod("strength"));   // step 49: strong kids get pushed around less
+      if (player.sprinting) shove(c);
+      player.x += (dx / d) * (min - d) * k; player.z += (dz / d) * (min - d) * k;
     }
   }
   collide(player, CFG.player.radius);
@@ -2227,8 +2232,9 @@ function updateSprint(dt) {
   const S = CFG.sprint, want = (keys.has("shift") || sprintTouch) && input.m > 0;
   if (player.winded && player.stamina >= S.restartAt) player.winded = false;
   player.sprinting = want && !player.winded && player.stamina > 0;
-  if (player.sprinting) { player.stamina = Math.max(0, player.stamina - dt / S.staminaSec); if (player.stamina <= 0) { player.winded = true; toast("Out of breath!"); } }
-  else player.stamina = Math.min(player.staminaMax, player.stamina + (dt / S.rechargeSec) * (player.boostT > 0 ? CFG.energy.rechargeMult : 1));
+  const stam = 1 + CFG.stats.speed.stamina * statMod("speed");   // step 49
+  if (player.sprinting) { player.stamina = Math.max(0, player.stamina - dt / (S.staminaSec * stam)); if (player.stamina <= 0) { player.winded = true; toast("Out of breath!"); } }
+  else player.stamina = Math.min(player.staminaMax, player.stamina + (dt / S.rechargeSec) * stam * (player.boostT > 0 ? CFG.energy.rechargeMult : 1));
 }
 // ---- skateboard ----
 const boardMesh = makeItemMesh("skateboard"); boardMesh.visible = false;
@@ -3215,7 +3221,7 @@ function maybeCheckRestroom(st) {
     const f = spotFront(sp, tmp);
     if (Math.hypot(f.x - st.x, f.z - st.z) > C.passRange) continue;
     st.checkCD.set(sp, game.time + C.cooldownSec);   // one roll per pass
-    if (Math.random() < C.chance) { st.state = "check"; st.checkSpot = sp; st.checkT = 0; }
+    if (Math.random() < C.chance * (1 - CFG.stats.stealth.restroomCheck * statMod("stealth"))) { st.state = "check"; st.checkSpot = sp; st.checkT = 0; }
     return;
   }
 }
@@ -3467,14 +3473,16 @@ function capLying() {
 
 // ---- hotbar ----
 const hotbarEl = $("hotbar");
-for (let i = 0; i < CFG.items.slots; i++) {
+const slotCount = () => CFG.items.slots + (character.stats.strength >= CFG.stats.strength.extraSlotAt ? 1 : 0);
+for (let i = 0; i < CFG.items.slots + 1; i++) {   // the last one only shows for a strong kid
   const b = document.createElement("button"); b.className = "slot empty"; b.type = "button"; b.dataset.key = i + 1;
   b.addEventListener("pointerdown", (e) => { e.preventDefault(); e.stopPropagation(); selectSlot(i); });
   hotbarEl.appendChild(b);
 }
 function renderHotbar() {
+  hotbarEl.classList.toggle("five", game.hotbar.length > 4);
   [...hotbarEl.children].forEach((b, i) => {
-    const it = game.hotbar[i];
+    const it = game.hotbar[i]; b.hidden = i >= game.hotbar.length;
     b.innerHTML = it ? `${ITEM_TYPES[it.key].icon}${it.uses > 1 ? `<small>${it.uses}</small>` : ""}` : "";
     b.classList.toggle("empty", !it); b.classList.toggle("active", game.aim?.slot === i || (it?.key === "skateboard" && !!player.board));
     b.title = it ? ITEM_TYPES[it.key].label : "Empty slot";
