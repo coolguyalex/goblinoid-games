@@ -23,6 +23,8 @@
 // Step 22: the "kick me" sign (kids pen the staff member in until the tardy bell) and Mentos & soda (a geyser kids crowd round to watch).
 // Step 23: best runs saved in the browser (top 3, new high score / longest run badges); restroom: found on the third check in one stay.
 // Step 24: burst out of a locker: stuns staff close by and gives you a head start, but busts that locker for the day.
+// Step 25: easier controls: an options menu (saved), auto-aim on by default (tap an item to throw it; banana peels go behind you),
+//          a joystick guide on phones, a pause button; a bigger stamina bar, and the energy drink (twice the stamina for a minute).
 import * as THREE from "three";
 
 // =====================================================================================
@@ -66,6 +68,17 @@ const CFG = {
     shoveSeenHeat: 4,             // ...and if one can see you, a little heat (at most once per shoveCooldownSec)
     shoveCooldownSec: 1,
   },
+  // Auto-aim (an option, on by default): tapping an item throws it the way you're facing. A staff member in front of you
+  // (within coneDeg, in sight, in range) gets a 🎯 and the throw goes at them, with the power picked to reach them.
+  autoAim: {
+    coneDeg: 25,
+    maxRange: 22,
+    defaultPower: 0.55,
+    power: { bananaPeel: 0.3, whoopee: 0.3, slime: 0.35, mentos: 0.35, stinkBomb: 0.5, spitball: 0.6, wheelieChair: 1 },
+    behind: ["bananaPeel"],       // these drop behind you instead
+  },
+  // Energy drink: a longer stamina bar (and faster refills) for a while
+  energy: { boostSec: 60, maxMult: 2, rechargeMult: 1.5 },
   keyboard: { aimTurnRate: 1.8, aimPowerRate: 0.9, startPower: 0.55 },   // arrow-key aiming: radians/s and power/s
   camera: {
     fov: 75,                      // wide, to help with corner blindness
@@ -147,7 +160,7 @@ const CFG = {
     // Burst out: slam the door open. Staff close by are stunned and you get a head start, but the locker's busted
     // for the rest of the day. Only while you've still got locker time left.
     burst: { radius: 4.5, stunSec: 2.5, graceSec: 1.2, points: 75, noiseRadius: 12 },
-    loot: [["spitball", 4], ["gum", 4], ["paperAirplane", 3], ["whoopee", 2], ["bananaPeel", 2], ["kickMe", 1],
+    loot: [["spitball", 4], ["gum", 4], ["paperAirplane", 3], ["whoopee", 2], ["bananaPeel", 2], ["kickMe", 1], ["energyDrink", 2],
            ["oldSock", 3], ["sandwich", 3], ["homework", 3]],
   },
 
@@ -421,11 +434,11 @@ const TEACHER_TYPES = {
 // a staff key extremely rare. always: put on the desk every time the room restocks (art always has spray paint).
 const ROOM_TYPES = {
   classroom: { label: "", count: [1, 2],
-               loot: [["spitball", 5], ["paperAirplane", 5], ["gum", 4], ["wheelieChair", 1.2], ["hallPass", 0.35], ["masterKey", 0.12]] },
+               loot: [["spitball", 5], ["paperAirplane", 5], ["gum", 4], ["wheelieChair", 1.2], ["energyDrink", 1], ["hallPass", 0.35], ["masterKey", 0.12]] },
   science:   { label: "Science lab", plaque: 0x2ecc71, loot: [["stinkBomb", 4], ["slime", 4], ["mentos", 3]], count: [1, 2] },
   art:       { label: "Art room", plaque: 0xe67e22, always: ["sprayPaint"], count: [1, 1],
                loot: [["kickMe", 3], ["paperAirplane", 3], ["gum", 3], ["spitball", 2], ["wheelieChair", 1]] },
-  gym:       { label: "Gym", plaque: 0xe74c3c, loot: [["basketball", 4], ["football", 3], ["frisbee", 3]], count: [1, 2] },
+  gym:       { label: "Gym", plaque: 0xe74c3c, loot: [["basketball", 4], ["football", 3], ["frisbee", 3], ["energyDrink", 2]], count: [1, 2] },
   // The office always has a hall pass and the staff key (restocked whenever the door's open again), but the secretary
   // is jumpy: if she catches you, she calls every staff member to the office and your heat jumps.
   office:    { label: "Main office", plaque: 0x34495e, door: 0x4a3426, staff: "office", count: [0, 0], loot: [], alarmHeat: 25,
@@ -489,6 +502,7 @@ const ITEM_TYPES = {
   hallPass:      { label: "Hall pass", icon: "🎫", kind: "pass" },   // grab it and it's your fake pass (cancels your next catch)
   wheelieChair:  { label: "Wheelie chair", icon: "🪑", kind: "ride", rideSpeed: 9.5, maxRideSec: 3, dazeSec: 1.5, leftoverSec: 3,
                    studentPoints: 40 },
+  energyDrink:   { label: "Energy drink", icon: "⚡", kind: "drink" },   // tap to drink: see CFG.energy
   gum:           { label: "Gum", icon: "🍬", kind: "instant", points: 100, line: "You stick gum under the water fountain. Gross. +havoc" },
   // Junk from lockers: takes up a slot until you toss it (select it to drop it). Staff tidy it up like anything else.
   oldSock:       { label: "Old gym sock", icon: "🧦", kind: "junk", line: "You drop the sock. It lands with a damp slap." },
@@ -864,7 +878,7 @@ function makePerson({ body, skin = 0xf1c27d, scale = 1, hat = null, hood = null 
 
 // ---------- player ----------
 const player = {
-  x: 0, z: 0, vx: 0, vz: 0, heading: 0, stamina: 1, sprinting: false, winded: false, shoveCD: 0,
+  x: 0, z: 0, vx: 0, vz: 0, heading: 0, stamina: 1, staminaMax: 1, boostT: 0, sprinting: false, winded: false, shoveCD: 0,
   hidden: null, hideT: 0, hideArmed: false, graceT: 0, invisT: 0, pushSpot: null, pushT: 0, slipT: 0, dazeT: 0, stuckT: 0, ride: null,
   mesh: makePerson({ body: 0x8a8f99, hood: 0x7b808a }),   // the gray hoodie
 };
@@ -1232,7 +1246,7 @@ function morningSetup() {
   clearStaff();
   clearObjects(); cancelAim(); clearGraffiti(); clearTrails();   // the custodian scrubs the walls (and takes down the TP) overnight
   if (player.ride) { scene.remove(player.ride.chair); player.ride = null; }
-  player.slipT = player.dazeT = player.stuckT = 0; player.mesh.rotation.z = 0; player.stamina = 1; player.winded = false;
+  player.slipT = player.dazeT = player.stuckT = 0; player.mesh.rotation.z = 0; player.stamina = 1; player.staminaMax = 1; player.boostT = 0; player.winded = false;
   game.hotbar = Array(CFG.items.slots).fill(null); renderHotbar();
   rollSubs();             // first, so sub rooms get their extra desk loot
   resetSpotsForPeriod();
@@ -1536,6 +1550,35 @@ document.addEventListener("visibilitychange", () => { if (document.hidden) pause
   }
   renderBestRuns();
 }
+// ---- options, saved in this browser ----
+const OPTS_KEY = "hallwaySkip.options.v1";
+const opts = { autoAim: true, stickGuide: true };
+try { Object.assign(opts, JSON.parse(localStorage.getItem(OPTS_KEY)) || {}); } catch (e) { /* storage blocked: defaults */ }
+function saveOpts() { try { localStorage.setItem(OPTS_KEY, JSON.stringify(opts)); } catch (e) { /* fine */ } }
+function renderOptSummary() { $("optSummary").textContent = `Auto-aim ${opts.autoAim ? "on" : "off"} · joystick guide ${opts.stickGuide ? "on" : "off"}`; }
+function openOptions(e) { e?.stopPropagation(); $("optAutoAim").checked = opts.autoAim; $("optStick").checked = opts.stickGuide; $("options").hidden = false; }
+$("optionsBtn").addEventListener("click", openOptions);
+$("pauseOptionsBtn").addEventListener("click", openOptions);
+$("optAutoAim").addEventListener("change", (e) => { opts.autoAim = e.target.checked; saveOpts(); renderOptSummary(); });
+$("optStick").addEventListener("change", (e) => { opts.stickGuide = e.target.checked; saveOpts(); renderOptSummary(); });
+$("options").addEventListener("click", (e) => e.stopPropagation());
+$("optionsClose").addEventListener("click", () => { $("options").hidden = true; });
+$("pauseBtn").addEventListener("pointerdown", (e) => e.stopPropagation());
+$("pauseBtn").addEventListener("click", (e) => { e.stopPropagation(); pause(); });
+renderOptSummary();
+// the joystick guide (phones only) and hiding the play-only HUD bits on menus
+const isTouch = matchMedia("(pointer: coarse)").matches || URLQ.has("touch");
+let guideKey = "";
+function updateGuides() {
+  const playing = game.state === "playing";
+  const show = playing && isTouch && opts.stickGuide && !player.hidden && !game.aim;
+  const k = `${playing}:${show && stick.id === null}:${show && look.id === null}`;
+  if (k === guideKey) return;
+  guideKey = k;
+  document.body.classList.toggle("state-off", !playing && game.state !== "scene");
+  $("stickGuide").hidden = !(show && stick.id === null);
+  $("lookGuide").hidden = !(show && look.id === null);
+}
 
 function tryFullscreenLandscape() {
   if (!matchMedia("(pointer: coarse)").matches) return;
@@ -1615,7 +1658,19 @@ function updateSprint(dt) {
   if (player.winded && player.stamina >= S.restartAt) player.winded = false;
   player.sprinting = want && !player.winded && player.stamina > 0;
   if (player.sprinting) { player.stamina = Math.max(0, player.stamina - dt / S.staminaSec); if (player.stamina <= 0) { player.winded = true; toast("Out of breath!"); } }
-  else player.stamina = Math.min(1, player.stamina + dt / S.rechargeSec);
+  else player.stamina = Math.min(player.staminaMax, player.stamina + (dt / S.rechargeSec) * (player.boostT > 0 ? CFG.energy.rechargeMult : 1));
+}
+// energy drink: the bar is twice as long (and refills faster) until boostT runs out
+function drinkEnergy() {
+  const E = CFG.energy, again = player.boostT > 0;
+  player.staminaMax = E.maxMult; player.stamina = E.maxMult; player.boostT = E.boostSec; player.winded = false;
+  toast(again ? "⚡ Another one. The buzz lasts longer." : `⚡ Energy drink! Double stamina for ${E.boostSec} seconds.`, 2.4);
+  popup("⚡ BUZZING", "item"); playBlip([520, 780, 1040], 0.07, "triangle", 0.06);
+}
+function tickBoost(dt) {
+  if (player.boostT <= 0) return;
+  player.boostT -= dt;
+  if (player.boostT <= 0) { player.boostT = 0; player.staminaMax = 1; player.stamina = Math.min(player.stamina, 1); toast("The energy drink wore off."); }
 }
 // barging through a kid: they stagger aside, nearby staff turn to look, and if one sees you it's a bit of heat
 function shove(c) {
@@ -2042,11 +2097,15 @@ function updateMarkers() {
 
 let lastStam = -1;
 function drawStamina() {
-  const v = Math.round(player.stamina * 50) / 50;
-  if (v === lastStam) return;
-  lastStam = v;
-  $("staminaMeter").hidden = v >= 1; $("staminaFill").style.width = v * 100 + "%";
-  $("staminaMeter").classList.toggle("out", player.winded);
+  const v = Math.round(player.stamina * 50) / 50, sec = Math.ceil(player.boostT), key = `${v}:${player.staminaMax}:${sec}:${player.winded}`;
+  if (key === lastStam) return;
+  lastStam = key;
+  const el = $("staminaMeter");
+  el.querySelector("i").style.width = 190 * player.staminaMax + "px";
+  $("staminaFill").style.width = (v / player.staminaMax) * 100 + "%";
+  el.classList.toggle("out", player.winded); el.classList.toggle("full", v >= player.staminaMax && !player.boostT);
+  el.classList.toggle("boost", player.boostT > 0);
+  $("boostT").textContent = player.boostT > 0 ? `⚡${sec}s` : "";
 }
 let lastHud = "";
 function updateHud() {
@@ -2625,6 +2684,8 @@ function selectSlot(i, fromKey = false) {
     capLying(); playBlip([300, 200], 0.06, "triangle", 0.04); return;
   }
   if (T.kind === "instant") { consumeSlot(i); toast(T.line); havoc(it.key, T.points, T.label, { x: player.x, z: player.z }); return; }
+  if (T.kind === "drink") { consumeSlot(i); drinkEnergy(); return; }
+  if (opts.autoAim) { autoThrow(i); return; }
   game.aim = { slot: i, key: it.key, id: null, sx: 0, sy: 0, cx: 0, cy: 0 };
   $("aim").hidden = false;
   $("aimText").textContent = T.kind === "ride" ? "Flick to launch the wheelie chair" : `Flick to throw the ${T.label.toLowerCase()}`;
@@ -2649,6 +2710,71 @@ function cancelAim() {
   if (!game.aim) return;
   game.aim = null; $("aim").hidden = true; arc.visible = false; renderHotbar();
   aimEl.querySelector(".aimHint").textContent = AIM_HINT;
+}
+
+// ---- auto-aim: throw the way you're facing (where you're looking, if you just dragged the view), at a staff member in front of you ----
+const aimYaw = () => (manualCamT > 0 ? cam.yaw : player.heading);
+const autoBehind = (key) => CFG.autoAim.behind.includes(key);
+const rangeCache = {};
+// how far a throw at each power goes before it's at chest height (or on the floor, for things that don't hit people)
+function throwRanges(key) {
+  if (rangeCache[key]) return rangeCache[key];
+  const T = ITEM_TYPES[key], stopY = T.hit && T.flight !== "glide2" ? 1.0 : 0.05, out = [];
+  for (let k = 0; k <= 17; k++) {
+    const power = 0.15 + (0.85 * k) / 17, v = launchVel(T, { dx: 0, dz: 1, power }), sim = { y: THROW_Y, vx: 0, vy: v.vy, vz: v.vz, d: 0 };
+    if (T.flight === "glide2") initPlane(sim, power, T);
+    for (let n = 0; n < 600; n++) {
+      if (T.flight === "glide2") { planeStep(sim, 0.02, T); sim.d += sim.vz * 0.02; sim.y += sim.vy * 0.02; if (sim.stage === 2 && sim.y <= T.lowY + 0.05) break; }
+      else { sim.vy -= T.gravity * 0.02; if (T.glide) sim.vy = Math.max(sim.vy, -0.9); sim.d += v.vz * 0.02; sim.y += sim.vy * 0.02; if (sim.vy < 0 && sim.y <= stopY) break; }
+    }
+    out.push([power, sim.d]);
+  }
+  return (rangeCache[key] = out);
+}
+// the staff member the next throw of this item would go at, or null
+function autoTarget(key) {
+  const T = ITEM_TYPES[key], A = CFG.autoAim;
+  if (!T || T.kind !== "throw" || autoBehind(key)) return null;
+  const yaw = aimYaw(), cone = (A.coneDeg * Math.PI) / 180, ranges = throwRanges(key);
+  const reach = Math.min(A.maxRange, ranges[ranges.length - 1][1] + 2);
+  let best = null, bs = Infinity;
+  for (const st of staff) {
+    const dx = st.x - player.x, dz = st.z - player.z, d = Math.hypot(dx, dz);
+    if (d < 0.8 || d > reach) continue;
+    const off = Math.abs(angDiff(yaw, Math.atan2(dx, dz)));
+    if (off > cone || !lineOfSight(player.x, player.z, st.x, st.z)) continue;
+    const score = d * (1 + off * 2);
+    if (score < bs) { bs = score; best = { st, d, yaw: Math.atan2(dx, dz) }; }
+  }
+  if (!best) return null;
+  let power = 1, err = Infinity;
+  for (const [p, r] of ranges) if (Math.abs(r - best.d) < err) { err = Math.abs(r - best.d); power = p; }
+  best.power = power;
+  return best;
+}
+function autoThrow(i) {
+  const it = game.hotbar[i], T = ITEM_TYPES[it.key], A = CFG.autoAim, behind = autoBehind(it.key);
+  let yaw = aimYaw() + (behind ? Math.PI : 0), power = A.power[it.key] ?? A.defaultPower;
+  const tg = autoTarget(it.key);
+  if (tg) { yaw = tg.yaw; power = tg.power; }
+  release({ slot: i, key: it.key }, { dx: Math.sin(yaw), dz: Math.cos(yaw), power, keepHeading: behind });
+}
+// the 🎯 over whoever the first throwable item in your hotbar would go at
+const autoTargetEl = $("autoTarget");
+function updateAutoTarget() {
+  let tg = null;
+  if (opts.autoAim && game.state === "playing" && !player.hidden && !game.aim) {
+    const it = game.hotbar.find((x) => x && ITEM_TYPES[x.key].kind === "throw" && !autoBehind(x.key));
+    if (it) tg = autoTarget(it.key);
+  }
+  if (tg) {
+    projA.set(tg.st.x, 2.6 * (tg.st.type?.scale ?? 1), tg.st.z).applyMatrix4(camera.matrixWorldInverse);
+    if (projA.z > -0.2) tg = null;
+  }
+  if (!tg) { autoTargetEl.style.display = "none"; return; }
+  projA.set(tg.st.x, 2.6 * (tg.st.type?.scale ?? 1), tg.st.z).project(camera);
+  autoTargetEl.style.display = "block";
+  autoTargetEl.style.left = ((projA.x + 1) / 2) * window.innerWidth + "px"; autoTargetEl.style.top = ((1 - projA.y) / 2) * window.innerHeight + "px";
 }
 
 // ---- aiming: drag anywhere, the dotted arc shows where it will go, release to throw ----
@@ -2683,7 +2809,7 @@ function launchVel(T, L) {
 const THROW_Y = 1.3;
 function release(a, L = flickLaunch(a)) {
   const T = ITEM_TYPES[a.key];
-  player.heading = Math.atan2(L.dx, L.dz);
+  if (!L.keepHeading) player.heading = Math.atan2(L.dx, L.dz);
   consumeSlot(a.slot);
   cancelAim();
   if (T.kind === "ride") { startRide(L); return; }
@@ -3756,9 +3882,11 @@ renderer.setAnimationLoop(() => {
   if (toastTimer > 0) { toastTimer -= dt; if (toastTimer <= 0) ui.toast.classList.remove("show"); }
   drawCrowd();
   updateCamera(dt);
-  if (game.state === "playing") updateKeyAim(dt);
+  if (game.state === "playing") { updateKeyAim(dt); tickBoost(dt); }
   updateAimPreview();
   updateKeyHint();
+  updateAutoTarget();
+  updateGuides();
   drawStamina();
   drawObjects();
   updateMarkers();
@@ -3771,7 +3899,7 @@ renderer.setAnimationLoop(() => {
 
 if (debug) {   // a small test panel for phone playtests (only with ?debug in the URL)
   const css = document.createElement("style");
-  css.textContent = `#dbg { position: fixed; left: 50%; bottom: max(6px, env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 5;
+  css.textContent = `#staminaMeter { bottom: calc(max(12px, env(safe-area-inset-bottom)) + 46px); } #dbg { position: fixed; left: 50%; bottom: max(6px, env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 5;
       display: flex; flex-direction: column; align-items: center; gap: 4px; }
     #dbg button { border: 0; border-radius: 8px; padding: 6px 9px; background: rgba(20,24,36,.85); color: #fff; font: 700 12px system-ui, sans-serif; }
     #dbgBtns { display: flex; flex-wrap: wrap; gap: 4px; justify-content: center; max-width: 420px; }
@@ -3870,6 +3998,11 @@ if (debug) {   // test-only helpers (only with ?debug in the URL)
     },
     obj(id) { const o = objects.find((x) => x.id === id); return o ? { claimed: claimedBy(o)?.key ?? null, popped: !!o.popped, state: o.state, x: o.x, y: o.y, z: o.z, stage: o.stage, slips: o.slips, life: o.life, hits: o.hitSet?.size ?? 0, flown: o.flown.size, dead: !!o.dead } : null; },
     heading() { return player.heading; },
+    opts(o) { if (o) { Object.assign(opts, o); saveOpts(); renderOptSummary(); } return { ...opts }; },
+    autoTarget(key) { const t = autoTarget(key); return t ? { staff: staff.indexOf(t.st), d: Math.round(t.d * 10) / 10, power: Math.round(t.power * 100) / 100 } : null; },
+    ranges(key) { return throwRanges(key).map(([p, d]) => [Math.round(p * 100) / 100, Math.round(d * 10) / 10]); },
+    tap(i) { selectSlot(i); },
+    setHeading(h) { player.heading = h; cam.yaw = h; manualCamT = 0; },
     clearCrowd() { for (const c of crowd) c.mode = "gone"; },
     graffitiSheet() {   // every graffiti drawing in a grid, for checking the art
       const d = document.createElement("div"); d.style.cssText = "position:fixed;inset:0;z-index:20;background:#cfc5ad;display:grid;grid-template-columns:repeat(5,1fr);gap:4px;padding:4px";
@@ -3886,7 +4019,7 @@ if (debug) {   // test-only helpers (only with ?debug in the URL)
     heatAdd(n) { addHeat(n); },
     crowdStats(cull) { if (cull != null) crowdCull = cull; return { drawn: crowdDrawn, total: crowd.length, active: crowd.filter(isActive).length,
       meshShown: !crowdBodies.frustumCulled || frustum.intersectsObject(crowdBodies) }; },
-    sprintInfo() { return { stamina: Math.round(player.stamina * 100) / 100, sprinting: player.sprinting, winded: player.winded }; },
+    sprintInfo() { return { max: player.staminaMax, boostT: Math.round(player.boostT * 10) / 10, stamina: Math.round(player.stamina * 100) / 100, sprinting: player.sprinting, winded: player.winded }; },
     ending() { return { title: $("caughtTitle").textContent, text: $("caughtText").textContent }; },
     lookYaw(a) { cam.yaw = player.heading = a; manualCamT = 99; },
     // put staff k at (x, z) on patrol, facing away along the hall

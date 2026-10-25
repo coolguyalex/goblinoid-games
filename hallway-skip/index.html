@@ -143,8 +143,42 @@
   .kbdOnly { display: none; } .kbd .kbdOnly { display: inline; } .kbd .touchOnly { display: none; }
   #kbdHelp { position: absolute; left: max(14px, env(safe-area-inset-left)); bottom: 10px; font-size: 11px; opacity: .45; display: none; }
   .kbd #kbdHelp { display: block; }
-  #staminaMeter[hidden] { display: none; }
-  #staminaMeter b { background: #8ef0a0; } #staminaMeter.out b { background: #ff8f8f; }
+  /* stamina: a big bar at the bottom middle. An energy drink makes it longer (gold) for a while. */
+  #staminaMeter { position: fixed; left: 50%; bottom: max(12px, env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 2;
+    display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 900; letter-spacing: .1em; text-shadow: 0 1px 2px rgba(0,0,0,.8);
+    pointer-events: none; transition: opacity .4s; white-space: nowrap; }
+  #staminaMeter i { position: relative; width: 190px; height: 14px; border-radius: 7px; background: rgba(0,0,0,.4);
+    box-shadow: inset 0 0 0 2px rgba(255,255,255,.35); overflow: hidden; transition: width .5s; }
+  #staminaMeter b { position: absolute; left: 0; top: 0; bottom: 0; width: 100%; background: #8ef0a0; border-radius: 7px; }
+  #staminaMeter.out b { background: #ff8f8f; }
+  #staminaMeter.full { opacity: .5; }
+  #staminaMeter.boost b { background: linear-gradient(90deg, #ffd36b, #ffef9e); } #staminaMeter.boost i { box-shadow: inset 0 0 0 2px #ffd36b, 0 0 10px rgba(255,211,107,.6); }
+  #staminaMeter.boost span { color: #ffd36b; }
+  #boostT { font-style: normal; color: #ffd36b; min-width: 2.5em; }
+  .state-off #staminaMeter, .state-off #autoTarget, .state-off #stickGuide, .state-off #lookGuide, .state-off #pauseBtn { display: none !important; }
+  /* auto-aim: who the next throw will go at */
+  #autoTarget { position: fixed; transform: translate(-50%, -100%); font-size: 22px; pointer-events: none; display: none; z-index: 1;
+    filter: drop-shadow(0 1px 3px rgba(0,0,0,.7)); animation: bob 0.8s ease-in-out infinite; }
+  /* joystick guide (phones): a faint stick where your left thumb goes, and a hint for the look area */
+  #stickGuide { position: fixed; left: calc(max(16px, env(safe-area-inset-left)) + 40px); bottom: calc(max(16px, env(safe-area-inset-bottom)) + 34px);
+    pointer-events: none; text-align: center; font-size: 11px; font-weight: 900; letter-spacing: .14em; text-transform: uppercase; opacity: .7; z-index: 1; }
+  #stickGuide[hidden], #lookGuide[hidden] { display: none; }
+  #stickGuide .gBase { width: 110px; height: 110px; border-radius: 50%; border: 2px dashed rgba(255,255,255,.45); background: rgba(255,255,255,.06);
+    display: flex; align-items: center; justify-content: center; margin-bottom: 4px; }
+  #stickGuide .gKnob { width: 46px; height: 46px; border-radius: 50%; background: rgba(255,255,255,.3); animation: nudge 2.4s ease-in-out infinite; }
+  @keyframes nudge { 0%, 100% { transform: none; } 25% { transform: translateY(-18px); } 50% { transform: none; } 75% { transform: translateX(18px); } }
+  #lookGuide { position: fixed; right: calc(max(10px, env(safe-area-inset-right)) + 90px); bottom: calc(max(16px, env(safe-area-inset-bottom)) + 70px);
+    pointer-events: none; font-size: 12px; font-weight: 800; opacity: .6; text-shadow: 0 1px 3px rgba(0,0,0,.8); z-index: 1; }
+  #pauseBtn { position: fixed; left: max(10px, env(safe-area-inset-left)); bottom: max(10px, env(safe-area-inset-bottom)); width: 38px; height: 38px;
+    border-radius: 50%; border: 2px solid rgba(255,255,255,.3); background: rgba(20,24,36,.6); color: #fff; font-size: 15px; padding: 0; z-index: 4; display: none; }
+  @media (pointer: coarse) { #pauseBtn { display: block; } }
+  /* options */
+  #options { z-index: 7; background: rgba(18, 21, 31, .97); cursor: default; }
+  .opt { display: flex; gap: 12px; align-items: flex-start; text-align: left; margin: 12px auto; max-width: 30em; padding: 10px 14px;
+    border-radius: 12px; background: rgba(255,255,255,.07); cursor: pointer; }
+  .opt input { width: 22px; height: 22px; margin: 2px 0 0; accent-color: #ffd36b; flex: none; }
+  .opt b { display: block; font-size: 16px; } .opt small { display: block; opacity: .75; font-size: 13px; line-height: 1.35; margin-top: 2px; }
+  #optSummary { font-size: 12px; opacity: .65; margin-top: 8px; }
   #sprintBtn { position: fixed; right: max(10px, env(safe-area-inset-right)); bottom: max(10px, env(safe-area-inset-bottom)); width: 54px; height: 54px;
     border-radius: 50%; border: 2px solid rgba(255,255,255,.35); background: rgba(20,24,36,.72); font-size: 24px; z-index: 4; touch-action: none; display: none; padding: 0; }
   #sprintBtn.on { border-color: #8ef0a0; background: rgba(142,240,160,.3); }
@@ -216,7 +250,6 @@
   <div id="meters">
     <div class="meter" id="secMeter" title="They know something happened"><span>SCHOOL ALERT</span><i><b id="secFill"></b></i></div>
     <div class="meter" id="heatMeter" title="They know it's you"><span>HEAT</span><i><b id="heatFill"></b><em></em></i></div>
-    <div class="meter" id="staminaMeter" hidden><span>STAMINA</span><i><b id="staminaFill"></b></i></div>
   </div>
   <div id="pa"><span class="who">PA ANNOUNCEMENT</span><span id="paText"></span></div>
   <div id="dares"></div>
@@ -245,6 +278,11 @@
     <div class="hint"><span class="touchOnly">or push the stick</span><span class="kbdOnly">number keys grab · E sneaks out</span></div>
   </div>
 </div>
+<div id="staminaMeter" class="full"><span>🏃 STAMINA</span><i><b id="staminaFill"></b></i><em id="boostT"></em></div>
+<div id="autoTarget">🎯</div>
+<div id="stickGuide" hidden><div class="gBase"><div class="gKnob"></div></div><span>move</span></div>
+<div id="lookGuide" hidden>👆 drag here to look around</div>
+<button id="pauseBtn" type="button" aria-label="Pause">⏸</button>
 <div id="hotbar"></div>
 <button id="sprintBtn" type="button" aria-label="Sprint">🏃</button>
 <div id="aim" hidden>
@@ -257,14 +295,16 @@
 
 <div class="overlay" id="title">
   <div>
-    <span class="tag">prototype · build step 24</span>
+    <span class="tag">prototype · build step 25</span>
     <h1>Hallway Skip</h1>
     <p>Skip class. Don't get caught.</p>
     <div class="buttons">
       <button class="go" id="startBtn" type="button">Play</button>
       <button class="go alt" id="continueBtn" type="button" hidden></button>
       <button class="go ghost" id="aboutBtn" type="button">How to play</button>
+      <button class="go ghost" id="optionsBtn" type="button">⚙ Options</button>
     </div>
+    <div id="optSummary"></div>
     <div id="bestRuns"></div>
   </div>
 </div>
@@ -275,13 +315,13 @@
     <p>Slip out with the crowd, then stay out of class until the next bell. Keep out of the staff's vision cones. If you're spotted, break line of sight, then hide.</p>
     <p>Walk into (or tap) a green locker, a restroom, or a classroom door to hide. Rummage through a locker once a period for whatever's inside (sometimes junk: tap it to toss it). Or burst out of a locker: staff close by are knocked flat for a moment so you can get away, but that locker is busted for the rest of the day. Staff walking past a restroom check it about half the time: the first two checks are close calls, and on the third check in one stay they find you. Subs take longer to notice you. While hiding in a room you can grab stuff off the desks, but it costs time, the teacher might call security, and the room stays locked for the next two periods. Each room has its own stuff: spray paint in art rooms, balls and frisbees in the gym, stink bombs and slime in the science labs. Ordinary classrooms have spitballs, paper airplanes and gum, and once in a while a wheelie chair, a hall pass or (very rarely) a staff key, which opens locked doors. The main office (room 105) always has a hall pass and the staff key, but if the secretary catches you, every staff member comes running.</p>
     <p>Security guards have narrow flashlight vision, are faster than you for a few seconds, and call for backup. Teachers at their doors yell for help and grab you if you walk past.</p>
-    <p>Items come from classrooms, lockers and restrooms (four slots, right edge). Whatever you throw stays where it lands until a staff member spots it and tidies it up, so you can pick some things back up. Tap a slot, then flick to throw. Anything you hit someone with scores, and hitting staff scores more. Banana peels trip anyone who steps on them (several people, until they wear out). Whoopee cushions go off when someone steps on them, pulling staff over. Basketballs knock people down and make noise on every bounce. Paper airplanes soar over heads, then drop low to hit someone (the orange dots). The wheelie chair launches you down the hall. The gym has basketballs, footballs (they fly far and bounce anywhere) and frisbees (they stay up a long time). Science labs have stink bombs (points for everyone who walks through the cloud) and slime (whoever steps in it is stuck for a few seconds). Art rooms have spray paint (tap it next to a wall). Science labs also have Mentos & soda: it fizzes, then a geyser goes off that staff come to see and kids crowd round to watch. Art rooms sometimes have a "kick me" sign: sneak right up behind a staff member to stick it on (if they're facing you, they catch on). In a passing period the kids pen them in, laughing, until the tardy bell. Restrooms have toilet paper: it flies like a paper airplane and leaves a streamer down the hall.</p>
+    <p>Items come from classrooms, lockers and restrooms (four slots, right edge). Whatever you throw stays where it lands until a staff member spots it and tidies it up, so you can pick some things back up. Tap a slot to throw it the way you're facing: with auto-aim on (the default) it goes at the staff member marked 🎯 if there is one, and banana peels drop behind you. Turn auto-aim off in ⚙ Options to aim every throw yourself (tap a slot, then flick). Energy drinks (⚡, from lockers and the gym) make your stamina bar twice as long for a minute. Anything you hit someone with scores, and hitting staff scores more. Banana peels trip anyone who steps on them (several people, until they wear out). Whoopee cushions go off when someone steps on them, pulling staff over. Basketballs knock people down and make noise on every bounce. Paper airplanes soar over heads, then drop low to hit someone (the orange dots). The wheelie chair launches you down the hall. The gym has basketballs, footballs (they fly far and bounce anywhere) and frisbees (they stay up a long time). Science labs have stink bombs (points for everyone who walks through the cloud) and slime (whoever steps in it is stuck for a few seconds). Art rooms have spray paint (tap it next to a wall). Science labs also have Mentos & soda: it fizzes, then a geyser goes off that staff come to see and kids crowd round to watch. Art rooms sometimes have a "kick me" sign: sneak right up behind a staff member to stick it on (if they're facing you, they catch on). In a passing period the kids pen them in, laughing, until the tardy bell. Restrooms have toilet paper: it flies like a paper airplane and leaves a streamer down the hall.</p>
     <p>The kid by the restroom sinks hands out dares (📜 on the restroom sign). You can hold two at a time. Some have to be done in a certain period.</p>
     <p>HEAT (they know it's you) rises when staff see you making mischief or running away, and drops at every bell. Above the line, staff can catch you during passing periods too. SCHOOL ALERT (they know something happened) rises with loud mischief and only drops overnight; the higher it is, the more guards are on duty.</p>
     <p>Max out your HEAT and you're on a REBEL RUN: heat stays maxed, more staff keep arriving, and every point counts double, but the next catch ends your run. The fire alarm (red box on the wall, tap it twice) does this on purpose: staff are stunned, the halls flood with kids, items spill everywhere and every classroom locks. Flooding a bathroom (from inside it) is worth a lot of points and heat, and closes it for the day.</p>
     <p>Friends (white tees) raise a hand during passing periods: get close and tap the bubble for a high five or a gum trade. Trading gum pays well and gets you a fake pass that cancels your next catch. Kids toss paper airplanes: walk into one to catch it. Points multiply while nobody has eyes on you (streak), and double for a few seconds after a near miss. After your second strike, the principal walks the halls.</p>
     <p>Three strikes and you're out. Survive six periods to finish the day. Each day gets harder. Your run saves at every bell.</p>
-    <p class="keys">Phone: left thumb moves, drag on the right side to look around, hold 🏃 to sprint.<br>Desktop: WASD or arrow keys move, Shift sprints, drag the mouse to look. E does whatever the little E bubble says (pick up, hide, high five, catch). 1–4 pick an item, then aim with the arrow keys and throw with Space. While hiding, number keys grab things off the desks.</p>
+    <p class="keys">Phone: left thumb moves, drag on the right side to look around, hold 🏃 to sprint, ⏸ pauses.<br>Desktop: WASD or arrow keys move, Shift sprints, drag the mouse to look. E does whatever the little E bubble says (pick up, hide, high five, catch). 1–4 throw an item (with auto-aim off: pick it, aim with the arrow keys, throw with Space). While hiding, number keys grab things off the desks.</p>
     <p>Sprinting is fast but short, makes you easier to notice, and barging through kids gets attention.</p>
     <button class="go" id="aboutClose" type="button">Got it</button>
   </div>
@@ -326,7 +366,16 @@
   </div>
 </div>
 <div class="overlay" id="paused" hidden>
-  <div><h1>Paused</h1><span class="go">Tap to resume</span></div>
+  <div><h1>Paused</h1><div class="buttons"><span class="go">Tap to resume</span><button class="go ghost" id="pauseOptionsBtn" type="button">⚙ Options</button></div></div>
+</div>
+<div class="overlay scroll" id="options" hidden>
+  <div class="aboutBox">
+    <h2>Options</h2>
+    <label class="opt"><input type="checkbox" id="optAutoAim"><span><b>🎯 Auto-aim</b><small>Tap an item and it's thrown straight away, the way you're facing. If a staff member is in front of you, it goes at them (look for the 🎯). Banana peels drop behind you. Turn it off to aim every throw yourself: tap an item, then flick.</small></span></label>
+    <label class="opt"><input type="checkbox" id="optStick"><span><b>🕹 Joystick guide</b><small>On phones, show a faint joystick where your left thumb goes and a hint for the look area.</small></span></label>
+    <p class="keys">Saved in this browser.</p>
+    <button class="go" id="optionsClose" type="button">Done</button>
+  </div>
 </div>
 <div id="rotate">Turn your phone sideways to play</div>
 <div id="error"><p>Something went wrong loading the game.<br><small id="errText"></small></p></div>
