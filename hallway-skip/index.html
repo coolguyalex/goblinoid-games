@@ -89,6 +89,7 @@
   .itag.alarm.armed { background: #c0392b; color: #fff; }
   #alarmFx { position: fixed; inset: 0; pointer-events: none; z-index: 1; box-shadow: inset 0 0 90px 30px rgba(255, 40, 40, .55); animation: strobe .7s steps(2) infinite; }
   #alarmFx[hidden] { display: none; }
+  #slowFx { position: fixed; inset: 0; pointer-events: none; z-index: 1; opacity: 0; box-shadow: inset 0 0 120px 40px rgba(80, 150, 255, .45); }
   @keyframes strobe { 50% { box-shadow: inset 0 0 60px 10px rgba(255, 40, 40, .15); } }
 
   /* while hiding */
@@ -275,6 +276,7 @@
   <div id="fps" hidden></div>
 </div>
 <div id="alarmFx" hidden></div>
+<div id="slowFx"></div>
 <div id="hidePanel" hidden>
   <div class="box">
     <div id="hpTitle"></div>
@@ -305,7 +307,7 @@
 
 <div class="overlay" id="title">
   <div>
-    <span class="tag">prototype · build step 42</span>
+    <span class="tag">prototype · build step 43</span>
     <h1>Hallway Skip</h1>
     <p>Skip class. Don't get caught.</p>
     <div class="buttons">

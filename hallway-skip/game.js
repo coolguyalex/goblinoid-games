@@ -44,6 +44,7 @@
 // Step 41: skateboards (lockers): tap to hop on, glide fast; bowl kids over; crash into staff or a wall and you're off (and the board's on the floor).
 // Step 42: a second floor. Two stairwells (northwest and southeast corners) connect them; staff follow you up and down,
 //          each floor has its own custodian, closet, restrooms and rooms. Rooms are now numbered 101-114 and 201-214.
+// Step 43: stronger slow motion while you aim a throw by hand (a fifth of normal speed), easing in and out, with a blue edge.
 import * as THREE from "three";
 
 // =====================================================================================
@@ -186,7 +187,8 @@ const CFG = {
     slots: 4,
     pickupRange: 2.6,             // how close you must be to tap an item lying around
     maxLying: 24,                 // things lying around stay until staff clean them up; past this many, the oldest get swept away
-    aimTimeScale: 0.5,            // the game runs at half speed while you line up a throw
+    aimTimeScale: 0.2,            // step 43: slow motion while you line up a throw by hand (was 0.5)
+    aimEaseSec: 0.18,             // how fast it slides into and out of slow motion (real seconds)
     flickFullFrac: 0.32,          // a drag this long (fraction of the screen's short side) is a full-power throw
     minFlickPx: 22,               // shorter than this counts as a tap (cancels the throw)
     diminish: 0.6,                // each repeat of the same havoc in one period is worth this much of the last
@@ -4853,12 +4855,19 @@ const debug = URLQ.has("debug");
 ui.fps.hidden = !debug;
 let fpsAcc = 0, fpsN = 0;
 const clock = new THREE.Clock();
+let timeScale = 1;
+const slowFx = $("slowFx");
 resetGame();        // lay out the scene behind the title screen
 updateCrowd(0.016); drawCrowd(); for (const st of staff) updateCone(st);
 
 renderer.setAnimationLoop(() => {
   const dt = Math.min(clock.getDelta(), 0.05);
-  if (game.state === "playing") update(dt * (game.aim ? CFG.items.aimTimeScale : 1));
+  // slow motion while aiming: eases in and out, with a tinted edge so you can tell
+  const tsGoal = game.aim && game.state === "playing" ? CFG.items.aimTimeScale : 1;
+  timeScale += (tsGoal - timeScale) * Math.min(1, dt / CFG.items.aimEaseSec);
+  if (Math.abs(timeScale - tsGoal) < 0.01) timeScale = tsGoal;
+  slowFx.style.opacity = ((1 - timeScale) / (1 - CFG.items.aimTimeScale)).toFixed(2);
+  if (game.state === "playing") update(dt * timeScale);
   if (game.state === "scene") { game.sceneT += dt; if (game.sceneT >= game.sceneEnd) endScene(); }
   if (paTimer > 0) { paTimer -= dt; if (paTimer <= 0) $("pa").classList.remove("show"); }
   if (bannerTimer > 0) { bannerTimer -= dt; if (bannerTimer <= 0) ui.banner.classList.remove("show"); }
@@ -4976,6 +4985,8 @@ if (debug) {   // test-only helpers (only with ?debug in the URL)
     checkRoll(k) { const st = staff[k]; st.checkCD = new Map(); st.state = "patrol"; maybeCheckRestroom(st); const r = st.state; st.state = "patrol"; return r; },
     checkNow(k, i) { const st = staff[k]; st.state = "check"; st.checkSpot = SPOTS[i]; st.checkT = 0; },
     give(key, uses) { return addItem(key, uses); },
+    timeScale() { return timeScale; },
+    setOpt(k, v) { opts[k] = v; },
     // throw an item from the hotbar: yaw = world heading, power 0..1
     throwAt(key, power, yaw) {
       if (!game.hotbar.some((x) => x && x.key === key)) addItem(key);
