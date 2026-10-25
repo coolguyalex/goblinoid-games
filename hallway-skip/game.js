@@ -53,6 +53,7 @@
 // Step 49: more stat effects: speed helps stamina, strength pushes through crowds (and 15+ carries a fifth item), stealth means fewer restroom checks.
 // Step 50: five more outfits (skater, theater kid, prep, pajama kid, band kid, with hats) and dreadlocks and a flat top.
 // Step 51: small phones: controls and HUD sized by screen height, items wrap to a second column, overlays scroll, How to play fixed.
+// Step 52: run stats: a tally of the whole run, and an end screen that calls out only what stood out (vs. your own past runs).
 import * as THREE from "three";
 
 // =====================================================================================
@@ -1698,9 +1699,111 @@ function phaseLen(phase = game.phase) {
 const SAVE_KEY = "hallwaySkip.save.v1";
 function saveGame() {
   try { localStorage.setItem(SAVE_KEY, JSON.stringify({ day: game.day, period: game.period, score: Math.floor(game.score),
-    strikes: game.strikes, highAlert: game.highAlert, periodsSkipped: game.periodsSkipped, security: Math.round(game.security), survival: game.survival, dares: game.dares })); } catch (e) { /* storage blocked: fine */ }
+    strikes: game.strikes, highAlert: game.highAlert, periodsSkipped: game.periodsSkipped, security: Math.round(game.security), survival: game.survival, dares: game.dares, tally: game.tally })); } catch (e) { /* storage blocked: fine */ }
 }
 function loadSave() { try { const s = JSON.parse(localStorage.getItem(SAVE_KEY)); return s && s.day ? s : null; } catch (e) { return null; } }
+// ---- step 52: run stats. A tally of everything you did this run, saved with the run. At the end, each stat is compared
+// (per minute played) with your earlier runs, and only the ones that stand out (1+ standard deviation above your usual,
+// or a first) make the end screen. With no history yet, "usual" is a guess at a player who does a bit of everything (prior),
+// which your own runs take over from as they pile up (it counts as PRIOR_RUNS runs' worth of evidence).
+function tally(k, n = 1) { if (game.tally) game.tally[k] = (game.tally[k] ?? 0) + n; }
+function tallyFrame(dt) {
+  const t = game.tally; t.playSec = (t.playSec ?? 0) + dt;
+  if (!player.hidden && game.lastPX != null) {
+    const d = Math.hypot(player.x - game.lastPX, player.z - game.lastPZ);
+    if (d < 3) tally(player.board ? "skateM" : player.ride ? "chairM" : "walkM", d);   // (bigger jumps are the stairs)
+  }
+  game.lastPX = player.x; game.lastPZ = player.z;
+  if (player.sprinting) tally("sprintSec", dt);
+  t.heatMax = Math.max(t.heatMax ?? 0, game.heat);
+  if (game.survival) t.rebel = 1;
+  // a chase: someone's after you. An escape: everyone has stopped chasing and searching, and you weren't caught.
+  const hunted = staff.some((st) => st.state === "chase" || st.state === "bust");
+  if (hunted) game.chaseOn = true;
+  else if (game.chaseOn && !staff.some((st) => st.state === "search")) { game.chaseOn = false; tally("escapes"); }
+}
+const compactTally = (t) => Object.fromEntries(Object.entries(t ?? {}).filter(([, v]) => v).map(([k, v]) => [k, Math.round(v * 10) / 10]));
+const tsum = (t, test) => Object.entries(t).reduce((a, [k, v]) => a + (test(k) ? v : 0), 0);
+const hv = (t, ...ks) => ks.reduce((a, k) => a + (t["h:" + k] ?? 0), 0);
+const plural = (n, one, many = one + "s") => `${n} ${n === 1 ? one : many}`;
+const meters = (m) => (m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`);
+// prior: [usual per minute, spread]. perRun: compared per run, not per minute. min: the least worth mentioning.
+const RUN_STATS = [
+  { id: "walk", icon: "🚶", get: (t) => Math.round(t.walkM ?? 0), prior: [130, 45], min: 200,
+    text: (n) => `Walked ${meters(n)} of hallway (${(n / 91.4).toFixed(1)} football fields)` },
+  { id: "sprint", icon: "💨", get: (t) => Math.round(t.sprintSec ?? 0), prior: [6, 4], min: 20, text: (n) => `${n} seconds of all-out sprinting` },
+  { id: "skate", icon: "🛹", get: (t) => Math.round(t.skateM ?? 0), prior: [12, 20], min: 60, text: (n) => `Skated ${meters(n)}` },
+  { id: "chair", icon: "🪑", get: (t) => Math.round(t.chairM ?? 0), prior: [3, 6], min: 20, text: (n) => `Rode a wheelie chair ${meters(n)}` },
+  { id: "lockers", icon: "🗄️", get: (t) => t["hide:locker"] ?? 0, prior: [0.8, 0.5], min: 3, text: (n) => `Hid in ${plural(n, "locker")}. Cozy.` },
+  { id: "restroom", icon: "🚻", get: (t) => t["hide:restroom"] ?? 0, prior: [0.3, 0.3], min: 2, text: (n) => `${plural(n, "trip")} to the restroom. The nurse is concerned.` },
+  { id: "classroom", icon: "🤫", get: (t) => t["hide:classroom"] ?? 0, prior: [0.3, 0.3], min: 2, text: (n) => `Slipped into ${plural(n, "classroom")} and nobody noticed` },
+  { id: "closet", icon: "🧹", get: (t) => t["hide:closet"] ?? 0, prior: [0.05, 0.1], min: 1, text: (n) => `Hid in the custodian's closet ${n === 1 ? "once" : n + " times"}` },
+  { id: "spotted", icon: "🏨", get: (t) => t.spotted ?? 0, prior: [0.1, 0.15], min: 2, text: (n) => `Spotted walking into ${plural(n, "classroom")} ("Does this look like a hotel?")` },
+  { id: "grabs", icon: "🫳", get: (t) => t.grabs ?? 0, prior: [0.4, 0.4], min: 3, text: (n) => `Swiped ${plural(n, "thing")} off teachers' desks` },
+  { id: "stairs", icon: "🪜", get: (t) => t.stairs ?? 0, prior: [0.3, 0.3], min: 3, text: (n) => `Took the stairs ${n} times` },
+  { id: "escapes", icon: "🏃", get: (t) => t.escapes ?? 0, prior: [0.4, 0.35], min: 2, text: (n) => `Got away from ${plural(n, "chase")}` },
+  { id: "closeCalls", icon: "😬", get: (t) => t.closeCall ?? 0, prior: [0.1, 0.15], min: 2, text: (n) => `Held your breath through ${plural(n, "restroom check")}` },
+  { id: "staffHits", icon: "🎯", get: (t) => tsum(t, (k) => k.startsWith("h:") && k.endsWith("Staff")) + hv(t, "kickMe"), prior: [0.6, 0.5], min: 3,
+    text: (n) => `Hit staff ${n} times` },
+  { id: "kidHits", icon: "😵", get: (t) => tsum(t, (k) => k.startsWith("h:") && k.endsWith("Student")) + hv(t, "kickMeKid", "plungerBump"), prior: [1.2, 1], min: 4,
+    text: (n) => `${plural(n, "innocent bystander")} caught in the crossfire` },
+  { id: "spitballs", icon: "🫧", get: (t) => hv(t, "spitballStaff", "spitballStudent"), prior: [0.5, 0.5], min: 3, text: (n) => `${plural(n, "spitball")} found their mark` },
+  { id: "gross", icon: "🧦", get: (t) => hv(t, "oldSockStaff", "oldSockStudent", "sandwichStaff", "sandwichStudent"), prior: [0.1, 0.2], min: 2,
+    text: (n) => `Hit ${plural(n, "person", "people")} with old socks and moldy sandwiches` },
+  { id: "balls", icon: "🏀", get: (t) => hv(t, "basketballStaff", "basketballStudent", "footballStaff", "footballStudent", "frisbeeStaff", "frisbeeStudent"), prior: [0.15, 0.25], min: 2,
+    text: (n) => `Beaned ${plural(n, "person", "people")} with sports equipment` },
+  { id: "flyover", icon: "✈️", get: (t) => t.flyover ?? 0, prior: [0.8, 1], min: 5, text: (n) => `Flew paper over the heads of ${plural(n, "kid")}` },
+  { id: "tp", icon: "🧻", get: (t) => Math.round(t.tpM ?? 0), prior: [2, 4], min: 10, text: (n) => `TP'd ${meters(n)} of hallway` },
+  { id: "gum", icon: "🍬", get: (t) => hv(t, "gum"), prior: [0.2, 0.25], min: 2, text: (n) => `Stuck ${plural(n, "wad")} of gum around the school` },
+  { id: "graffiti", icon: "🎨", get: (t) => hv(t, "sprayPaint"), prior: [0.1, 0.15], min: 2, text: (n) => `Tagged ${plural(n, "wall")} with spray paint` },
+  { id: "slips", icon: "🍌", get: (t) => hv(t, "bananaPeelStaff", "bananaPeelStudent", "mopBucketStaff", "mopBucketStudent"), prior: [0.2, 0.3], min: 2,
+    text: (n) => `${plural(n, "person", "people")} slipped on something you left` },
+  { id: "slime", icon: "🟢", get: (t) => hv(t, "slimeStaff", "slimeStudent"), prior: [0.1, 0.2], min: 2, text: (n) => `Got ${plural(n, "person", "people")} stuck in slime` },
+  { id: "stink", icon: "🧪", get: (t) => t.stinkGag ?? 0, prior: [0.2, 0.4], min: 3, text: (n) => `${plural(n, "person", "people")} walked into your stink` },
+  { id: "plunger", icon: "🪠", get: (t) => hv(t, "plungerStaff", "plungerStudent"), prior: [0.05, 0.1], min: 1, text: (n) => `Plungered ${plural(n, "face")}` },
+  { id: "rammed", icon: "💥", get: (t) => hv(t, "chairStaff", "chairStudent", "boardStaff", "boardStudent"), prior: [0.15, 0.25], min: 2,
+    text: (n) => `Flattened ${plural(n, "person", "people")} with wheels` },
+  { id: "kickMe", icon: "🦵", get: (t) => hv(t, "kickMe", "kickMeKid"), prior: [0.05, 0.1], min: 1, text: (n) => `Stuck ${plural(n, "\"Kick me\" sign")} on someone` },
+  { id: "bursts", icon: "🚪", get: (t) => hv(t, "burstOut"), prior: [0.05, 0.1], min: 1, text: (n) => `Burst out of a locker ${n === 1 ? "once" : n + " times"}` },
+  { id: "highFives", icon: "🙌", get: (t) => t.highFives ?? 0, prior: [0.2, 0.25], min: 3, text: (n) => `${plural(n, "high five")}` },
+  { id: "gumTrades", icon: "🤝", get: (t) => t.gumTrades ?? 0, prior: [0.1, 0.15], min: 2, text: (n) => `${plural(n, "gum trade")} with friends` },
+  { id: "dares", icon: "📜", get: (t) => t.dares ?? 0, prior: [0.1, 0.15], min: 2, text: (n) => `Pulled off ${plural(n, "dare")}` },
+  { id: "shoves", icon: "🫸", get: (t) => t.shoves ?? 0, prior: [1, 1], min: 8, text: (n) => `Shoved ${plural(n, "kid")} out of your way` },
+  { id: "drinks", icon: "⚡", get: (t) => t.drinks ?? 0, prior: [0.1, 0.15], min: 2, text: (n) => `Downed ${plural(n, "energy drink")}` },
+  { id: "passes", icon: "🎫", get: (t) => t.passUsed ?? 0, prior: [0.05, 0.1], min: 2, text: (n) => `Talked your way out with a fake pass ${n} times` },
+  { id: "planeCatch", icon: "🫴", get: (t) => t.planeCatch ?? 0, prior: [0.05, 0.1], min: 1, text: (n) => `Caught ${plural(n, "paper airplane")} out of the air` },
+  { id: "alarm", icon: "🚨", get: (t) => hv(t, "fireAlarm"), prior: [0.02, 0.05], min: 1, text: (n) => (n === 1 ? "Pulled the fire alarm" : `Pulled the fire alarm ${n} times`) },
+  { id: "flood", icon: "🌊", get: (t) => hv(t, "flood"), prior: [0.02, 0.05], min: 1, text: () => "Flooded a restroom" },
+  { id: "mopJam", icon: "🔒", get: (t) => hv(t, "mopJam"), prior: [0.02, 0.05], min: 1, text: (n) => `Mopped ${plural(n, "teacher")} into their classroom` },
+  { id: "breaker", icon: "💡", get: (t) => hv(t, "breaker"), prior: [0.02, 0.05], min: 1, text: () => "Killed the lights" },
+  { id: "trumpet", icon: "🎺", get: (t) => hv(t, "trumpet"), prior: [0.02, 0.05], min: 1, text: (n) => `Blasted the trumpet ${n === 1 ? "once" : n + " times"}` },
+  { id: "mentos", icon: "🥤", get: (t) => hv(t, "mentos"), prior: [0.05, 0.1], min: 1, text: (n) => `Set off ${plural(n, "soda geyser")}` },
+  { id: "prize", icon: "💰", get: (t) => hv(t, "rarePrize"), prior: [0.02, 0.05], min: 1, text: () => "Found a confiscated stash" },
+  { id: "rebel", icon: "🔥", get: (t) => t.rebel ?? 0, perRun: true, prior: [0.15, 0.35], min: 1, text: () => "Went full rebel run" },
+];
+const PRIOR_RUNS = 4;
+function runStatsHtml(run, prevRuns) {
+  const t = run.tally, mins = Math.max(1.5, (t.playSec ?? 0) / 60);
+  const hist = prevRuns.filter((r) => r.tally && (r.tally.playSec ?? 0) > 30);
+  const out = [];
+  for (const D of RUN_STATS) {
+    const x = D.get(t); if (x < D.min) continue;
+    const rate = (v, r) => (D.perRun ? v : v / Math.max(1.5, (r.playSec ?? 0) / 60));
+    const xs = hist.map((r) => rate(D.get(r.tally), r.tally)), [m0, s0] = D.prior, k = PRIOR_RUNS;
+    const mean = (k * m0 + xs.reduce((a, v) => a + v, 0)) / (k + xs.length);
+    const sd = Math.max(s0 * 0.4, Math.sqrt((k * (s0 * s0 + (m0 - mean) ** 2) + xs.reduce((a, v) => a + (v - mean) ** 2, 0)) / (k + xs.length)));
+    const z = (rate(x, t) - mean) / sd, first = hist.length >= 3 && xs.every((v) => v === 0);
+    if (z < 1 && !first) continue;
+    const usual = mean * (D.perRun ? 1 : mins);
+    const tag = first ? "first time ever!" : usual >= 0.5 ? `${(x / usual).toFixed(x / usual < 10 ? 1 : 0)}× usual` : "rare";
+    out.push({ D, x, z: z + (first ? 1 : 0), tag });
+  }
+  out.sort((a, b) => b.z - a.z);
+  const hides = tsum(t, (k) => k.startsWith("hide:"));
+  const basics = `🚶 ${meters(t.walkM ?? 0)} · 🙈 hid ${plural(hides, "time")} · 🏃 ${plural(t.escapes ?? 0, "escape")}`;
+  const list = out.slice(0, 5).map((o) => `<li><span class="rsI">${o.D.icon}</span>${o.D.text(o.x)} <em>${o.tag}</em></li>`).join("");
+  return `<div class="rsBasics">${basics}</div>` + (list ? `<div class="rsHead">What made this run</div><ul class="rs">${list}</ul>` : `<div class="rsHead">A by-the-book run. Nothing out of the ordinary.</div>`);
+}
 // ---- best runs, kept in this browser: every finished run, your top 3, and whether you beat your records ----
 const RUNS_KEY = "hallwaySkip.runs.v1";
 function loadRuns() { try { const r = JSON.parse(localStorage.getItem(RUNS_KEY)); return Array.isArray(r) ? r : []; } catch (e) { return []; } }
@@ -1711,7 +1814,9 @@ const runLine = (r, i, me) => `<li${me ? ' class="me"' : ""}><b>${i + 1}.</b> ${
 function recordRun(ending) {
   const runs = loadRuns();
   const best = runs.reduce((m, r) => Math.max(m, r.score), 0), longest = runs.reduce((m, r) => Math.max(m, r.periods), 0);
-  const run = { score: Math.floor(game.score), periods: game.periodsSkipped, day: game.day, period: game.period, ending, at: Date.now() };
+  const run = { score: Math.floor(game.score), periods: game.periodsSkipped, day: game.day, period: game.period, ending, at: Date.now(),
+    tally: compactTally(game.tally) };
+  $("runStats").innerHTML = runStatsHtml(run, runs);   // step 52: compared with the runs before this one
   runs.push(run); saveRuns(runs);
   const badges = [];
   if (runs.length === 1) badges.push(`<b class="rec">First run on the board!</b>`);
@@ -1781,6 +1886,7 @@ function resetGame(save = null) {
   if (game.survival) { game.heat = 100; game.highAlert = true; }   // a saved run in survival mode stays in it
   game.unseenT = 0; game.nearMissT = 0; game.passShield = false;
   game.dares = (save?.dares ?? []).filter((m) => DARES[m.id]); game.dareOffer = null; game.daresDone = [];
+  game.tally = { ...(save?.tally ?? {}) }; game.chaseOn = false; game.lastPX = null;
   paLast = {}; Ads.newDay();
   morningSetup();
 }
@@ -1898,6 +2004,7 @@ function releaseControls() { stick.id = look.id = null; keys.clear(); sprintTouc
 
 const RELEASE_LINES = ["Now get to class!!!", "Get out of my sight!!!", "Go. GO. Before I change my mind.", "I don't want to see you again today.", "Class. Now. MOVE."];
 function caught(st) {
+  game.chaseOn = false;   // a catch isn't an escape
   cancelAim();
   game.catcher = st;
   hopOff(true);
@@ -1905,7 +2012,7 @@ function caught(st) {
   if (game.phase === "passing" && game.heat < CFG.heat.passingCatchAt && !game.survival) { shoo(st); return; }
   game.unseenT = 0;
   if (game.passShield) {   // the fake pass: one free get-out
-    game.passShield = false;
+    game.passShield = false; tally("passUsed");
     shoo(st, `You flash the fake pass. The ${st.type.name} squints at it... "Fine. Go."`);
     return;
   }
@@ -2401,6 +2508,7 @@ function tickHood(dt) {
 }
 // energy drink: the bar is twice as long (and refills faster) until boostT runs out
 function drinkEnergy() {
+  tally("drinks");
   const E = CFG.energy, again = player.boostT > 0;
   player.staminaMax = E.maxMult; player.stamina = E.maxMult; player.boostT = E.boostSec; player.winded = false;
   toast(again ? "⚡ Another one. The buzz lasts longer." : `⚡ Energy drink! Double stamina for ${E.boostSec} seconds.`, 2.4);
@@ -2415,6 +2523,7 @@ function tickBoost(dt) {
 function shove(c) {
   const S = CFG.sprint;
   if (c.slipT <= 0) {
+    tally("shoves");
     c.slipT = S.shoveStaggerSec; c.stunStyle = "flinch";
     const pr = hallProject(player.x, player.z);
     if (pr.h === c.h) { const [lo, hi] = latLimits(c.h, c.t); c.lat = c.targetLat = clamp(c.lat + (c.lat >= pr.lat ? 0.7 : -0.7), lo, hi); }
@@ -2917,6 +3026,7 @@ function update(dt) {
     if (game.phaseT >= phaseLen("skipping")) { periodSurvived(); if (game.state !== "playing") return; }
   }
   updatePlayer(dt);
+  tallyFrame(dt);
   updateCrowd(dt);
   updateStaff(dt, crowdCoverCount());
   if (game.state === "playing") { updateKickMe(dt); updateObjects(dt); updateTrails(dt); kidsGrab(dt); updateHeat(dt); updateRisk(dt); updateFriends(dt); updateAirplanes(dt); updateAlarm(dt); }
@@ -2981,7 +3091,7 @@ function nearestSpot() {
 }
 
 function enterSpot(sp) {
-  if (sp.kind === "stairs") { takeStairs(sp); return true; }
+  if (sp.kind === "stairs") { tally("stairs"); takeStairs(sp); return true; }
   const why = spotBlocked(sp);
   if (why && keyOpens(sp) && hasKey()) {   // the master key
     const i = game.hotbar.findIndex((it) => it && it.key === "masterKey");
@@ -3014,6 +3124,7 @@ function enterSpot(sp) {
     toast(`🤫 Nobody noticed you slip in. (${Math.round(ch * 100)}% chance)`, 1.8);
     dareEvent("enterRoom", { sp });
   }
+  tally("hide:" + sp.kind);
   if (sp.kind === "restroom") sp.checks = 0;   // a new stay
   if (sp.kind === "restroom") game.dareOffer = game.dares.length < CFG.dares.max ? makeDareOffer() : null;   // the kid by the sinks
   ui.hide.hidden = false;
@@ -3197,7 +3308,7 @@ function grabLoot(i) {
   if (typeof i === "string" ? sp.taken.has(i) : !sp.loot[i]) return;
   // step 44: every grab is another roll; get spotted and you leave empty-handed
   if (Math.random() >= roomHideChance(sp)) { roomSpotted(sp); return; }
-  sp.grabs = (sp.grabs || 0) + 1;
+  sp.grabs = (sp.grabs || 0) + 1; tally("grabs");
   if (typeof i === "string") {   // a special
     if (i === "prize") havoc("rarePrize", sp.R.specials.prize.points, "Confiscated stash!", { x: player.x, z: player.z });
     else if (!takeItem(i === "fakePass" ? "hallPass" : "masterKey")) return;
@@ -3280,7 +3391,7 @@ function roomSpotted(sp) {
   const C = CFG.rooms.hideCheck;
   const line = pick(sp.teacher === "sub" ? C.subLines : sp.teacher === "office" ? C.officeLines : C.lines);
   sp.lockedUntil = Math.max(sp.lockedUntil, game.period + C.lockPeriods - 1);
-  sp.lockWhy = "spotted"; sp.raided = false;
+  sp.lockWhy = "spotted"; sp.raided = false; tally("spotted");
   exitSpot(true, `${TT_NAME(sp)}: ${line} Room ${sp.room} is locked for a while.`, "SPOTTED!");
   roomBackfire(sp);
 }
@@ -3308,7 +3419,8 @@ function updateCheck(st, dt) {   // returns the walking speed this frame
   st.checkT += dt;
   st.facing = lerpAngle(st.facing, Math.atan2(sp.side * HALLS[sp.h].nx, sp.side * HALLS[sp.h].nz), damp(6, dt));   // looking in
   if (st.checkT < CFG.hiding.restroomCheck.peekSec) return 0;
-  if (player.hidden === sp && ++sp.checks < CFG.hiding.restroomCheck.foundAfter) {   // a close call: you hold your breath, they move on
+  if (player.hidden === sp && ++sp.checks < CFG.hiding.restroomCheck.foundAfter) {
+    tally("closeCall");   // a close call: you hold your breath, they move on
     const left = CFG.hiding.restroomCheck.foundAfter - sp.checks;
     toast(`The ${T.name} looks in: "Hey, do you kids have a pass?" ...You hold your breath. They move on. (${left} more and they'll find you)`, 3);
     playBlip([300, 240], 0.08, "triangle", 0.05);
@@ -4072,7 +4184,7 @@ function landObject(o) {
       if (n) havoc(o.key, n * T.perStudent + (crowdLand ? T.crowdLandBonus : 0), `${name} over ${n} kid${n === 1 ? "" : "s"}${crowdLand ? " · crowd landing!" : ""}`, { x: o.x, z: o.z });
       else if (!o.hitSet?.size && !o.trail) popup(`The ${T.label.toLowerCase()} lands. Nobody notices.`, "meh");
       if (o.trail) finishTrail(o);
-      dareEvent("flyover", { n });
+      dareEvent("flyover", { n }); tally("flyover", n);
       if (o.key === "frisbee" || o.key === "paperAirplane") { o.state = "resting"; o.mesh.rotation.set(0, o.mesh.rotation.y, 0); break; }   // pick it back up (or a kid will)
       o.state = "spent"; o.life = o.trail ? 0.6 : 1.5; break;
     }
@@ -4361,6 +4473,7 @@ function updateTrails(dt) {
 function finishTrail(o) {
   const tr = o.trail; let len = 0;
   for (let i = 1; i < tr.pts.length; i++) len += Math.hypot(tr.pts[i].x - tr.pts[i - 1].x, tr.pts[i].z - tr.pts[i - 1].z);
+  tally("tpM", len);
   if (len >= 2) havoc("tpTrail", Math.round(len * o.T.trailPointsPerM), `TP'd ${Math.round(len)} m of hallway!`, { x: o.x, z: o.z });
   o.trailLen = len;
   dareEvent("trail", { len });
@@ -4432,6 +4545,7 @@ function penStaff(st) {
   const T = ITEM_TYPES.kickMe;
   st.penned = true;
   const n = gatherKids(st.x, st.z, T.penKids, 18, [0.75, 1.15], () => !st.penned);
+  if (n) tally("penned", n);
   if (n) addScore(T.penPoints + n * 10, `${n} kids pen the ${st.type.name} in! 😂`, "item");
   st.bubble.textContent = pick(["What's so funny?", "Move, people!", "Let me THROUGH!"]); st.barkUntil = performance.now() + 2000; st.barkAt = game.time;
 }
@@ -4503,12 +4617,12 @@ function stinkCloud(o, dt) {
     if (o.hitSet.has(st) || st.type.custodian || !inside(st.x, st.z)) continue;
     o.hitSet.add(st); stunStaff(st, T.staffGagSec, "flinch");
     st.bubble.textContent = pick(["*cough*", "UGH. What IS that?", "*gag*"]); st.barkUntil = performance.now() + 1500; st.barkAt = game.time;
-    addScore(T.perStaff, `The ${st.type.name} walks into the stink`, "small");
+    addScore(T.perStaff, `The ${st.type.name} walks into the stink`, "small"); tally("stinkGag");
   }
   for (const c of crowd) {
     if (!isActive(c) || o.hitSet.has(c) || !inside(c.x, c.z)) continue;
     o.hitSet.add(c); c.slipT = Math.max(c.slipT, T.studentGagSec); c.stunStyle = "flinch";
-    addScore(T.perStudent, "Ew!", "small");
+    addScore(T.perStudent, "Ew!", "small"); tally("stinkGag");
   }
 }
 
@@ -4879,6 +4993,7 @@ function tryTapPickup(x, y) {
 function scoreMult() { return (game.survival ? CFG.survival.scoreMult : 1) * (game.nearMissT > 0 ? CFG.scoring.nearMissMult : 1); }
 function streakMult() { const S = CFG.scoring; return Math.min(S.streakMax, 1 + Math.floor(game.unseenT / S.streakStepSec) * S.streakStep); }
 function havoc(kind, base, label, opts = {}) {
+  tally("h:" + kind);
   const n = game.havocCount[kind] ?? 0;
   game.havocCount[kind] = n + 1;
   const pts = Math.max(1, Math.round(base * Math.pow(CFG.items.diminish, n) * scoreMult()));
@@ -5077,7 +5192,7 @@ function dareEvent(type, d = {}) {
 function completeDare(m) {
   const D = DARES[m.id];
   game.dares = game.dares.filter((x) => x !== m); game.daresDone.push(m.id);
-  addScore(D.points, "DARE COMPLETE!", "item");
+  addScore(D.points, "DARE COMPLETE!", "item"); tally("dares");
   banner(`DARE COMPLETE! +${Math.round(D.points * scoreMult())}<small>${D.text(m)}</small>`, 2.4);
   playBlip([523, 659, 784, 1046], 0.09, "triangle", 0.07);
 }
@@ -5172,11 +5287,11 @@ function friendTap(c) {
   if (game.state !== "playing" || F.cd > 0) return;
   if (Math.hypot(c.x - player.x, c.z - player.z) > R.interactRange) { toast("Get closer!"); return; }
   if (F.offer === "highFive") {
-    addScore(R.highFivePoints, "High five!", "item"); playBlip([880, 1320], 0.06, "square", 0.06);
+    addScore(R.highFivePoints, "High five!", "item"); tally("highFives"); playBlip([880, 1320], 0.06, "square", 0.06);
   } else if (F.offer === "gumTrade") {
     const i = game.hotbar.findIndex((s) => s && s.key === "gum");
     if (i < 0) { toast("Friend: \"Got any gum?\" (Bring them gum to trade.)"); return; }
-    addScore(R.gumTradePoints, "Gum trade!", "item");
+    addScore(R.gumTradePoints, "Gum trade!", "item"); tally("gumTrades");
     dareEvent("gumTrade");
     if (!game.passShield) {   // the main way to get a fake pass
       consumeSlot(i); game.passShield = true;
@@ -5238,7 +5353,7 @@ function updateAirplanes(dt) {
 }
 function catchPlane(o) {
   if (!addItem("paperAirplane")) return;
-  addScore(CFG.airplanes.catchPoints, "Caught it!", "item");
+  addScore(CFG.airplanes.catchPoints, "Caught it!", "item"); tally("planeCatch");
   removeObject(o);
 }
 
@@ -5504,6 +5619,10 @@ if (debug) {   // test-only helpers (only with ?debug in the URL)
     runs() { return loadRuns(); },
     forceScore(sc, per) { game.score = sc; game.periodsSkipped = per; },
     clearRuns() { saveRuns([]); },
+    tally(o) { if (o) Object.assign(game.tally, o); return { ...game.tally }; },
+    endRun() { game.strikes = CFG.strikes.max - 1; game.phase = "skipping"; game.passShield = false; caught(staff[0]); return game.state; },
+    runs() { return loadRuns(); },
+    seedRuns(a) { saveRuns(a); },
     kickMe() { const i = game.hotbar.findIndex((x) => x?.key === "kickMe"); if (i >= 0) stickKickMe(i); },
     penInfo() { return staff.map((s) => ({ key: s.key, kickMe: !!s.kickMe, penned: !!s.penned, x: s.x, z: s.z, facing: s.facing })); },
     gathered() { return crowd.filter((c) => c.mode === "gather").length; },

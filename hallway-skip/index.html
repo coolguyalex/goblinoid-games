@@ -258,6 +258,17 @@
   .board li span { opacity: .65; font-size: 12px; } .board li.me { background: rgba(255,211,107,.18); }
   #bestRuns .bt { font-size: 11px; font-weight: 800; letter-spacing: .14em; opacity: .6; margin-bottom: 2px; }
   #caught h1 { color: #ff6b6b; }
+  /* step 52: what made this run */
+  #caught { background: rgba(12, 14, 22, .93); }
+  .endCols { display: flex; flex-wrap: wrap; justify-content: center; align-items: flex-start; gap: 4px 28px; }
+  #runStats { margin: 6px 0 4px; max-width: 34em; }
+  .endCols #caughtBest { margin-top: 10px; }
+  .rsBasics { font-size: 13px; opacity: .75; }
+  .rsHead { font-size: 11px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; color: #ffd36b; margin: 8px 0 4px; }
+  ul.rs { list-style: none; margin: 0 auto; padding: 0; display: inline-block; text-align: left; font-size: 14.5px; }
+  ul.rs li { padding: 3px 10px; margin: 2px 0; border-radius: 8px; background: rgba(255,255,255,.07); }
+  ul.rs .rsI { display: inline-block; width: 1.6em; }
+  ul.rs em { font-style: normal; font-size: 11.5px; font-weight: 800; color: #8ef0a0; margin-left: 6px; white-space: nowrap; }
   #dayEnd h1 { color: #8ef0a0; }
   #dayNext .warn { color: #ff8f5c; }
   .overlay button.go { border: 0; font: inherit; font-weight: 800; cursor: pointer; }
@@ -301,6 +312,7 @@
     #staminaMeter span { display: none; }
     .opt { margin: 8px auto; padding: 8px 12px; } .statRow { margin: 8px auto; padding: 8px 12px; }
     .pop { font-size: 15px; }
+    #caughtText { font-size: 14px; } ul.rs { font-size: 13px; } ul.rs li { padding: 2px 8px; margin: 1px 0; } .rsHead { margin: 5px 0 3px; }
   }
 </style>
 </head>
@@ -359,7 +371,7 @@
 
 <div class="overlay" id="title">
   <div>
-    <span class="tag">prototype · build step 51</span>
+    <span class="tag">prototype · build step 52</span>
     <h1>Hallway Skip</h1>
     <p>Skip class. Don't get caught.</p>
     <div class="buttons">
@@ -410,7 +422,7 @@
   <div>
     <h1 id="caughtTitle">Run over!</h1>
     <p id="caughtText"></p>
-    <div id="caughtBest"></div>
+    <div class="endCols"><div id="runStats"></div><div id="caughtBest"></div></div>
     <span class="go">Tap to try again</span>
   </div>
 </div>
