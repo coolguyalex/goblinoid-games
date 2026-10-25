@@ -33,6 +33,7 @@
 // Step 31: the custodian does the cleaning (messes stay until he gets to them; kids grab balls and planes), never chases, radios you in.
 // Step 32: slime holds longer, spitballs fly farther, stuns last about 25% longer, teachers at their doors see less.
 // Step 33: every classroom has a subject (math, English, history); history rooms have a globe you can roll at someone.
+// Step 34: the custodian's closet: a mop (jams a classroom door), a wet-floor sign, a mop bucket, a plunger, and the breaker box (lights out).
 import * as THREE from "three";
 
 // =====================================================================================
@@ -100,6 +101,14 @@ const CFG = {
     kidGrabRange: 0.9, kidGrabAfterSec: 1.5,
     lingerRadius: 0.55,           // a stink cloud shrinks to this fraction once it fades, and hangs around until he airs it out
   },
+  // The custodian's closet: each item can be taken once per period; the breaker box once a day.
+  closet: {
+    grabSec: 1,
+    items: ["mop", "wetFloor", "mopBucket", "plunger"],
+    foundRange: 2.3,              // the custodian comes by his closet: this close and you're found
+    visitEverySec: [35, 70],      // how often he goes to his closet when there's nothing to clean
+  },
+  breaker: { sec: 10, visionMult: 0.4, points: 300, light: 0.22 },   // lights out: staff can barely see
   // Energy drink: a longer stamina bar (and faster refills) for a while
   energy: { boostSec: 60, maxMult: 2, rechargeMult: 1.5 },
   keyboard: { aimTurnRate: 1.8, aimPowerRate: 0.9, startPower: 0.55 },   // arrow-key aiming: radians/s and power/s
@@ -455,6 +464,8 @@ const SPOT_TYPES = {
   restroom:  { label: "Restroom", halfW: 0.75, maxStaySec: 45,
                stayLine: "Staff passing by sometimes check the stalls. Keep your feet up.", timeoutLine: "Someone's pounding on the stall door. Time to go." },
   classroom: { label: "Room", halfW: 0.6 },   // stay time comes from who's teaching
+  closet:    { label: "Custodian's closet", halfW: 0.7, maxStaySec: 30,
+               stayLine: "Mops, buckets, a breaker box. Smells like bleach. The custodian checks in here now and then.", timeoutLine: "Keys jingling outside. Time to go." },
 };
 // Who's in the room. backfire = chance per grab that they pick up the phone and call security.
 const TEACHER_TYPES = {
@@ -560,6 +571,16 @@ const ITEM_TYPES = {
   globe:         { label: "Globe", icon: "🌍", kind: "throw", roll: true, single: true, recoverable: true, speed: [5, 10], friction: 0.6, radius: 0.5, ballR: 0.3,
                    noiseRadius: 5, rumbleSec: 0.8,
                    hit: { student: 30, staff: 130, studentSec: 1.5, staffSec: 2.6, style: "fall", minSpeed: 1.2 } },
+  // Custodian's closet. Jam a classroom door shut with it: the teacher's stuck inside until the custodian frees them.
+  mop:           { label: "Mop", icon: "🧹", kind: "mop", range: 2.6, points: 200 },
+  // Set it down: anyone hurrying through (staff chasing or searching, you sprinting) slips. Walkers see it and step around.
+  wetFloor:      { label: "Wet floor sign", icon: "⚠️", kind: "place", mess: true, radius: 1.3, slipStaffSec: 2.6, slipPlayerSec: 0.8, staffPoints: 140 },
+  // Kick it over: a big puddle everyone slips on (each person once) until the custodian mops it up.
+  mopBucket:     { label: "Mop bucket", icon: "🪣", kind: "throw", trap: true, mess: true, speed: [2.5, 5], pitchDeg: 25, gravity: 9.8, trapRadius: 1.7,
+                   slipStaffSec: 2.6, slipStudentSec: 1.3, slipPlayerSec: 0.8, staffPoints: 120, studentPoints: 20 },
+  // Hits someone: it sticks on their head and they stumble around blind, bumping into people. Misses: it sticks to the wall.
+  plunger:       { label: "Plunger", icon: "🪠", kind: "throw", recoverable: true, speed: [9, 15], pitchDeg: 6, gravity: 6, blindSec: 5, blindSpeed: 2.6,
+                   staffPoints: 200, studentPoints: 25, bumpPoints: 20, studentSec: 1.8 },
   energyDrink:   { label: "Energy drink", icon: "⚡", kind: "drink" },   // tap to drink: see CFG.energy
   gum:           { label: "Gum", icon: "🍬", kind: "instant", points: 100, line: "You stick gum under the water fountain. Gross. +havoc" },
   // Junk from lockers: takes up a slot until you toss it (select it to drop it). Staff tidy it up like anything else.
@@ -567,7 +588,7 @@ const ITEM_TYPES = {
   sandwich:      { label: "Moldy sandwich", icon: "🥪", kind: "junk", line: "You toss the sandwich. Something in it moved." },
   homework:      { label: "Crumpled homework", icon: "📄", kind: "junk", line: "You toss someone's homework. It's a D-minus anyway." },
 };
-const REST_Y = { globe: 0.3, bassDrum: 0.45, trumpet: 0.06, basketball: 0.2, football: 0.14, wheelieChair: 0, whoopee: 0.08, frisbee: 0.03, slime: 0.02, mentos: 0 };   // how high items sit on the floor (default 0.04)
+const REST_Y = { wetFloor: 0, mopBucket: 0, globe: 0.3, bassDrum: 0.45, trumpet: 0.06, basketball: 0.2, football: 0.14, wheelieChair: 0, whoopee: 0.08, frisbee: 0.03, slime: 0.02, mentos: 0 };   // how high items sit on the floor (default 0.04)
 
 // Floor plan: a squared figure 8. An outer loop plus a main hall across the middle, around two classroom blocks.
 // Halls run node to node. "side" on a hall: +1 / -1 = which wall (+1 is the classroom side on the outer loop).
@@ -605,6 +626,7 @@ const LAYOUT = {
   ],
   hideLockers: [ { h: 0, t: 4 }, { h: 0, t: 25 }, { h: 1, t: 13 }, { h: 2, t: 4 }, { h: 3, t: 27 }, { h: 4, t: 13 }, { h: 5, t: 4 } ],
   restrooms: [ { h: 2, t: 12 }, { h: 5, t: 12 } ],
+  closets: [ { h: 1, t: 4 } ],   // the custodian's closet (one per floor)
   fireAlarms: [ { h: 6, t: 14.5, side: -1 }, { h: 1, t: 13.5 }, { h: 3, t: 24.5 } ],   // side defaults to the classroom wall
 };
 
@@ -780,7 +802,7 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x1d2230);
 scene.fog = new THREE.Fog(0x1d2230, 22, 48);
 const camera = new THREE.PerspectiveCamera(CFG.camera.fov, 1, 0.1, 120);
-scene.add(new THREE.HemisphereLight(0xffffff, 0x8a7f6a, 1.15));
+const hemi = new THREE.HemisphereLight(0xffffff, 0x8a7f6a, 1.15); scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xffffff, 0.75);
 sun.position.set(6, 14, 9);
 scene.add(sun);
@@ -833,7 +855,7 @@ function wallBox(h, t, lat, w, hgt, d, color, y) { const p = hallPos(h, t, lat);
     for (let t = 0.4; t < H.len - 0.4; t += spacing) {
       if (h === LAYOUT.entrance.h && Math.abs(t - LAYOUT.entrance.t) < 2.0) continue;
       if (OBSTACLES.some((o) => o.h === h && o.side === H.outerSide && Math.abs(o.t - t) < o.halfLen + 0.35)) continue;
-      if (near(LAYOUT.hideLockers, h, t, 0.75) || near(LAYOUT.restrooms, h, t, 1.0)) continue;
+      if (near(LAYOUT.hideLockers, h, t, 0.75) || near(LAYOUT.restrooms, h, t, 1.0) || near(LAYOUT.closets, h, t, 1.0)) continue;
       positions.push({ h, t });
     }
   });
@@ -897,6 +919,13 @@ for (const { h, t } of LAYOUT.restrooms) {
   wallBox(h, t, wl + side * (LAYOUT.lockerDepth - 0.11), 0.12, 0.2, 0.02, 0x3f9c9a, 2.5);
   wallBox(h, t, wl + side * (LAYOUT.lockerDepth - 0.11), 0.09, 0.09, 0.02, 0x3f9c9a, 2.66);
 }
+for (const { h, t } of LAYOUT.closets) {
+  const side = HALLS[h].outerSide, wl = wallLat(h, side), sp = addSpot("closet", h, t, side, { taken: new Set() });
+  sp.glow.push(wallBox(h, t, wl + side * (LAYOUT.lockerDepth - 0.04), 1.1, 2.2, 0.08, 0x7f8c8d, 1.1).material);
+  wallBox(h, t, wl + side * (LAYOUT.lockerDepth - 0.09), 0.8, 0.18, 0.03, 0x2d3b45, 2.0);   // the CUSTODIAN plate
+  wallBox(h, t + 0.35, wl + side * (LAYOUT.lockerDepth - 0.1), 0.06, 0.06, 0.04, 0xd4ac0d, 1.05);   // the knob
+}
+const CLOSETS = SPOTS.filter((sp) => sp.kind === "closet");
 for (const d of LAYOUT.doors) {
   const H = HALLS[d.h], side = d.side ?? (H.sideType[1] === "block" ? 1 : -1), wl = wallLat(d.h, side);
   const R = ROOM_TYPES[d.type ?? "classroom"];
@@ -1030,7 +1059,7 @@ function pickStaffPlace(typeKey) {
   const T = STAFF_TYPES[typeKey];
   if (T.stationary) {   // a teacher at a classroom door that has nobody posted yet
     const taken = new Set(staff.filter((s) => s.post).map((s) => s.post));
-    const doors = DOOR_SPOTS().filter((sp) => !taken.has(sp) && !sp.R.staff);
+    const doors = DOOR_SPOTS().filter((sp) => !taken.has(sp) && !sp.R.staff && !sp.jammed);
     doors.sort((a, b) => spotDist(b) - spotDist(a));
     const sp = pick(doors.slice(0, Math.max(1, Math.ceil(doors.length / 2))));
     const p = hallPos(sp.h, sp.t + 0.95, sp.wallLat - sp.side * 0.55);
@@ -1245,7 +1274,7 @@ function readInput() {
 const game = { state: "title", day: 1, period: 1, phase: "passing", phaseT: 0, score: 0, time: 0,
   strikes: 0, highAlert: false, periodScore: 0, periodsSkipped: 0, dayPeriodsSkipped: 0, sceneT: 0, sceneEnd: null,
   lockerUses: 0, pendingOffice: false, hotbar: [], aim: null, havocCount: {}, heat: 0, heatPending: 0, security: 0, survival: false, survivalT: 0, nextArrivalT: 0, nextRadioT: 0, alarmT: 0, alarmPulled: false,
-  unseenT: 0, nearMissT: 0, passShield: false, nextPlaneT: 0, nerveAcc: 0, dares: [], dareOffer: null, daresDone: [], chasedThisSkip: false };
+  unseenT: 0, nearMissT: 0, passShield: false, nextPlaneT: 0, nerveAcc: 0, dares: [], dareOffer: null, daresDone: [], chasedThisSkip: false, blackoutT: 0, breakerUsed: false };
 const cam = { yaw: 0 };
 const $ = (id) => document.getElementById(id);
 const ui = { phase: $("phase"), label: $("phaseLabel"), timer: $("timer"), score: $("score"), uses: $("uses"), banner: $("banner"), fps: $("fps"),
@@ -1264,7 +1293,8 @@ function dayMult(perDay) { return Math.min(CFG.days.maxMult, 1 + perDay * (game.
 function alertMult(k) { return game.highAlert ? CFG.strikes.alert[k] : 1; }
 function staffMult(k) {
   const day = { speed: CFG.days.staffSpeedPerDay, vision: CFG.days.staffVisionPerDay, notice: CFG.days.staffNoticePerDay }[k];
-  return alertMult(k) * dayMult(day) * (1 + CFG.heat.effect[k] * game.heat / 100) * (1 + CFG.security.effect[k] * game.security / 100);
+  return alertMult(k) * dayMult(day) * (1 + CFG.heat.effect[k] * game.heat / 100) * (1 + CFG.security.effect[k] * game.security / 100)
+    * (k === "vision" && game.blackoutT > 0 ? CFG.breaker.visionMult : 1);
 }
 const periodsToday = () => CFG.periodsPerDay;
 function phaseLen(phase = game.phase) {
@@ -1340,6 +1370,8 @@ function morningSetup() {
     sp.closed = false; if (sp.puddle) sp.puddle.visible = false;   // mopped overnight
   }
   game.alarmPulled = false; stopAlarm();
+  for (const sp of SPOTS) if (sp.jammed) unjam(sp);   // the custodian frees everyone overnight
+  game.breakerUsed = false; if (game.blackoutT > 0) { game.blackoutT = 0; lightsOn(); }
   startPassing(true);
   if (game.strikes >= 2) ensurePrincipal(false);
   for (const c of crowd) if (c.friend) c.friend.cd = rand(0, 6);
@@ -1361,6 +1393,7 @@ function resetSpotsForPeriod() {
   game.lockerUses = CFG.hiding.lockerUsesPerPeriod;
   for (const sp of SPOTS) {
     sp.used = false; sp.rummaged = false; sp.tpTaken = false;
+    if (sp.kind === "closet") sp.taken.clear();
     if (sp.kind === "classroom") {
       // raided last period: locked for a while, and nothing gets restocked until it opens again
       if (sp.raided) { sp.lockedUntil = game.period + CFG.rooms.raidLockPeriods - 1; sp.raided = false; }
@@ -1381,7 +1414,7 @@ function startPassing(first) {
   const P = phaseLen("passing"), doors = DOOR_SPOTS();
   for (const c of crowd) {
     c.leaveAt = game.alarmT > 0 ? Infinity : rand(CFG.crowd.leaveStartFrac, CFG.crowd.leaveEndFrac) * P;   // nobody goes to class during a fire alarm
-    c.door = pick(doors);
+    c.door = pick(doors.filter((d) => !d.jammed));
     if (!first) { c.mode = "spawning"; c.spawnAt = rand(0, CFG.crowd.floodSpreadSec); c.speed = rand(CFG.crowd.speedMin, CFG.crowd.speedMax); }
   }
   // staff for this period (the within-day curve); they stay on for the rest of the day
@@ -1944,6 +1977,7 @@ function updateStaff(dt, cover) {
       st.cone.visible = st.stunT <= 0;
       continue;
     }
+    if (st.plungerT > 0) { blindStumble(st, dt); continue; }   // a plunger on their head
     if (st.pauseT > 0) {   // "I saw you go in there." — a beat before chasing
       st.pauseT -= dt;
       st.facing = lerpAngle(st.facing, Math.atan2(player.x - st.x, player.z - st.z), damp(8, dt));
@@ -2201,10 +2235,11 @@ function updateMarkers() {
 
 let lastStam = -1;
 function drawStamina() {
-  const v = Math.round(player.stamina * 50) / 50, sec = Math.ceil(player.boostT), key = `${v}:${player.staminaMax}:${sec}:${player.winded}`;
+  const v = Math.round(player.stamina * 50) / 50, sec = Math.ceil(player.boostT), key = `${v}:${player.staminaMax}:${sec}:${player.winded}:${!!player.hidden}`;
   if (key === lastStam) return;
   lastStam = key;
   const el = $("staminaMeter");
+  el.style.visibility = player.hidden ? "hidden" : "";   // out of the way of the hiding panel
   el.querySelector("i").style.width = 190 * player.staminaMax + "px";
   $("staminaFill").style.width = (v / player.staminaMax) * 100 + "%";
   el.classList.toggle("out", player.winded); el.classList.toggle("full", v >= player.staminaMax && !player.boostT);
@@ -2264,6 +2299,8 @@ function spotBlocked(sp) {   // why this spot can't be used right now ("" if it 
   if (sp.kind === "classroom" && game.alarmT > 0) return "Fire alarm! Every classroom is locked";
   if (sp.closed) return "Out of order (somebody flooded it)";
   if (roomLocked(sp)) return `Room ${sp.room} is locked (you raided it)`;
+  if (sp.jammed) return `Room ${sp.room} is jammed shut with a mop`;
+  if (sp.used && sp.kind === "closet") return "You already hid in the closet this period";
   if (sp.used) return sp.kind === "restroom" ? "You already hid in this restroom this period" : `Room ${sp.room} already kicked you out this period`;
   if (sp.kind === "classroom" && staff.some((s) => s.post === sp)) return `Room ${sp.room}'s teacher is standing right there`;
   return "";
@@ -2384,7 +2421,7 @@ function updateHidePanel() {
 // Rooms as shops: tap an item on the desk to grab it. It costs hiding time, and the teacher might call security.
 const lootEl = $("hpLoot");
 function renderLoot(sp) {
-  const key = sp.kind === "classroom" ? `${sp.room}:${sp.lootVer}:${sp.loot.length}:${[...sp.taken]}:${game.passShield}` : `${sp.kind}${sp.h}:${sp.t}:${!!sp.rummaged}:${!!sp.tpTaken}:${game.dareOffer?.id}:${game.dares.length}`;
+  const key = sp.kind === "classroom" || sp.kind === "closet" ? `${sp.room}:${sp.lootVer}:${sp.loot?.length}:${[...sp.taken]}:${game.passShield}:${game.breakerUsed}` : `${sp.kind}${sp.h}:${sp.t}:${!!sp.rummaged}:${!!sp.tpTaken}:${game.dareOffer?.id}:${game.dares.length}`;
   if (lootEl.dataset.key === key) return;
   lootEl.dataset.key = key; lootEl.innerHTML = "";
   if (sp.kind === "restroom") {   // the bathroom flood: big points and heat, and it's closed for the rest of the day
@@ -2407,6 +2444,23 @@ function renderLoot(sp) {
       lootEl.appendChild(t);
     }
     lootEl.appendChild(b);
+    return;
+  }
+  if (sp.kind === "closet") {   // the custodian's stuff, plus the breaker box
+    for (const key of CFG.closet.items) {
+      if (sp.taken.has(key)) continue;
+      const T = ITEM_TYPES[key], b = document.createElement("button"); b.type = "button";
+      b.innerHTML = `${T.icon} ${T.label}<small>-${CFG.closet.grabSec}s</small>`;
+      b.addEventListener("click", () => grabCloset(key));
+      lootEl.appendChild(b);
+    }
+    if (!sp.taken.size) {} else if (sp.taken.size >= CFG.closet.items.length) lootEl.insertAdjacentHTML("afterbegin", `<span class="none">Shelves are bare until next period.</span>`);
+    if (!game.breakerUsed) {
+      const x = document.createElement("button"); x.type = "button"; x.className = "prize";
+      x.innerHTML = `⚡ Flip the breaker<small>lights out ${CFG.breaker.sec}s · once a day</small>`;
+      x.addEventListener("click", flipBreaker);
+      lootEl.appendChild(x);
+    }
     return;
   }
   if (sp.kind === "locker") {   // a blind grab (could be junk), or burst out
@@ -2648,8 +2702,9 @@ function updateSpotsUI() {
     if (!show) continue;
     let text, cls = "itag";
     if (sp.kind === "locker") text = sp.busted ? "Locker · busted" : blocked ? "Locker · none left" : "Locker";
+    else if (sp.kind === "closet") text = blocked ? "Custodian's closet · used" : "Custodian's closet";
     else if (sp.kind === "restroom") text = sp.closed ? "Restroom · out of order" : blocked ? "Restroom · used" : game.dares.length < CFG.dares.max ? "Restroom · 📜" : "Restroom";
-    else { text = `Room ${sp.room}${sp.R.label ? " · " + sp.R.label : ""} · ${TEACHER_TYPES[sp.teacher].label}${blocked ? (game.alarmT > 0 ? " · locked (fire alarm)" : roomLocked(sp) ? " · locked" : sp.used ? " · used" : " · guarded") : ""}`; if (sp.teacher === "sub") cls += " sub"; }
+    else { text = `Room ${sp.room}${sp.R.label ? " · " + sp.R.label : ""} · ${TEACHER_TYPES[sp.teacher].label}${blocked ? (game.alarmT > 0 ? " · locked (fire alarm)" : sp.jammed ? " · jammed 🧹" : roomLocked(sp) ? " · locked" : sp.used ? " · used" : " · guarded") : ""}`; if (sp.teacher === "sub") cls += " sub"; }
     const keyOk = blocked && keyOpens(sp) && hasKey();
     if (keyOk) text += " · 🔑";
     if (blocked && !keyOk) cls += " off"; else if (reach) cls += " near";
@@ -2721,6 +2776,23 @@ function makeItemMesh(key) {
       add(new THREE.CylinderGeometry(0.43, 0.43, 0.38, 18), 0xf4f1e8, 0);   // the white heads
       add(new THREE.CylinderGeometry(0.46, 0.46, 0.05, 18), 0xd4ac0d, 0.18); add(new THREE.CylinderGeometry(0.46, 0.46, 0.05, 18), 0xd4ac0d, -0.18);
       const band = new THREE.Mesh(new THREE.BoxGeometry(0.37, 0.1, 0.92), lambert(0x1d2230)); pivot.add(band);   // a stripe so you can see it roll
+      break;
+    }
+    case "mop": { const pole = m(new THREE.CylinderGeometry(0.025, 0.025, 1.2, 5), 0xc8a46a); pole.rotation.z = Math.PI / 2; m(new THREE.BoxGeometry(0.18, 0.1, 0.2), 0xe8e2d0).position.x = 0.62; break; }
+    case "wetFloor": {
+      for (const a of [-0.32, 0.32]) { const p = m(new THREE.BoxGeometry(0.34, 0.62, 0.02), 0xf1c40f); p.position.y = 0.3; p.rotation.x = a; p.position.z = -a * 0.3; }
+      const mark = m(new THREE.BoxGeometry(0.06, 0.2, 0.03), 0x1d2230); mark.position.set(0, 0.36, 0.11); mark.rotation.x = -0.32;
+      break;
+    }
+    case "mopBucket": {
+      const bk = m(new THREE.CylinderGeometry(0.2, 0.16, 0.3, 10), 0xf1c40f); bk.position.y = 0.15; g.userData.bucket = bk;
+      const pud = new THREE.Mesh(new THREE.CircleGeometry(1, 20), new THREE.MeshBasicMaterial({ color: 0x8fc3e0, transparent: true, opacity: 0.5, depthWrite: false }));
+      pud.rotation.x = -Math.PI / 2; pud.position.y = 0.02; pud.visible = false; g.add(pud); g.userData.puddle = pud;
+      break;
+    }
+    case "plunger": {
+      const cup = m(new THREE.SphereGeometry(0.1, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2), 0xc0392b); cup.rotation.x = Math.PI;
+      const stick = m(new THREE.CylinderGeometry(0.022, 0.022, 0.5, 5), 0xc8a46a); stick.position.y = 0.25;
       break;
     }
     case "globe": {
@@ -2820,6 +2892,8 @@ function selectSlot(i, fromKey = false) {
   if (T.kind === "instant") { consumeSlot(i); toast(T.line); havoc(it.key, T.points, T.label, { x: player.x, z: player.z }); return; }
   if (T.kind === "drink") { consumeSlot(i); drinkEnergy(); return; }
   if (T.kind === "instrument") { consumeSlot(i); playTrumpet(); return; }
+  if (T.kind === "mop") { if (jamDoor()) consumeSlot(i); return; }
+  if (T.kind === "place") { consumeSlot(i); placeSign(it.key); return; }
   if (opts.autoAim) { autoThrow(i); return; }
   game.aim = { slot: i, key: it.key, id: null, sx: 0, sy: 0, cx: 0, cy: 0 };
   $("aim").hidden = false;
@@ -3009,6 +3083,7 @@ function updateObjects(dt) {
     else if (o.state === "rolling") rollObject(o, dt);
     else if (o.state === "drum") drumRoll(o, dt);
     else if (o.state === "chairRoll") chairRoll(o, dt);
+    else if (o.state === "sign") wetSignCheck(o);
     else if (o.state === "trap") (o.key === "slime" ? slimeCheck : trapCheck)(o);
     else if (o.state === "resting" && o.key === "whoopee") stepOnCushion(o);
     else if (o.state === "cloud") stinkCloud(o, dt);
@@ -3053,6 +3128,7 @@ function custodianJobs() {
     jobs.push({ kind: "tp", tr, x: p.x, z: p.z, sec: C.tpSec, reach: 1.0 });
   }
   for (const sp of RESTROOMS) if (sp.closed) { const f = spotFront(sp, {}); jobs.push({ kind: "flood", sp, x: f.x, z: f.z, sec: C.mopSec, reach: 0.8 }); }
+  for (const sp of DOOR_SPOTS()) if (sp.jammed) { const f = spotFront(sp, {}); jobs.push({ kind: "jam", sp, x: f.x, z: f.z, sec: 3, reach: 0.8 }); }
   return jobs;
 }
 function jobGone(j) {
@@ -3060,13 +3136,17 @@ function jobGone(j) {
   if (j.kind === "cloud") return j.o.dead;
   if (j.kind === "graffiti") return !graffiti.includes(j.g);
   if (j.kind === "tp") return !tpTrails.includes(j.tr);
+  if (j.kind === "jam") return !j.sp.jammed;
+  if (j.kind === "closet") return false;
   return !j.sp.closed;
 }
-const jobKey = (j) => j.o ?? j.g ?? j.tr ?? j.sp;
+const jobKey = (j) => j.o ?? j.g ?? j.tr ?? (j.kind === "closet" ? "closet" : j.sp);
 function finishJob(st, j) {
   if (j.kind === "obj" || j.kind === "cloud") removeObject(j.o);
   else if (j.kind === "graffiti") { const i = graffiti.indexOf(j.g); graffiti.splice(i, 1); scene.remove(j.g.mesh); j.g.mesh.material.map.dispose(); j.g.mesh.material.dispose(); }
   else if (j.kind === "tp") { dropTrail(j.tr); tpTrails.splice(tpTrails.indexOf(j.tr), 1); }
+  else if (j.kind === "jam") { unjam(j.sp); toast(`The custodian pulls the mop out of room ${j.sp.room}'s door.`); }
+  else if (j.kind === "closet") { st.closetCD = rand(...CFG.closet.visitEverySec); return; }
   else { j.sp.closed = false; if (j.sp.puddle) j.sp.puddle.visible = false; if (player.hidden !== j.sp) toast("The custodian mopped up the flooded restroom. It's open again."); }
   bark(st, "tidy", true);
 }
@@ -3087,6 +3167,11 @@ function updateCustodian(st, dt, cover, stuck) {
   st.radioCD = Math.max(0, (st.radioCD ?? 0) - dt);
   if (st.suspicion >= 1) { st.suspicion = 0.4; if (st.radioCD <= 0) { st.radioCD = C.radioCooldownSec; radioIn(st); } }
   if (stuck) return 0;
+  // his closet: if you're hiding in it when he gets there, you're found
+  const cl = player.hidden?.kind === "closet" ? player.hidden : null;
+  if (cl) { const f = spotFront(cl, {}); if (Math.hypot(f.x - st.x, f.z - st.z) < CFG.closet.foundRange) {
+    exitSpot(true, `The custodian opens his closet: "HEY! Out of my closet!"`); radioIn(st); st.job = null; } }
+  st.closetCD = (st.closetCD ?? rand(...CFG.closet.visitEverySec)) - dt;
   const sus = st.suspicion > 0.05;
   if (sus) st.facing = lerpAngle(st.facing, Math.atan2(player.x - st.x, player.z - st.z), damp(5, dt));
   const speed = T.patrolSpeed * staffMult("speed") * (sus ? 0.3 : 1);
@@ -3097,6 +3182,10 @@ function updateCustodian(st, dt, cover, stuck) {
     const taken = new Set(staff.filter((o) => o !== st && o.job).map((o) => jobKey(o.job)));
     let best = null, bd = Infinity;
     for (const j of custodianJobs()) { if (taken.has(jobKey(j))) continue; const d = Math.hypot(j.x - st.x, j.z - st.z); if (d < bd) { bd = d; best = j; } }
+    if (!best && st.closetCD <= 0 && CLOSETS.length) {   // nothing to clean: back to his closet for a bit
+      const cl2 = CLOSETS.reduce((a, b) => (spotDist(a) < spotDist(b) ? a : b)), f = spotFront(cl2, {});
+      best = { kind: "closet", sp: cl2, x: f.x, z: f.z, sec: 2.5, reach: 0.9 };
+    }
     st.job = best; st.workT = 0;
   }
   if (st.job) {
@@ -3144,7 +3233,8 @@ function setTidy(st, o, wait = 0) { if (st.type.stationary) return; st.state = "
 // what staff notice: anything lying around, except traps nobody has set off yet
 function tidyable(o) {
   if (o.dead || o.wild) return false;
-  if (o.state === "trap") return o.slips > 0;
+  if (o.state === "trap") return o.slips > 0 || !!o.T.mess;
+  if (o.state === "sign") return true;
   if (o.state === "resting") return !o.T.trap || o.popped;
   return o.state === "pickup";
 }
@@ -3206,6 +3296,7 @@ function flyObject(o, dt) {
   if (plane) planeStep(o, dt, T);
   else { o.vy -= T.gravity * dt; if (T.glide) o.vy = Math.max(o.vy, -0.9); }
   if (wallBounce(o, dt, T.bounces ? 0.8 : 0.15)) {
+    if (o.key === "plunger") { stickPlungerToWall(o); return; }
     if (T.bounces) bounceNoise(o);
     else if (plane) o.stage = 3;
     else if (T.glide) o.vy = Math.min(o.vy, -2.5);
@@ -3221,6 +3312,10 @@ function flyObject(o, dt) {
   if (o.key === "slime") {   // splat on whoever it hits: they're standing in it
     const p = personHit(o, 0.45, 2.0);
     if (p) { o.x = p.who.x; o.z = p.who.z; o.y = REST_Y.slime; landObject(o); return; }
+  }
+  if (o.key === "plunger") {
+    const p = personHit(o, 0.45, 2.3);
+    if (p) { plungerHit(o, p.who, p.isStaff); return; }
   }
   if (o.key === "spitball") {
     const p = personHit(o, 0.45, 2.1);
@@ -3266,6 +3361,11 @@ function landObject(o) {
     case "slime": o.state = "trap"; o.mesh.userData.blob.scale.set(4.2, 0.22, 4.2); break;   // a puddle
     case "spitball": o.state = "spent"; o.life = 0.4; break;
     case "bananaPeel": o.state = "trap"; o.mesh.rotation.y = Math.random() * 6; break;
+    case "mopBucket": {   // tipped over: a puddle
+      o.state = "trap"; const u = o.mesh.userData; u.bucket.rotation.z = Math.PI / 2; u.bucket.position.y = 0.18;
+      u.puddle.visible = true; u.puddle.scale.setScalar(o.T.trapRadius); playBlip([300, 200, 150], 0.12, "sine", 0.08);
+      havoc("mopBucket", 40, "Splash! The mop bucket goes over", { x: o.x, z: o.z, loud: true }); makeNoise(o.x, o.z, 8, false); break;
+    }
     case "whoopee": o.state = "resting"; o.armedAt = o.age + 0.4; break;   // waits for someone to step on it
     case "basketball": case "football": o.state = "rolling"; break;
     case "stinkBomb": popStinkBomb(o); break;
@@ -3388,21 +3488,21 @@ function trapCheck(o) {
     return o.dead;
   };
   for (const st of staff) {
-    if (!chaser(st) || st.stunT > 0 || o.hitSet.has(st) || Math.hypot(st.x - o.x, st.z - o.z) > 0.55) continue;   // (the custodian steps around it)
-    dareEvent("hit", { item: "bananaPeel", staff: st.key, chasing: st.state === "chase" || st.state === "bust" });
+    if (!chaser(st) || st.stunT > 0 || o.hitSet.has(st) || Math.hypot(st.x - o.x, st.z - o.z) > (T.trapRadius ?? 0.5) + 0.05) continue;   // (the custodian steps around it)
+    dareEvent("hit", { item: o.key, staff: st.key, chasing: st.state === "chase" || st.state === "bust" });
     stunStaff(st, T.slipStaffSec, "fall"); bark(st, "slip", true);
     playBlip([700, 300], 0.12, "sawtooth", 0.07);
-    havoc("bananaStaff", T.staffPoints, `Wipeout! The ${st.type.name} slips`, { x: o.x, z: o.z, loud: true });
+    havoc(o.key + "Staff", T.staffPoints, `Wipeout! The ${st.type.name} slips`, { x: o.x, z: o.z, loud: true });
     if (slipped(st)) return;
   }
   for (const c of crowd) {
-    if (!isActive(c) || c.slipT > 0 || o.hitSet.has(c) || Math.hypot(c.x - o.x, c.z - o.z) > 0.45) continue;
+    if (!isActive(c) || c.slipT > 0 || o.hitSet.has(c) || Math.hypot(c.x - o.x, c.z - o.z) > (T.trapRadius ?? 0.45)) continue;
     c.slipT = T.slipStudentSec; c.stunStyle = "fall";
-    havoc("bananaStudent", T.studentPoints, "A kid slips!", { x: o.x, z: o.z });
+    havoc(o.key + "Student", T.studentPoints, "A kid slips!", { x: o.x, z: o.z });
     if (slipped(c)) return;
   }
-  if (o.age > 1.2 && !player.hidden && !player.ride && player.slipT <= 0 && !o.hitSet.has(player) && Math.hypot(player.x - o.x, player.z - o.z) < 0.45) {
-    player.slipT = T.slipPlayerSec; toast("You slipped on your own banana peel!");
+  if (o.age > 1.2 && !player.hidden && !player.ride && player.slipT <= 0 && !o.hitSet.has(player) && Math.hypot(player.x - o.x, player.z - o.z) < (T.trapRadius ?? 0.45)) {
+    player.slipT = T.slipPlayerSec; toast(o.key === "mopBucket" ? "You slip in your own puddle!" : "You slipped on your own banana peel!");
     slipped(player);
   }
 }
@@ -3451,7 +3551,7 @@ function tpSupport(x, z) {
   for (const ob of OBSTACLES) if (ob.h === pr.h && ob.side === side && Math.abs(pr.t - ob.t) < ob.halfLen + 0.1 && fromWall < ob.depth + 0.15) s = Math.max(s, ob.height);
   if (H.outerSide === side && fromWall < 0.2) {   // the row of lockers along the outer wall (and the hide lockers, a bit taller)
     const hide = LAYOUT.hideLockers.some((l) => l.h === pr.h && Math.abs(l.t - pr.t) < 0.5);
-    const gap = LAYOUT.restrooms.some((r) => r.h === pr.h && Math.abs(r.t - pr.t) < 1.2) || (LAYOUT.entrance.h === pr.h && Math.abs(LAYOUT.entrance.t - pr.t) < 2);
+    const gap = [...LAYOUT.restrooms, ...LAYOUT.closets].some((r) => r.h === pr.h && Math.abs(r.t - pr.t) < 1.2) || (LAYOUT.entrance.h === pr.h && Math.abs(LAYOUT.entrance.t - pr.t) < 2);
     if (hide) s = Math.max(s, 2.1); else if (!gap) s = Math.max(s, 2.0);
   }
   return s;
@@ -3836,6 +3936,126 @@ function chairRoll(o, dt) {
     done(); return;
   }
   if (Math.hypot(o.vx, o.vz) < 0.6) done();
+}
+
+// ---- the custodian's closet ----
+function grabCloset(key) {
+  const sp = player.hidden;
+  if (!sp || sp.kind !== "closet" || sp.taken.has(key) || game.state !== "playing") return;
+  if (!addItem(key)) return;
+  sp.taken.add(key); player.hideT += CFG.closet.grabSec;
+  updateHidePanel();
+}
+// lights out: staff can barely see for a few seconds
+function flipBreaker() {
+  const B = CFG.breaker;
+  if (!player.hidden || player.hidden.kind !== "closet" || game.breakerUsed || game.state !== "playing") return;
+  game.breakerUsed = true; game.blackoutT = B.sec;
+  hemi.intensity = 1.15 * B.light; sun.intensity = 0.75 * B.light;
+  banner("LIGHTS OUT!<small>The staff can barely see. Move!</small>", 2.4);
+  playBlip([120, 60], 0.25, "square", 0.1);
+  havoc("breaker", B.points, "Flipped the breaker!", { x: player.x, z: player.z, loud: true });
+  setTimeout(() => game.state === "playing" && pa(null, "Uh, we seem to be having a power issue. Please stay where you are.", 4), 900);
+  updateHidePanel();
+}
+function lightsOn() { hemi.intensity = 1.15; sun.intensity = 0.75; }
+function tickBlackout(dt) {
+  if (game.blackoutT <= 0) return;
+  game.blackoutT -= dt;
+  if (game.blackoutT <= 0) { game.blackoutT = 0; lightsOn(); toast("The lights flicker back on."); playBlip([400, 800], 0.08, "triangle", 0.05); }
+}
+// the mop, jammed through a classroom door's handle: the teacher's stuck inside until the custodian pulls it out
+function jamDoor() {
+  const T = ITEM_TYPES.mop;
+  let sp = null, bd = T.range;
+  for (const d of DOOR_SPOTS()) { const dd = spotDist(d); if (dd < bd && !d.jammed && d.roomType !== "office") { bd = dd; sp = d; } }
+  if (!sp) { toast("Get right up to a classroom door to jam it shut with the mop."); return false; }
+  if (staff.some((s) => s.post === sp)) { toast(`Room ${sp.room}'s teacher is standing right there.`); return false; }
+  sp.jammed = true;
+  const f = hallPos(sp.h, sp.t, sp.wallLat - sp.side * 0.12);
+  sp.mopMesh = makeItemMesh("mop"); sp.mopMesh.position.set(f.x, 1.0, f.z); sp.mopMesh.rotation.set(0, wallRot(sp.h), 0.5);
+  if (player.hidden === sp) exitSpot(false);
+  havoc("mopJam", T.points, `Room ${sp.room} jammed shut!`, { x: f.x, z: f.z });
+  playBlip([300, 240], 0.08, "square", 0.06);
+  setTimeout(() => game.state === "playing" && sp.jammed && toast(`*BANG BANG* "Who did this?! Open this door!" (room ${sp.room})`, 2.6), 1500);
+  return true;
+}
+function unjam(sp) { sp.jammed = false; if (sp.mopMesh) { scene.remove(sp.mopMesh); sp.mopMesh = null; } }
+// the wet-floor sign: set down just ahead of you
+function placeSign(key) {
+  const o = spawnObject(key, "sign", player.x + Math.sin(player.heading) * 0.9, 0, player.z + Math.cos(player.heading) * 0.9);
+  collide(o, 0.3); o.mesh.rotation.y = player.heading; o.hitSet = new Set(); capLying();
+  playBlip([500, 420], 0.06, "triangle", 0.05);
+  toast("Wet floor! Anyone running through here is going down.");
+}
+function wetSignCheck(o) {
+  const T = o.T, near = (x, z, r) => Math.hypot(x - o.x, z - o.z) < r;
+  for (const st of staff) {
+    if (!chaser(st) || st.stunT > 0 || o.hitSet.has(st) || !near(st.x, st.z, T.radius)) continue;
+    if (st.state !== "chase" && st.state !== "search" && st.state !== "bust") continue;   // walking, they see the sign and step around
+    o.hitSet.add(st); stunStaff(st, T.slipStaffSec, "fall"); bark(st, "slip", true);
+    playBlip([700, 300], 0.12, "sawtooth", 0.07);
+    havoc("wetFloorStaff", T.staffPoints, `The ${st.type.name} didn't read the sign!`, { x: o.x, z: o.z, loud: true });
+    dareEvent("hit", { item: "wetFloor", staff: st.key, chasing: true });
+  }
+  if (player.sprinting && !player.hidden && player.slipT <= 0 && o.age > 1 && near(player.x, player.z, T.radius * 0.8) && !o.hitSet.has(player)) {
+    o.hitSet.add(player); player.slipT = T.slipPlayerSec; toast("You ran through your own wet floor!");
+  }
+}
+// the plunger: stuck to whoever it hits (they stumble around blind) or to the wall
+function plungerHit(o, who, isStaff) {
+  const T = o.T;
+  removeObject(o);
+  if (isStaff && who.type.stationary) {   // a teacher at the door just yanks it off
+    stunStaff(who, 2.5, "flinch"); who.bubble.textContent = "REALLY?!"; who.barkUntil = performance.now() + 1800;
+    havoc("plungerStaff", T.staffPoints, `Plunger! Right on the ${who.type.name}!`, { x: who.x, z: who.z, loud: true });
+  } else if (isStaff) {
+    who.plungerT = T.blindSec; who.blindDir = who.facing; who.bumpCD = 0;
+    who.plungerMesh = makeItemMesh("plunger"); scene.remove(who.plungerMesh);
+    who.plungerMesh.position.set(0, 2.05, 0.05); who.plungerMesh.rotation.x = Math.PI; who.mesh.add(who.plungerMesh);
+    if (who.state === "chase" || who.state === "bust") { who.state = "search"; who.searchT = 0; }
+    who.camping = false; who.cone.visible = false;
+    who.bubble.textContent = "MMMPH!"; who.barkUntil = performance.now() + 2000; who.barkAt = game.time;
+    playBlip([200, 500], 0.1, "sine", 0.08);
+    havoc("plungerStaff", T.staffPoints, `Plunger! The ${who.type.name} can't see!`, { x: who.x, z: who.z, loud: true });
+    dareEvent("hit", { item: "plunger", staff: who.key, chasing: false });
+  } else {
+    who.slipT = Math.max(who.slipT, T.studentSec); who.stunStyle = "flinch";
+    havoc("plungerStudent", T.studentPoints, "Plunger to the face!", { x: who.x, z: who.z });
+  }
+}
+function stickPlungerToWall(o) {
+  const yaw = Math.atan2(-o.vx, -o.vz);   // (wallBounce already turned it around: this points back into the wall)
+  o.vx = o.vy = o.vz = 0; o.state = "resting"; o.wallStuck = true;
+  o.mesh.rotation.set(Math.PI / 2, yaw, 0, "YXZ");
+  playBlip([180, 260], 0.06, "sine", 0.06);   // thwop
+  popup("Thwop! Stuck to the wall.", "meh");
+  capLying();
+}
+// blind with a plunger on their head: wandering, bumping into kids (and colleagues)
+function blindStumble(st, dt) {
+  const T = ITEM_TYPES.plunger;
+  st.plungerT -= dt; st.bumpCD -= dt;
+  st.blindDir += (Math.random() - 0.5) * 6 * dt;
+  const ox = st.x, oz = st.z;
+  moveToward(st, st.x + Math.sin(st.blindDir), st.z + Math.cos(st.blindDir), T.blindSpeed, dt);
+  if (Math.hypot(st.x - ox, st.z - oz) < T.blindSpeed * dt * 0.4) st.blindDir += Math.PI * (0.6 + Math.random() * 0.8);   // walked into a wall: turn around
+  st.facing = st.blindDir;
+  for (const c of crowd) if (isActive(c) && c.slipT <= 0 && Math.hypot(c.x - st.x, c.z - st.z) < 0.6) {
+    c.slipT = 1.2; c.stunStyle = "fall"; havoc("plungerBump", T.bumpPoints, "Blind bump!", { x: c.x, z: c.z });
+  }
+  if (st.bumpCD <= 0) for (const o of staff) if (o !== st && o.stunT <= 0 && Math.hypot(o.x - st.x, o.z - st.z) < 0.8) {
+    st.bumpCD = 1.5; stunStaff(o, 1.2, "flinch"); bark(o, "slip", true); havoc("plungerBumpStaff", 60, `The ${st.type.name} walks into the ${o.type.name}!`, { x: o.x, z: o.z });
+  }
+  st.mesh.position.set(st.x, Math.abs(Math.sin(game.time * 9)) * 0.05, st.z); st.mesh.rotation.y = st.facing; st.mesh.rotation.z = Math.sin(game.time * 7) * 0.15;
+  if (performance.now() > st.barkUntil + 1200) { st.bubble.textContent = pick(["MMMPH!", "WHO DID THIS?!", "I can't SEE!", "*muffled yelling*"]); st.barkUntil = performance.now() + 1400; }
+  if (st.plungerT <= 0) {   // pops it off
+    st.plungerT = 0; st.mesh.remove(st.plungerMesh); st.plungerMesh = null; st.mesh.rotation.z = 0; st.cone.visible = true;
+    if (st.type.custodian) st.offHall = true;
+    else if (chaser(st)) { st.state = "return"; setReturnPoint(st); }
+    spawnObject("plunger", "resting", st.x + 0.4, 0.04, st.z);   // left lying there
+    capLying();
+  }
 }
 
 // ---- picking things up ----
@@ -4293,7 +4513,7 @@ renderer.setAnimationLoop(() => {
   if (toastTimer > 0) { toastTimer -= dt; if (toastTimer <= 0) ui.toast.classList.remove("show"); }
   drawCrowd();
   updateCamera(dt);
-  if (game.state === "playing") { updateKeyAim(dt); tickBoost(dt); }
+  if (game.state === "playing") { updateKeyAim(dt); tickBoost(dt); tickBlackout(dt); }
   updateAimPreview();
   updateKeyHint();
   updateAutoTarget();
