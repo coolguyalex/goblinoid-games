@@ -1,4 +1,4 @@
-// Hallway Skip — build step 15b prototype.
+// Hallway Skip — build step 16 prototype.
 // Step 1: hallway, joystick, a hall monitor that chases, a crowd that thins, and the bell.
 // Step 2: tap-to-interact and hiding spots: lockers, restrooms, classrooms (teacher and sub boot timers).
 // Step 3: security guard, the three-strike ladder, and the PA announcer.
@@ -14,6 +14,7 @@
 // Step 13: survival mode (replaces "Last Day"), the fire alarm, flooding bathrooms, endings that depend on your heat.
 // Step 14: keyboard for everything (E hints, slot numbers, arrow-key aiming), sprint with stamina and shoving.
 // Step 15: a bigger crowd (110 kids, ?crowd=N to try others); kids out of view aren't drawn.
+// Step 16: fewer lockers (and you can rummage through them: might be junk), nothing spawns in the halls, things stay where they land until staff tidy them up, balls only from the gym.
 import * as THREE from "three";
 
 // =====================================================================================
@@ -115,8 +116,7 @@ const CFG = {
   items: {
     slots: 4,
     pickupRange: 2.6,             // how close you must be to tap an item lying around
-    hallSpawnsPerPeriod: 3,       // items that turn up lying in the halls each period...
-    maxLying: 8,                  // ...up to this many at once
+    maxLying: 24,                 // things lying around stay until staff clean them up; past this many, the oldest get swept away
     aimTimeScale: 0.5,            // the game runs at half speed while you line up a throw
     flickFullFrac: 0.32,          // a drag this long (fraction of the screen's short side) is a full-power throw
     minFlickPx: 22,               // shorter than this counts as a tap (cancels the throw)
@@ -124,9 +124,23 @@ const CFG = {
     blinkSec: 5,                  // recoverable items blink for this long before they vanish
   },
 
+  // Staff tidy up: anything lying in the halls that a staff member walks past (and sees) gets picked up.
+  // Traps (banana peels, whoopee cushions, slime) aren't noticed until they go off; whoever set one off
+  // cleans it up once they're back on their feet.
+  tidy: {
+    noticeRange: 6,               // how far away staff notice something lying around (it also has to be in their cone)
+    pickupSec: 1.2,               // how long they stand there picking it up ("Who left this here?")
+    afterTrapSec: 1.0,            // after setting off a trap: this long (after any stun) before they pick it up
+  },
+  // Lockers: hide in one, and you can rummage through it once per period. It's a blind grab: you might get junk.
+  lockers: {
+    rummageSec: 2,                // eats this much of your hiding time
+    loot: [["spitball", 4], ["gum", 4], ["paperAirplane", 3], ["whoopee", 2], ["bananaPeel", 2], ["sprayPaint", 1],
+           ["oldSock", 3], ["sandwich", 3], ["homework", 3]],
+  },
+
   rooms: {
     grabSec: 1.5,                 // grabbing an item off a desk eats this much of your hiding time (subs: see TEACHER_TYPES)
-    hallItemLifeSec: 45,          // items lying in the halls vanish after this long (blinking at the end)
     raidLockPeriods: 2,           // grab anything from a room and its door is locked for this many periods (no restock either)
   },
 
@@ -295,12 +309,12 @@ const PA_LINES = {
 const BARKS = {   // speech bubbles over staff heads
   hallMonitor:   { suspicious: ["Hmm?", "Is that...?", "*squints*"], chase: ["HEY!", "Walking! WALKING!", "Stop right there!"],
                    search: ["Where'd you go...", "I know you're here."], giveUp: ["Kids these days.", "Must've been nothing."],
-                   slip: ["WHOA—", "My back!"], bust: ["I SAW that.", "Nice try."] },
+                   slip: ["WHOA—", "My back!"], bust: ["I SAW that.", "Nice try."], tidy: ["Who left this here?", "Unbelievable.", "*sigh* Kids."] },
   securityGuard: { suspicious: ["...", "Movement."], chase: ["Code gray hoodie!", "Freeze!"], search: ["Come out, come out..."],
-                   giveUp: ["Copy. Lost visual."], slip: ["Man down!"], winded: ["*wheeze*", "Gimme... a sec..."], bust: ["Gotcha."] },
+                   giveUp: ["Copy. Lost visual."], slip: ["Man down!"], winded: ["*wheeze*", "Gimme... a sec..."], bust: ["Gotcha."], tidy: ["Confiscated.", "Evidence."] },
   hallTeacher:   { suspicious: ["Excuse me?"], alarm: ["HALL PASS!", "Excuse me?!", "SECURITY!"] },
   principal:     { suspicious: ["Mm-hm."], chase: ["YOUNG PERSON!", "MY OFFICE!"], search: ["Hiding won't help."],
-                   giveUp: ["This isn't over."], slip: ["Who put this here?!"], bust: ["Out. Now."] },
+                   giveUp: ["This isn't over."], slip: ["Who put this here?!"], bust: ["Out. Now."], tidy: ["In MY school?", "Disgraceful."] },
 };
 const CAUGHT_LINES = {   // strike 1, by who caught you
   hallMonitor:   ["\"You better get to class.\"", "\"Pass? No? Didn't think so.\"", "\"I'm writing this down. In pen.\""],
@@ -356,7 +370,7 @@ const ROOM_TYPES = {
   art:       { label: "Art room", plaque: 0xe67e22, loot: [["sprayPaint", 4], ["wheelieChair", 3], ["paperAirplane", 2], ["gum", 1]], count: [1, 2] },
   gym:       { label: "Gym", plaque: 0xe74c3c, loot: [["basketball", 4], ["football", 3], ["whoopee", 1]], count: [1, 2] },
   office:    { label: "Main office", plaque: 0x34495e, door: 0x4a3426, staff: "office", count: [2, 3],
-               loot: [["wheelieChair", 2], ["whoopee", 2], ["basketball", 2], ["bananaPeel", 2]],
+               loot: [["wheelieChair", 2], ["whoopee", 2], ["gum", 2], ["bananaPeel", 2]],
                // once-per-day specials: the confiscated drawer (points), a fake hall pass, and the master key
                specials: { prize: { icon: "🗄️", label: "Raid the confiscated-stuff drawer", points: 300 },
                            fakePass: { icon: "🎫", label: "Swipe a hall pass" },
@@ -369,30 +383,34 @@ const ITEM_TYPES = {
   paperAirplane: { label: "Paper airplane", icon: "✈️", kind: "throw", speed: [6, 11], pitchDeg: 8, gravity: 1.2, glide: true,
                    // two-stage flight: soars over heads (fly-over points), then drops to head height (can hit people)
                    cruiseY: 2.55, highSec: [0.45, 1.3], lowY: 1.35, sinkRate: 0.75, drag: 0.25,
-                   perStudent: 10, crowdLandBonus: 50, crowdLandCount: 3, spawnWeight: 3,
+                   perStudent: 10, crowdLandBonus: 50, crowdLandCount: 3,
                    hit: { student: 20, staff: 80, studentSec: 0.5, staffSec: 0.7, style: "flinch" } },
-  spitball:      { label: "Spitball", icon: "🫧", kind: "throw", uses: 3, speed: [12, 18], pitchDeg: 4, gravity: 6, spawnWeight: 4,
+  spitball:      { label: "Spitball", icon: "🫧", kind: "throw", uses: 3, speed: [12, 18], pitchDeg: 4, gravity: 6,
                    hit: { student: 25, staff: 75, studentSec: 0.4, staffSec: 0.8, style: "flinch" } },
-  bananaPeel:    { label: "Banana peel", icon: "🍌", kind: "throw", speed: [2, 4.5], pitchDeg: 35, gravity: 9.8, lifeSec: 40,
-                   afterSlipSec: 10, maxSlips: 5,   // stays down after the first slip so others can slip too
-                   slipStaffSec: 2.5, slipStudentSec: 1.0, slipPlayerSec: 0.8, staffPoints: 150, studentPoints: 30, spawnWeight: 2 },
-  whoopee:       { label: "Whoopee cushion", icon: "💨", kind: "throw", recoverable: true, speed: [3, 8], pitchDeg: 35, gravity: 9.8,
-                   noiseRadius: 14, lifeSec: 20, points: 50, spawnWeight: 2 },   // goes off when someone steps on it (you too)
+  bananaPeel:    { label: "Banana peel", icon: "🍌", kind: "throw", speed: [2, 4.5], pitchDeg: 35, gravity: 9.8,
+                   maxSlips: 5,   // stays down until a staff member slips on it (and cleans it up) or it's been slipped on 5 times
+                   slipStaffSec: 2.5, slipStudentSec: 1.0, slipPlayerSec: 0.8, staffPoints: 150, studentPoints: 30 },
+  whoopee:       { label: "Whoopee cushion", icon: "💨", kind: "throw", recoverable: true, trap: true, speed: [3, 8], pitchDeg: 35, gravity: 9.8,
+                   noiseRadius: 14, points: 50 },   // goes off when someone steps on it (you too)
   basketball:    { label: "Basketball", icon: "🏀", kind: "throw", recoverable: true, speed: [5, 11], pitchDeg: 30, gravity: 9.8,
-                   bounces: [6, 8], restitution: 0.72, noiseRadius: 10, lingerSec: 5, bouncePoints: 5, spawnWeight: 2,
+                   bounces: [6, 8], restitution: 0.72, noiseRadius: 10, bouncePoints: 5,
                    hit: { student: 35, staff: 140, studentSec: 1.0, staffSec: 1.8, style: "fall", minSpeed: 2 } },
   football:      { label: "Football", icon: "🏈", kind: "throw", recoverable: true, speed: [8, 15], pitchDeg: 26, gravity: 9.8,
                    bounces: [4, 7], restitution: [0.45, 0.85], erratic: 1.3,   // each bounce turns it up to ±1.3 rad, at a random bounciness
-                   noiseRadius: 10, lingerSec: 5, bouncePoints: 6, spawnWeight: 1,
+                   noiseRadius: 10, bouncePoints: 6,
                    hit: { student: 35, staff: 140, studentSec: 1.0, staffSec: 1.8, style: "fall", minSpeed: 2 } },
-  stinkBomb:     { label: "Stink bomb", icon: "🧪", kind: "throw", speed: [4, 9], pitchDeg: 30, gravity: 9.8, spawnWeight: 0,   // science labs only
+  stinkBomb:     { label: "Stink bomb", icon: "🧪", kind: "throw", speed: [4, 9], pitchDeg: 30, gravity: 9.8,   // science labs only
                    points: 60, cloudRadius: 2.3, cloudSec: 10, noiseRadius: 12,
                    perStudent: 15, perStaff: 60, studentGagSec: 0.8, staffGagSec: 1.4 },   // extra points for everyone who walks through it
-  sprayPaint:    { label: "Spray paint", icon: "🎨", kind: "spray", uses: 3, points: 100, wallRange: 1.7, spawnWeight: 0 },   // art rooms only
-  masterKey:     { label: "Master key", icon: "🔑", kind: "key", uses: 3, spawnWeight: 0 },   // the principal's office only: opens locked or used doors
+  sprayPaint:    { label: "Spray paint", icon: "🎨", kind: "spray", uses: 3, points: 100, wallRange: 1.7 },   // art rooms only
+  masterKey:     { label: "Master key", icon: "🔑", kind: "key", uses: 3 },   // the principal's office only: opens locked or used doors
   wheelieChair:  { label: "Wheelie chair", icon: "🪑", kind: "ride", rideSpeed: 9.5, maxRideSec: 3, dazeSec: 1.5, leftoverSec: 3,
-                   studentPoints: 40, spawnWeight: 1 },
-  gum:           { label: "Gum", icon: "🍬", kind: "instant", points: 100, line: "You stick gum under the water fountain. Gross. +havoc", spawnWeight: 3 },
+                   studentPoints: 40 },
+  gum:           { label: "Gum", icon: "🍬", kind: "instant", points: 100, line: "You stick gum under the water fountain. Gross. +havoc" },
+  // Junk from lockers: takes up a slot until you toss it (select it to drop it). Staff tidy it up like anything else.
+  oldSock:       { label: "Old gym sock", icon: "🧦", kind: "junk", line: "You drop the sock. It lands with a damp slap." },
+  sandwich:      { label: "Moldy sandwich", icon: "🥪", kind: "junk", line: "You toss the sandwich. Something in it moved." },
+  homework:      { label: "Crumpled homework", icon: "📄", kind: "junk", line: "You toss someone's homework. It's a D-minus anyway." },
 };
 const REST_Y = { basketball: 0.2, football: 0.14, wheelieChair: 0, whoopee: 0.08 };   // how high items sit on the floor (default 0.04)
 
@@ -430,8 +448,7 @@ const LAYOUT = {
     { h: 6, t: 14, side: 1, room: 201, type: "gym" }, { h: 6, t: 25, side: 1, room: 202 }, { h: 2, t: 8.5, room: 203, type: "science" },
     { h: 3, t: 9.75, room: 204 }, { h: 3, t: 19.5, room: 205, type: "art" }, { h: 3, t: 29.25, room: 206 }, { h: 4, t: 8.5, room: 207 },
   ],
-  hideLockers: [ { h: 0, t: 4 }, { h: 0, t: 14.5 }, { h: 0, t: 25 }, { h: 0, t: 35 }, { h: 1, t: 4 }, { h: 1, t: 13 },
-                 { h: 2, t: 4 }, { h: 3, t: 5 }, { h: 3, t: 27 }, { h: 3, t: 34 }, { h: 4, t: 4 }, { h: 4, t: 13 }, { h: 5, t: 4 } ],
+  hideLockers: [ { h: 0, t: 4 }, { h: 0, t: 25 }, { h: 1, t: 13 }, { h: 2, t: 4 }, { h: 3, t: 27 }, { h: 4, t: 13 }, { h: 5, t: 4 } ],
   restrooms: [ { h: 2, t: 12 }, { h: 5, t: 12 } ],
   fireAlarms: [ { h: 6, t: 14.5, side: -1 }, { h: 1, t: 13.5 }, { h: 3, t: 24.5 } ],   // side defaults to the classroom wall
 };
@@ -1129,7 +1146,7 @@ function resetGame(save = null) {
 function resetSpotsForPeriod() {
   game.lockerUses = CFG.hiding.lockerUsesPerPeriod;
   for (const sp of SPOTS) {
-    sp.used = false;
+    sp.used = false; sp.rummaged = false;
     if (sp.kind === "classroom") {
       // raided last period: locked for a while, and nothing gets restocked until it opens again
       if (sp.raided) { sp.lockedUntil = game.period + CFG.rooms.raidLockPeriods - 1; sp.raided = false; }
@@ -1146,7 +1163,6 @@ function resetSpotsForPeriod() {
 function startPassing(first) {
   game.phase = "passing"; game.phaseT = 0; game.periodScore = 0;
   game.havocCount = {}; game.nextPlaneT = rand(...CFG.airplanes.everySec);
-  spawnHallItems();
   const P = phaseLen("passing"), doors = DOOR_SPOTS();
   for (const c of crowd) {
     c.leaveAt = game.alarmT > 0 ? Infinity : rand(CFG.crowd.leaveStartFrac, CFG.crowd.leaveEndFrac) * P;   // nobody goes to class during a fire alarm
@@ -1673,7 +1689,7 @@ function updateStaff(dt, cover) {
       const base = st.post ? Math.atan2(-st.post.side * HALLS[st.post.h].nx, -st.post.side * HALLS[st.post.h].nz) : st.facing;
       const want = st.suspicion > 0.05 ? Math.atan2(player.x - st.x, player.z - st.z) : st.distractT > 0 ? Math.atan2(st.dX - st.x, st.dZ - st.z) : base + Math.sin(st.sweep) * (T.sweepDeg * Math.PI / 180);
       st.facing = lerpAngle(st.facing, want, damp(st.suspicion > 0.05 ? 5 : 2, dt));
-    } else if (st.state === "patrol" || st.state === "return") {
+    } else if (st.state === "patrol" || st.state === "return" || st.state === "tidy") {
       const look = canSeePlayer(st, 1, true);
       if (look.seen) {
         st.suspicion += noticeRate(st, look.d, cover) * dt;
@@ -1681,7 +1697,18 @@ function updateStaff(dt, cover) {
       } else st.suspicion = Math.max(0, st.suspicion - D.decayRate * dt);
 
       if (st.suspicion >= 1) { startChase(st); }
-      else if (st.state === "return") {
+      else if (st.state === "tidy") {   // "Who left this here?"
+        const o = st.tidyObj;
+        if (!o || o.dead) { st.state = "return"; setReturnPoint(st); }
+        else if (st.tidyT < 0) st.tidyT += dt;   // just set off a trap: a beat before picking it up
+        else {
+          speed = T.patrolSpeed * staffMult("speed");
+          if (navToward(st, o.x, o.z, speed, dt) < 0.6) {
+            speed = 0; st.tidyT += dt;
+            if (st.tidyT >= CFG.tidy.pickupSec) { removeObject(o); bark(st, "tidy", true); st.state = "return"; setReturnPoint(st); }
+          }
+        }
+      } else if (st.state === "return") {
         speed = T.patrolSpeed * staffMult("speed");
         const tgt = hallPos(st.h, st.t, 0);
         if (navToward(st, tgt.x, tgt.z, speed, dt) < 0.3) st.state = "patrol";
@@ -1691,6 +1718,8 @@ function updateStaff(dt, cover) {
         if (T.roamTurnSec) { st.roamT -= dt; if (st.roamT <= 0) { st.roamT = rand(...T.roamTurnSec); if (Math.random() < 0.6) st.to = otherEnd(st.h, st.to); } }
         walk(st, speed * dt, patrolChooser(st));
         hallPos(st.h, st.t, 0, st);
+        st.tidyScanT = (st.tidyScanT ?? 0) - dt;   // glance around for things lying in the hall
+        if (st.tidyScanT <= 0 && st.suspicion < 0.05) { st.tidyScanT = 0.4; const o = findTidy(st); if (o) setTidy(st, o); }
         const base = hallHeading(st.h, st.to === HALLS[st.h].b ? 1 : -1);
         const want = st.suspicion > 0.05 ? Math.atan2(player.x - st.x, player.z - st.z) : st.distractT > 0 ? Math.atan2(st.dX - st.x, st.dZ - st.z) : base + Math.sin(st.sweep) * (T.sweepDeg * Math.PI / 180);
         st.facing = lerpAngle(st.facing, want, damp(st.suspicion > 0.05 ? 5 : 3, dt));
@@ -1956,7 +1985,7 @@ function enterSpot(sp) {
     if (!lineOfSight(st.x, st.z, f.x, f.z)) continue;
     if ((st.state === "chase" || st.state === "search") && d < st.type.visionRange * CFG.detection.chaseSightRangeMult) {
       st.state = "bust"; st.bustSpot = sp;
-    } else if ((st.state === "patrol" || st.state === "return") && st.suspicion > 0.5 && d < st.type.visionRange) {
+    } else if ((st.state === "patrol" || st.state === "return" || st.state === "tidy") && st.suspicion > 0.5 && d < st.type.visionRange) {
       st.state = "search"; st.searchT = 0; st.lastX = st.tx = f.x; st.lastZ = st.tz = f.z;   // "...was that a kid?"
     }
   }
@@ -2034,13 +2063,21 @@ function updateHidePanel() {
 // Rooms as shops: tap an item on the desk to grab it. It costs hiding time, and the teacher might call security.
 const lootEl = $("hpLoot");
 function renderLoot(sp) {
-  const key = sp.kind === "classroom" ? `${sp.room}:${sp.lootVer}:${sp.loot.length}:${[...sp.taken]}:${game.passShield}` : sp.kind + sp.h;
+  const key = sp.kind === "classroom" ? `${sp.room}:${sp.lootVer}:${sp.loot.length}:${[...sp.taken]}:${game.passShield}` : `${sp.kind}${sp.h}:${sp.t}:${!!sp.rummaged}`;
   if (lootEl.dataset.key === key) return;
   lootEl.dataset.key = key; lootEl.innerHTML = "";
   if (sp.kind === "restroom") {   // the bathroom flood: big points and heat, and it's closed for the rest of the day
     const b = document.createElement("button"); b.type = "button"; b.className = "prize";
     b.innerHTML = `🚽 Flood the toilets<small>+${CFG.flood.points} · lots of heat</small>`;
     b.addEventListener("click", floodRestroom);
+    lootEl.appendChild(b);
+    return;
+  }
+  if (sp.kind === "locker") {   // a blind grab: could be good, could be junk
+    if (sp.rummaged) { lootEl.innerHTML = `<span class="none">You already went through this one.</span>`; return; }
+    const b = document.createElement("button"); b.type = "button";
+    b.innerHTML = `🎒 Rummage around<small>-${CFG.lockers.rummageSec}s · might be junk</small>`;
+    b.addEventListener("click", rummageLocker);
     lootEl.appendChild(b);
     return;
   }
@@ -2085,6 +2122,16 @@ function grabLoot(i) {
   sp.raided = true;   // locked for a while from the next bell
   player.hideT += TT.grabSec ?? CFG.rooms.grabSec;
   if (Math.random() < TT.backfire) roomBackfire(sp);
+  updateHidePanel();
+}
+function rummageLocker() {
+  const sp = player.hidden;
+  if (!sp || sp.kind !== "locker" || sp.rummaged || game.state !== "playing") return;
+  const key = pickWeighted(CFG.lockers.loot);
+  if (!addItem(key)) return;   // inventory full: nothing happens
+  sp.rummaged = true;
+  player.hideT += CFG.lockers.rummageSec;
+  if (ITEM_TYPES[key].kind === "junk") toast(`${ITEM_TYPES[key].icon} Junk. Great. (Select it to toss it.)`);
   updateHidePanel();
 }
 // The teacher spots you rummaging and calls security: the nearest guard (or anyone free) heads for the door.
@@ -2249,6 +2296,11 @@ function makeItemMesh(key) {
       break;
     }
     case "gum": m(new THREE.BoxGeometry(0.16, 0.05, 0.09), 0xff8fc8); break;
+    case "oldSock": { m(new THREE.BoxGeometry(0.1, 0.06, 0.32), 0xe8e4d8); const toe = m(new THREE.BoxGeometry(0.2, 0.06, 0.1), 0xe8e4d8); toe.position.set(0.05, 0, 0.16);
+      m(new THREE.BoxGeometry(0.105, 0.065, 0.05), 0xc0392b).position.z = -0.12; break; }
+    case "sandwich": { m(new THREE.BoxGeometry(0.22, 0.04, 0.22), 0xd9b77a).position.y = 0.0; m(new THREE.BoxGeometry(0.21, 0.03, 0.21), 0x6b8e23).position.y = 0.035;
+      m(new THREE.BoxGeometry(0.22, 0.04, 0.22), 0xd9b77a).position.y = 0.07; break; }
+    case "homework": m(new THREE.IcosahedronGeometry(0.11, 0), 0xf7f7f2); break;
   }
   scene.add(g);
   return g;
@@ -2271,19 +2323,13 @@ function pickWeighted(pairs) {
   for (const [k, w] of pairs) if ((r -= w) <= 0) return k;
   return pairs[0][0];
 }
-function spawnHallItems() {
-  const lying = objects.filter((o) => o.state === "pickup").length;
-  const table = Object.entries(ITEM_TYPES).map(([k, T]) => [k, T.spawnWeight]);
-  for (let i = 0; i < CFG.items.hallSpawnsPerPeriod && lying + i < CFG.items.maxLying; i++) {
-    for (let tries = 0; tries < 12; tries++) {
-      const h = Math.floor(Math.random() * HALLS.length), t = rand(1.5, HALLS[h].len - 1.5), [lo, hi] = latLimits(h, t);
-      const p = hallPos(h, t, rand(lo, hi));
-      if (Math.hypot(p.x - player.x, p.z - player.z) < 8) continue;
-      const key = pickWeighted(table);
-      spawnObject(key, "pickup", p.x, REST_Y[key] ?? 0.04, p.z, { life: CFG.rooms.hallItemLifeSec });
-      break;
-    }
-  }
+// What can turn up "found" (fire alarm spill, gum trades): the locker table without the junk.
+const goodLoot = () => CFG.lockers.loot.filter(([k]) => ITEM_TYPES[k].kind !== "junk");
+// Things lying around stay until staff tidy them up. If the halls fill up anyway, the oldest get swept away.
+const isLying = (o) => !o.dead && (o.state === "pickup" || o.state === "resting" || o.state === "trap");
+function capLying() {
+  const lying = objects.filter(isLying);
+  for (let i = 0; i < lying.length - CFG.items.maxLying; i++) removeObject(lying[i]);
 }
 
 // ---- hotbar ----
@@ -2321,6 +2367,11 @@ function selectSlot(i, fromKey = false) {
   const T = ITEM_TYPES[it.key];
   if (T.kind === "spray") { if (sprayPaint()) consumeSlot(i); return; }
   if (T.kind === "key") { toast(`Master key: walk into a locked door to open it (${it.uses} use${it.uses === 1 ? "" : "s"} left)`, 2.4); return; }
+  if (T.kind === "junk") {   // toss it: it lands at your feet, and staff will tidy it up
+    consumeSlot(i); toast(T.line);
+    spawnObject(it.key, "resting", player.x + Math.sin(player.heading) * 0.6, 0.04, player.z + Math.cos(player.heading) * 0.6);
+    capLying(); playBlip([300, 200], 0.06, "triangle", 0.04); return;
+  }
   if (T.kind === "instant") { consumeSlot(i); toast(T.line); havoc(it.key, T.points, T.label, { x: player.x, z: player.z }); return; }
   game.aim = { slot: i, key: it.key, id: null, sx: 0, sy: 0, cx: 0, cy: 0 };
   $("aim").hidden = false;
@@ -2465,6 +2516,28 @@ function stunStaff(st, sec, style) {
   st.stunT = Math.max(st.stunT, sec); st.stunStyle = style;
   if (st.state === "chase" || st.state === "bust") { st.state = "search"; st.searchT = 0; st.lastX = st.tx = player.x; st.lastZ = st.tz = player.z; }
 }
+// ---- staff tidying up: they walk over to things lying around and pick them up ----
+function claimedBy(o) { return staff.find((s) => s.state === "tidy" && s.tidyObj === o) ?? null; }
+function setTidy(st, o, wait = 0) { if (st.type.stationary) return; st.state = "tidy"; st.tidyObj = o; st.tidyT = -wait; }
+// what staff notice: anything lying around, except traps nobody has set off yet
+function tidyable(o) {
+  if (o.dead || o.wild) return false;
+  if (o.state === "trap") return o.slips > 0;
+  if (o.state === "resting") return !o.T.trap || o.popped;
+  return o.state === "pickup";
+}
+function findTidy(st) {
+  const T = st.type, R = CFG.tidy.noticeRange, half = (T.visionHalfAngleDeg * Math.PI) / 180;
+  let best = null, bd = R;
+  for (const o of objects) {
+    if (!tidyable(o)) continue;
+    const dx = o.x - st.x, dz = o.z - st.z, d = Math.hypot(dx, dz);
+    if (d >= bd || Math.abs(angDiff(st.facing, Math.atan2(dx, dz))) > half || !lineOfSight(st.x, st.z, o.x, o.z) || claimedBy(o)) continue;
+    bd = d; best = o;
+  }
+  return best;
+}
+
 // who: a staff member or a student. Returns true if it counted (each thing hits each person once).
 function hitPerson(o, who, isStaff) {
   const Hh = o.T.hit;
@@ -2559,12 +2632,13 @@ function landObject(o) {
       o.state = "spent"; o.life = 1.5; break;
     }
     case "spitball": o.state = "spent"; o.life = 0.4; break;
-    case "bananaPeel": o.state = "trap"; o.life = T.lifeSec; o.mesh.rotation.y = Math.random() * 6; break;
-    case "whoopee": o.state = "resting"; o.life = T.lifeSec; o.armedAt = o.age + 0.4; break;   // waits for someone to step on it
+    case "bananaPeel": o.state = "trap"; o.mesh.rotation.y = Math.random() * 6; break;
+    case "whoopee": o.state = "resting"; o.armedAt = o.age + 0.4; break;   // waits for someone to step on it
     case "basketball": case "football": o.state = "rolling"; break;
     case "stinkBomb": popStinkBomb(o); break;
-    default: o.state = "resting"; o.life = 10;
+    default: o.state = "resting";
   }
+  capLying();
 }
 function rollObject(o, dt) {
   const k = Math.exp(-1.6 * dt); o.vx *= k; o.vz *= k;
@@ -2575,7 +2649,7 @@ function rollObject(o, dt) {
     const p = personHit(o, 0.5, 1);
     if (p && hitPerson(o, p.who, p.isStaff)) { o.vx *= -0.35; o.vz *= -0.35; }
   }
-  if (Math.hypot(o.vx, o.vz) < 0.25) { o.state = "resting"; o.life = o.T.lingerSec; }
+  if (Math.hypot(o.vx, o.vz) < 0.25) { o.state = "resting"; capLying(); }
 }
 function bounceNoise(o) {
   playFootstep(o.x, o.z, true);
@@ -2589,12 +2663,13 @@ function cushionNoise(o, who) {
   playBlip([95, 70, 110, 60], 0.09, "sawtooth", 0.1);   // pfffft
   const label = who === "player" ? "PFFFT! You sat on your own cushion" : who?.type ? `PFFFT! The ${who.type.name} steps on it` : "PFFFT! A kid steps on it";
   havoc("whoopee", o.T.points, label, { x: o.x, z: o.z, loud: true });
-  if (who?.type) bark(who, "slip", true);
-  makeNoise(o.x, o.z, o.T.noiseRadius, true, o);
+  o.popped = true;   // now staff notice it lying there
+  if (who?.type) { bark(who, "slip", true); setTidy(who, o, CFG.tidy.afterTrapSec); }   // they pick it up (it can't go off again)
+  makeNoise(o.x, o.z, o.T.noiseRadius, true, who?.type ? who : null);
 }
 // Goes off when anyone steps on it: staff, a student, or you (then the staff come to see who it was).
 function stepOnCushion(o) {
-  if (o.age < (o.armedAt ?? 1) || o.noiseCD > 0) return;
+  if (o.age < (o.armedAt ?? 1) || o.noiseCD > 0 || claimedBy(o)) return;   // (not while someone's coming to pick it up)
   const on = (x, z, r) => Math.hypot(x - o.x, z - o.z) < r;
   const st = staff.find((s) => on(s.x, s.z, 0.55));
   if (st) { cushionNoise(o, st); return; }
@@ -2602,25 +2677,24 @@ function stepOnCushion(o) {
   if (!player.hidden && on(player.x, player.z, 0.45)) cushionNoise(o, "player");
 }
 // A noise: staff nearby either come to investigate (pull) or just turn and look.
-function makeNoise(x, z, radius, pull) {
+function makeNoise(x, z, radius, pull, except = null) {
   for (const st of staff) {
     const d = Math.hypot(st.x - x, st.z - z);
-    if (d > radius || st.state === "chase" || st.state === "bust" || st.stunT > 0) continue;
+    if (st === except || d > radius || st.state === "chase" || st.state === "bust" || st.stunT > 0) continue;
     if (pull && !st.type.stationary) {
       st.state = "search"; st.searchT = -Math.min(8, d / (st.type.chaseSpeed * 0.8));
       st.lastX = st.tx = x; st.lastZ = st.tz = z; st.suspicion = Math.max(st.suspicion, 0.3);
     } else { st.distractT = 2.2; st.dX = x; st.dZ = z; }
   }
 }
-// Anyone who steps on it slips (each person once). It stays down after the first slip, then vanishes
-// afterSlipSec later or after maxSlips slips, whichever comes first.
+// Anyone who steps on it slips (each person once). It stays down until a staff member slips on it
+// (they pick it up once they're back on their feet) or it's been slipped on maxSlips times.
 function trapCheck(o) {
   const T = o.T;
   o.hitSet ??= new Set();
   const slipped = (who) => {
     o.hitSet.add(who);
-    if (++o.slips === 1) o.life = Math.min(o.life, T.afterSlipSec);
-    if (o.slips >= T.maxSlips) removeObject(o);
+    if (++o.slips >= T.maxSlips) removeObject(o);
     return o.dead;
   };
   for (const st of staff) {
@@ -2629,6 +2703,7 @@ function trapCheck(o) {
     playBlip([700, 300], 0.12, "sawtooth", 0.07);
     havoc("bananaStaff", T.staffPoints, `Wipeout! The ${st.type.name} slips`, { x: o.x, z: o.z, loud: true });
     if (slipped(st)) return;
+    if (!claimedBy(o)) setTidy(st, o, CFG.tidy.afterTrapSec);
   }
   for (const c of crowd) {
     if (!isActive(c) || c.slipT > 0 || o.hitSet.has(c) || Math.hypot(c.x - o.x, c.z - o.z) > 0.45) continue;
@@ -2939,7 +3014,7 @@ function pullFireAlarm(a) {
     c.leaveAt = Infinity;
   }
   // stuff everywhere: items fall out of lockers and backpacks, and they stay until picked up
-  const table = Object.entries(ITEM_TYPES).filter(([k]) => k !== "masterKey").map(([k, T]) => [k, Math.max(1, T.spawnWeight)]);
+  const table = goodLoot();
   for (let i = 0; i < F.items; i++) {
     for (let tries = 0; tries < 12; tries++) {
       const h = Math.floor(Math.random() * HALLS.length), t = rand(1.5, HALLS[h].len - 1.5), [lo, hi] = latLimits(h, t), p = hallPos(h, t, rand(lo, hi));
@@ -3068,7 +3143,7 @@ function friendTap(c) {
       consumeSlot(i); game.passShield = true;
       popup("🎫 They slip you a fake pass! Your next catch doesn't count.", "item"); playBlip([523, 659, 784], 0.08, "triangle", 0.06);
     } else {
-      const got = pickWeighted(Object.entries(ITEM_TYPES).filter(([k]) => k !== "gum").map(([k, T]) => [k, T.spawnWeight]));
+      const got = pickWeighted(goodLoot().filter(([k]) => k !== "gum"));
       game.hotbar[i] = { key: got, uses: ITEM_TYPES[got].uses ?? 1 }; renderHotbar();
       popup(`Traded gum for ${ITEM_TYPES[got].icon} ${ITEM_TYPES[got].label}`, "item"); playBlip([660, 990], 0.06, "triangle", 0.06);
     }
@@ -3301,7 +3376,7 @@ if (debug) {   // test-only helpers (only with ?debug in the URL)
       game.aim = { slot, key }; release(game.aim, { dx: Math.sin(yaw), dz: Math.cos(yaw), power });
       return objects.length ? objects[objects.length - 1].id : null;
     },
-    obj(id) { const o = objects.find((x) => x.id === id); return o ? { state: o.state, x: o.x, y: o.y, z: o.z, stage: o.stage, slips: o.slips, life: o.life, hits: o.hitSet?.size ?? 0, flown: o.flown.size, dead: !!o.dead } : null; },
+    obj(id) { const o = objects.find((x) => x.id === id); return o ? { claimed: claimedBy(o)?.key ?? null, popped: !!o.popped, state: o.state, x: o.x, y: o.y, z: o.z, stage: o.stage, slips: o.slips, life: o.life, hits: o.hitSet?.size ?? 0, flown: o.flown.size, dead: !!o.dead } : null; },
     heading() { return player.heading; },
     clearCrowd() { for (const c of crowd) c.mode = "gone"; },
     graffitiSheet() {   // every graffiti drawing in a grid, for checking the art
@@ -3345,13 +3420,17 @@ if (debug) {   // test-only helpers (only with ?debug in the URL)
     ads() { return { interstitialsToday: Ads.interstitialsToday, rewardedToday: { ...Ads.rewardedToday } }; },
     setHeat(h, s) { if (h != null) { game.heat = h; game.heatPending = 0; } if (s != null) game.security = s; },
     heat() { return { heat: game.heat, pending: game.heatPending, security: game.security, survival: game.survival, alarmT: game.alarmT }; },
-    objects() { return objects.map((o) => ({ key: o.key, state: o.state, x: o.x, y: o.y, z: o.z, bounces: o.bounces, life: o.life })); },
+    objects() { return objects.filter((o) => !o.dead).map((o) => ({ key: o.key, state: o.state, x: o.x, y: o.y, z: o.z, bounces: o.bounces, life: o.life })); },
     dropItem(key, dx, dz) { const o = spawnObject(key, "pickup", player.x + dx, REST_Y[key] ?? 0.04, player.z + dz); return o.id; },
     hotbar() { return game.hotbar.map((s) => s && `${s.key}${s.uses > 1 ? "x" + s.uses : ""}`); },
     playerState() { return { slipT: player.slipT, dazeT: player.dazeT, riding: !!player.ride, x: player.x, z: player.z }; },
     staffFull(k) { const s = staff[k]; return { state: s.state, stunT: s.stunT, distractT: s.distractT, x: s.x, z: s.z, key: s.key }; },
     searchTo(k, x, z) { const st = staff[k]; st.state = "search"; st.searchT = -30; st.lastX = st.tx = x; st.lastZ = st.tz = z; },
     nodes() { return NODES.map((n) => ({ id: n.id, x: n.x, z: n.z })); },
+    tidyInfo() { return staff.map((s) => ({ key: s.key, state: s.state, obj: s.tidyObj && !s.tidyObj.dead && s.state === "tidy" ? s.tidyObj.id : null, stunT: s.stunT, tidyT: s.tidyT, x: s.x, z: s.z, pauseT: s.pauseT })); },
+    rummage() { rummageLocker(); },
+    lockers() { return SPOTS.map((sp, i) => ({ i, kind: sp.kind })).filter((x) => x.kind === "locker").map((x) => x.i); },
+    selectSlot(i) { selectSlot(i); },
     phaseLens() { return { passing: phaseLen("passing"), skipping: phaseLen("skipping") }; },
     insideWalls() {   // how many people are standing inside a wall (should be 0)
       const inWall = (x, z) => WALLS.some((b) => x > b.x0 + 0.05 && x < b.x1 - 0.05 && z > b.z0 + 0.05 && z < b.z1 - 0.05);
