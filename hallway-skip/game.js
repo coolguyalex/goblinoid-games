@@ -1,4 +1,4 @@
-// Hallway Skip — build step 21 prototype.
+// Hallway Skip — build step 22 prototype.
 // Step 1: hallway, joystick, a hall monitor that chases, a crowd that thins, and the bell.
 // Step 2: tap-to-interact and hiding spots: lockers, restrooms, classrooms (teacher and sub boot timers).
 // Step 3: security guard, the three-strike ladder, and the PA announcer.
@@ -20,6 +20,7 @@
 // Step 19: dares from the kid in the restroom (hold two at a time; some are tied to a period, a hall, or a combo).
 // Step 20: "they found you, run for it!", farther spitballs, slower heat (and a bigger heat bar), a bigger score, survival mode renamed Rebel Run.
 // Step 21: loot by room and rarity (specialty items only from their room; hall passes and staff keys are rare finds), the office always has a pass and a key but its alarm calls everyone.
+// Step 22: the "kick me" sign (kids pen the staff member in until the tardy bell) and Mentos & soda (a geyser kids crowd round to watch).
 import * as THREE from "three";
 
 // =====================================================================================
@@ -140,7 +141,7 @@ const CFG = {
   // Lockers: hide in one, and you can rummage through it once per period. It's a blind grab: you might get junk.
   lockers: {
     rummageSec: 2,                // eats this much of your hiding time
-    loot: [["spitball", 4], ["gum", 4], ["paperAirplane", 3], ["whoopee", 2], ["bananaPeel", 2],
+    loot: [["spitball", 4], ["gum", 4], ["paperAirplane", 3], ["whoopee", 2], ["bananaPeel", 2], ["kickMe", 1],
            ["oldSock", 3], ["sandwich", 3], ["homework", 3]],
   },
 
@@ -385,6 +386,8 @@ const DARES = {
   cleanPeriod: { need: 1, points: 300, text: () => "Get through a whole skipping period without anyone chasing you",
                  on: { bell: (m, d) => d.clean && m.p.armed } },
   tpTrail:     { need: 1, points: 250, text: () => "TP the halls: leave a 15 m toilet-paper trail", on: { trail: (m, d) => d.len >= 15 } },
+  kickGuard:   { need: 1, points: 400, text: () => "Stick a \"kick me\" sign on a security guard", on: { kickMe: (m, d) => d.staff === "securityGuard" } },
+  geyserCrowd: { need: 1, points: 300, text: () => "Get 8 kids watching a soda geyser", on: { geyser: (m, d) => d.n >= 8 } },
   officeRaid:  { need: 1, points: 250, text: () => "Steal something from the main office", on: { raid: (m, d) => d.type === "office" } },
 };
 const DARE_KID_LINES = ["Psst. Bet you can't", "Hey. You look bored. I dare you to", "Five bucks says you won't", "Legend says nobody's ever managed to"];
@@ -413,9 +416,9 @@ const TEACHER_TYPES = {
 const ROOM_TYPES = {
   classroom: { label: "", count: [1, 2],
                loot: [["spitball", 5], ["paperAirplane", 5], ["gum", 4], ["wheelieChair", 1.2], ["hallPass", 0.35], ["masterKey", 0.12]] },
-  science:   { label: "Science lab", plaque: 0x2ecc71, loot: [["stinkBomb", 4], ["slime", 4]], count: [1, 2] },
+  science:   { label: "Science lab", plaque: 0x2ecc71, loot: [["stinkBomb", 4], ["slime", 4], ["mentos", 3]], count: [1, 2] },
   art:       { label: "Art room", plaque: 0xe67e22, always: ["sprayPaint"], count: [1, 1],
-               loot: [["paperAirplane", 3], ["gum", 3], ["spitball", 2], ["wheelieChair", 1]] },
+               loot: [["kickMe", 3], ["paperAirplane", 3], ["gum", 3], ["spitball", 2], ["wheelieChair", 1]] },
   gym:       { label: "Gym", plaque: 0xe74c3c, loot: [["basketball", 4], ["football", 3], ["frisbee", 3]], count: [1, 2] },
   // The office always has a hall pass and the staff key (restocked whenever the door's open again), but the secretary
   // is jumpy: if she catches you, she calls every staff member to the office and your heat jumps.
@@ -466,6 +469,14 @@ const ITEM_TYPES = {
   // seconds: staff can still look around and yell, they just can't move.
   slime:         { label: "Slime", icon: "🟢", kind: "throw", trap: true, speed: [4, 9], pitchDeg: 25, gravity: 9.8,
                    radius: 0.6, maxSticks: 3, stickStaffSec: 4, stickStudentSec: 2.5, stickPlayerSec: 1.5, staffPoints: 120, studentPoints: 30 },
+  // Stick it on a staff member's back (get right up behind them; if they're facing you, they catch on). During a passing
+  // period the kids crowd round laughing and pen them in until the tardy bell. Stick it on during class and it waits.
+  kickMe:        { label: "\"Kick me\" sign", icon: "🦵", kind: "sign", range: 1.4, points: 400, penKids: 9, penPoints: 100 },
+  // Science labs: lands upright, fizzes for a moment, then a geyser. Loud (staff come to look), kids crowd round to watch
+  // (cover for you), and anyone standing in the spray gets soaked.
+  mentos:        { label: "Mentos & soda", icon: "🥤", kind: "throw", speed: [3, 6.5], pitchDeg: 30, gravity: 9.8,
+                   fuseSec: 1.2, geyserSec: 4, points: 150, noiseRadius: 18, watchRadius: 14, watchKids: 10, watchSec: 9, perWatcher: 6, sprayRadius: 1.2,
+                   hit: { student: 20, staff: 80, studentSec: 0.6, staffSec: 1.2, style: "flinch" } },
   loveNote:      { label: "Love note", icon: "💌", kind: "note" },   // for the love-note dare: can't be thrown, just delivered
   sprayPaint:    { label: "Spray paint", icon: "🎨", kind: "spray", uses: 3, points: 100, wallRange: 1.7 },   // art rooms only
   masterKey:     { label: "Staff key", icon: "🔑", kind: "key", uses: 3 },
@@ -478,7 +489,7 @@ const ITEM_TYPES = {
   sandwich:      { label: "Moldy sandwich", icon: "🥪", kind: "junk", line: "You toss the sandwich. Something in it moved." },
   homework:      { label: "Crumpled homework", icon: "📄", kind: "junk", line: "You toss someone's homework. It's a D-minus anyway." },
 };
-const REST_Y = { basketball: 0.2, football: 0.14, wheelieChair: 0, whoopee: 0.08, frisbee: 0.03, slime: 0.02 };   // how high items sit on the floor (default 0.04)
+const REST_Y = { basketball: 0.2, football: 0.14, wheelieChair: 0, whoopee: 0.08, frisbee: 0.03, slime: 0.02, mentos: 0 };   // how high items sit on the floor (default 0.04)
 
 // Floor plan: a squared figure 8. An outer loop plus a main hall across the middle, around two classroom blocks.
 // Halls run node to node. "side" on a hall: +1 / -1 = which wall (+1 is the classroom side on the outer loop).
@@ -1075,6 +1086,8 @@ function interactTarget() {
     for (const c of crowd) { const F = c.friend; if (!F || F.cd > 0 || !isActive(c) || c.slipT > 0) continue; const d = Math.hypot(c.x - player.x, c.z - player.z); if (d < bd) { bd = d; best = c; } }
     if (best) return { kind: "friend", c: best, x: best.x, y: 2.3, z: best.z, label: OFFER_LABELS[best.friend.offer].toLowerCase() };
   }
+  const km = game.hotbar.findIndex((s) => s?.key === "kickMe");
+  if (km >= 0) { const st = kickMeTarget(); if (st) return { kind: "kickme", slot: km, x: st.x, y: 2.3 * st.type.scale, z: st.z, label: "stick on the sign" }; }
   let it = null, id = CFG.items.pickupRange;
   for (const o of objects) if (pickable(o)) { const d = Math.hypot(o.x - player.x, o.z - player.z); if (d < id) { id = d; it = o; } }
   if (it) return { kind: "item", o: it, x: it.x, y: it.y + 0.5, z: it.z, label: `pick up ${it.T.label.toLowerCase()}` };
@@ -1091,6 +1104,7 @@ function doInteract() {
   else if (t.kind === "plane") catchPlane(t.o);
   else if (t.kind === "friend") friendTap(t.c);
   else if (t.kind === "item") pickUp(t.o);
+  else if (t.kind === "kickme") stickKickMe(t.slot);
   else if (t.kind === "alarm") tryAlarm(t.a);
   else if (t.kind === "spot") enterSpot(t.sp);
 }
@@ -1253,7 +1267,8 @@ function startSkipping() {
   for (const m of game.dares) m.p.armed = true;   // the clean-period dare counts from the start of a skipping period
   playBell();
   banner("TARDY BELL<small>Hall's clearing out. Stay hidden until the next bell.</small>");
-  if (game.alarmT <= 0) for (const c of crowd) if (c.mode === "wander" || c.mode === "toClass") { c.mode = "toClass"; c.speed = CFG.crowd.tardyRushSpeed; }
+  if (game.alarmT <= 0) for (const c of crowd) if (c.mode === "wander" || c.mode === "toClass" || c.mode === "gather") { c.mode = "toClass"; c.gather = null; c.speed = CFG.crowd.tardyRushSpeed; }
+  for (const st of staff) if (st.penned) unpen(st);   // the tardy bell: the kids scatter to class
 }
 
 function periodSurvived() {
@@ -1608,6 +1623,13 @@ function updateCrowd(dt) {
       }
       c.lat += (c.targetLat - c.lat) * damp(1.5, dt);
       if (game.phase === "passing" && game.phaseT >= c.leaveAt) c.mode = "toClass";
+    } else if (c.mode === "gather") {   // crowding round something (a geyser, a staff member with a sign on their back)
+      const G = c.gather;
+      if (G.done()) { c.mode = "wander"; c.gather = null; c.retargetT = 0; }
+      else {
+        const there = walkTo(c, G.h, G.t, c.speed * 1.4 * dt);
+        c.lat += ((c.h === G.h ? G.lat : 0) - c.lat) * damp(there ? 4 : 1.5, dt);
+      }
     } else if (c.mode === "toClass") {
       const d = c.door;
       if (c.h !== d.h || Math.abs(c.t - d.t) > 0.05) {
@@ -2023,7 +2045,7 @@ function update(dt) {
   updatePlayer(dt);
   updateCrowd(dt);
   updateStaff(dt, crowdCoverCount());
-  if (game.state === "playing") { updateObjects(dt); updateHeat(dt); updateRisk(dt); updateFriends(dt); updateAirplanes(dt); updateAlarm(dt); }
+  if (game.state === "playing") { updateKickMe(); updateObjects(dt); updateHeat(dt); updateRisk(dt); updateFriends(dt); updateAirplanes(dt); updateAlarm(dt); }
 }
 
 // =====================================================================================
@@ -2408,6 +2430,13 @@ function makeItemMesh(key) {
     case "spitball": m(new THREE.IcosahedronGeometry(0.07, 0), 0xf4f4f4); break;
     case "toiletPaper": { const r = m(new THREE.CylinderGeometry(0.1, 0.1, 0.18, 10), 0xf6f6f0); r.rotation.z = Math.PI / 2; break; }
     case "frisbee": m(new THREE.CylinderGeometry(0.2, 0.17, 0.04, 14), 0xff5a36); break;
+    case "kickMe": m(new THREE.BoxGeometry(0.3, 0.02, 0.2), 0xffffff); break;
+    case "mentos": {
+      m(new THREE.CylinderGeometry(0.07, 0.075, 0.32, 9), 0x4a1f0c).position.y = 0.16;
+      m(new THREE.CylinderGeometry(0.076, 0.076, 0.09, 9), 0xd62828).position.y = 0.17;
+      m(new THREE.CylinderGeometry(0.03, 0.05, 0.08, 8), 0x4a1f0c).position.y = 0.36;
+      break;
+    }
     case "slime": { const b = m(new THREE.IcosahedronGeometry(0.13, 1), 0x7ee84a); b.material.emissive.setHex(0x1d4a0c); g.userData.blob = b; break; }
     case "bananaPeel": {
       m(new THREE.BoxGeometry(0.16, 0.05, 0.16), 0xf2d43b);
@@ -2462,7 +2491,7 @@ function spawnObject(key, state, x, y, z, extra = {}) {
   objects.push(o);
   return o;
 }
-function removeObject(o) { if (o.trailMesh) { scene.remove(o.trailMesh); o.trailMesh.geometry.dispose(); o.trailMesh = null; } scene.remove(o.mesh); scene.remove(o.ring); if (o.cloud) { scene.remove(o.cloud); o.cloud.material.dispose(); } o.dead = true; }
+function removeObject(o) { if (o.foam) { scene.remove(o.foam); o.foam.material.dispose(); o.foam = null; } if (o.trailMesh) { scene.remove(o.trailMesh); o.trailMesh.geometry.dispose(); o.trailMesh = null; } scene.remove(o.mesh); scene.remove(o.ring); if (o.cloud) { scene.remove(o.cloud); o.cloud.material.dispose(); } o.dead = true; }
 function clearObjects() { for (const o of objects) removeObject(o); objects.length = 0; }
 
 function pickWeighted(pairs) {
@@ -2513,6 +2542,7 @@ function selectSlot(i, fromKey = false) {
   if (game.aim?.slot === i) { cancelAim(); return; }
   const T = ITEM_TYPES[it.key];
   if (T.kind === "spray") { if (sprayPaint()) consumeSlot(i); return; }
+  if (T.kind === "sign") { stickKickMe(i); return; }
   if (T.kind === "pass") { if (game.passShield) toast("You already have a fake pass."); else { consumeSlot(i); takeItem("hallPass"); } return; }
   if (T.kind === "note") { const m = game.dares.find((x) => x.id === "loveNote"); toast(m ? `💌 Deliver it: hide in the gym during period ${m.p.period}.` : "A love note. It's not for you."); return; }
   if (T.kind === "key") { toast(`Staff key: walk into a locked door to open it (${it.uses} use${it.uses === 1 ? "" : "s"} left)`, 2.4); return; }
@@ -2643,6 +2673,8 @@ function updateObjects(dt) {
     else if (o.state === "trap") (o.key === "slime" ? slimeCheck : trapCheck)(o);
     else if (o.state === "resting" && o.key === "whoopee") stepOnCushion(o);
     else if (o.state === "cloud") stinkCloud(o, dt);
+    else if (o.state === "fuse") { o.fuseT -= dt; o.mesh.rotation.z = Math.sin(o.age * 40) * 0.08; if (o.fuseT <= 0) { o.mesh.rotation.z = 0; startGeyser(o); } }
+    else if (o.state === "geyser") geyserStep(o, dt);
     if (o.dead) continue;
     if (o.life !== Infinity) { o.life -= dt; if (o.life <= 0) removeObject(o); }
   }
@@ -2704,7 +2736,7 @@ function hitPerson(o, who, isStaff) {
     havoc(o.key + "Staff", Hh.staff, `${o.T.label} hits the ${who.type.name}!`, { x: o.x, z: o.z, loud: Hh.style === "fall" });
   } else {
     who.slipT = Math.max(who.slipT, Hh.studentSec); who.stunStyle = Hh.style;
-    havoc(o.key + "Student", Hh.student, o.key === "spitball" ? "Spitball! Ew!" : `${o.T.label} hits a kid!`, { x: o.x, z: o.z });
+    havoc(o.key + "Student", Hh.student, o.key === "spitball" ? "Spitball! Ew!" : o.key === "mentos" ? "Soaked!" : `${o.T.label} hits a kid!`, { x: o.x, z: o.z });
   }
   return true;
 }
@@ -2790,6 +2822,7 @@ function landObject(o) {
       if (o.key === "frisbee") { o.state = "resting"; o.mesh.rotation.set(0, o.mesh.rotation.y, 0); break; }   // pick it back up
       o.state = "spent"; o.life = o.trail ? 0.6 : 1.5; break;
     }
+    case "mentos": o.state = "fuse"; o.fuseT = o.T.fuseSec; o.vx = o.vz = 0; o.mesh.rotation.set(0, 0, 0); playBlip([900, 1100], 0.05, "sine", 0.03); break;
     case "slime": o.state = "trap"; o.mesh.userData.blob.scale.set(4.2, 0.22, 4.2); break;   // a puddle
     case "spitball": o.state = "spent"; o.life = 0.4; break;
     case "bananaPeel": o.state = "trap"; o.mesh.rotation.y = Math.random() * 6; break;
@@ -2948,6 +2981,94 @@ function finishTrail(o) {
   o.trail = null;
 }
 function clearTrails() { for (const m of tpTrails) { scene.remove(m); m.geometry.dispose(); } tpTrails.length = 0; }
+
+// ---- kids crowding round a spot: the n nearest kids in the halls walk over and stand in a ring until done() ----
+function gatherKids(x, z, n, radius, ring, done) {
+  const picked = crowd.filter((c) => (c.mode === "wander" || c.mode === "toClass") && c.slipT <= 0 && Math.hypot(c.x - x, c.z - z) < radius)
+    .sort((a, b) => Math.hypot(a.x - x, a.z - z) - Math.hypot(b.x - x, b.z - z)).slice(0, n);
+  picked.forEach((c, i) => {
+    const a = (i / picked.length) * Math.PI * 2 + rand(-0.25, 0.25), r = rand(ring[0], ring[1]);
+    const pr = hallProject(x + Math.sin(a) * r, z + Math.cos(a) * r), [lo, hi] = latLimits(pr.h, pr.t);
+    c.mode = "gather"; c.gather = { h: pr.h, t: pr.t, lat: clamp(pr.lat, lo, hi), done };
+  });
+  return picked.length;
+}
+
+// ---- the "kick me" sign ----
+const kickMeTex = (() => {
+  const cv = document.createElement("canvas"); cv.width = 128; cv.height = 80; const x = cv.getContext("2d");
+  x.fillStyle = "#fff"; x.fillRect(0, 0, 128, 80); x.fillStyle = "#111"; x.textAlign = "center"; x.textBaseline = "middle";
+  x.font = "900 30px 'Comic Sans MS', 'Marker Felt', cursive"; x.fillText("KICK", 64, 24); x.fillText("ME", 64, 56);
+  const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; return t;
+})();
+function kickMeTarget() {
+  const R = ITEM_TYPES.kickMe.range;
+  return staff.filter((s) => !s.kickMe && Math.hypot(s.x - player.x, s.z - player.z) < R)
+    .sort((a, b) => Math.hypot(a.x - player.x, a.z - player.z) - Math.hypot(b.x - player.x, b.z - player.z))[0] ?? null;
+}
+function stickKickMe(slot) {
+  const T = ITEM_TYPES.kickMe, st = kickMeTarget();
+  if (!st) { toast("Sneak right up behind a staff member to stick it on."); return; }
+  consumeSlot(slot);
+  const facing = st.stunT <= 0 && st.stuckT <= 0 && Math.abs(angDiff(st.facing, Math.atan2(player.x - st.x, player.z - st.z))) < (st.type.visionHalfAngleDeg * Math.PI) / 180;
+  if (facing) {   // they saw it coming
+    st.bubble.textContent = "Is that... for ME?"; st.barkUntil = performance.now() + 1800; st.barkAt = game.time;
+    toast(`The ${st.type.name} turns around just in time. Get behind them next time.`, 2.4);
+    if (!st.type.stationary) startChase(st); else { st.suspicion = 1; }
+    return;
+  }
+  st.kickMe = true;
+  st.sign = new THREE.Mesh(new THREE.PlaneGeometry(0.46, 0.3), new THREE.MeshBasicMaterial({ map: kickMeTex, side: THREE.DoubleSide }));
+  st.sign.position.set(0, 0.8, -0.34); st.sign.rotation.y = Math.PI; st.mesh.add(st.sign);
+  playBlip([700, 900], 0.05, "square", 0.04);
+  havoc("kickMe", T.points, `"KICK ME" on the ${st.type.name}!`, { x: st.x, z: st.z });
+  dareEvent("kickMe", { staff: st.key });
+  if (game.phase === "passing") penStaff(st);
+  else toast("It's on. Wait till the halls fill up...", 2.2);
+}
+function penStaff(st) {
+  const T = ITEM_TYPES.kickMe;
+  st.penned = true;
+  const n = gatherKids(st.x, st.z, T.penKids, 18, [0.75, 1.15], () => !st.penned);
+  if (n) addScore(T.penPoints + n * 10, `${n} kids pen the ${st.type.name} in! 😂`, "item");
+  st.bubble.textContent = pick(["What's so funny?", "Move, people!", "Let me THROUGH!"]); st.barkUntil = performance.now() + 2000; st.barkAt = game.time;
+}
+function unpen(st) {
+  st.penned = false; st.kickMe = false; st.stuckT = 0;
+  if (st.sign) { st.mesh.remove(st.sign); st.sign.material.dispose(); st.sign = null; }
+  st.bubble.textContent = "...Very funny."; st.barkUntil = performance.now() + 1800; st.barkAt = game.time;
+}
+function updateKickMe() {
+  for (const st of staff) {
+    if (st.penned) st.stuckT = Math.max(st.stuckT || 0, 0.2);   // can look and yell, can't get out
+    else if (st.kickMe && game.phase === "passing" && game.phaseT > 3) penStaff(st);   // tagged during class: the next passing period
+  }
+}
+
+// ---- Mentos & soda: fizz, then a geyser ----
+const foamGeo = new THREE.CylinderGeometry(0.3, 0.1, 1, 10, 1, false).translate(0, 0.5, 0);
+function startGeyser(o) {
+  const T = o.T;
+  o.state = "geyser"; o.gT = T.geyserSec;
+  o.foam = new THREE.Mesh(foamGeo, new THREE.MeshLambertMaterial({ color: 0xfff6e0, emissive: 0x8a7550 }));
+  o.foam.position.set(o.x, 0.38, o.z); scene.add(o.foam);
+  playBlip([180, 260, 340, 420], 0.12, "sawtooth", 0.06);
+  havoc("mentos", T.points, "GEYSER!", { x: o.x, z: o.z, loud: true });
+  makeNoise(o.x, o.z, T.noiseRadius, true);
+  const until = game.time + T.watchSec;
+  const n = gatherKids(o.x, o.z, T.watchKids, T.watchRadius, [1.7, 2.6], () => game.time > until);
+  if (n) addScore(n * T.perWatcher, `${n} kids crowd round to watch`, "small");
+  dareEvent("geyser", { n });
+}
+function geyserStep(o, dt) {
+  const T = o.T;
+  o.gT -= dt;
+  const k = 1 - o.gT / T.geyserSec, h = 2.6 * Math.min(1, k * 4) * Math.pow(Math.max(0, o.gT / T.geyserSec), 0.35);
+  o.foam.scale.set(1 + Math.sin(o.age * 30) * 0.12, Math.max(0.01, h), 1 + Math.cos(o.age * 27) * 0.12);
+  const p = personHit(o, T.sprayRadius, 9);
+  if (p) hitPerson(o, p.who, p.isStaff);
+  if (o.gT <= 0) { scene.remove(o.foam); o.foam.material.dispose(); o.foam = null; o.state = "resting"; o.popped = true; capLying(); }   // an empty bottle: litter
+}
 
 // ---- the stink bomb: pops on landing (noise pulls staff over), then a cloud that pays for everyone who walks through ----
 const cloudGeo = new THREE.IcosahedronGeometry(1, 1);
@@ -3727,6 +3848,9 @@ if (debug) {   // test-only helpers (only with ?debug in the URL)
     nodes() { return NODES.map((n) => ({ id: n.id, x: n.x, z: n.z })); },
     tidyInfo() { return staff.map((s) => ({ key: s.key, state: s.state, obj: s.tidyObj && !s.tidyObj.dead && s.state === "tidy" ? s.tidyObj.id : null, stunT: s.stunT, tidyT: s.tidyT, x: s.x, z: s.z, pauseT: s.pauseT })); },
     rummage() { rummageLocker(); },
+    kickMe() { const i = game.hotbar.findIndex((x) => x?.key === "kickMe"); if (i >= 0) stickKickMe(i); },
+    penInfo() { return staff.map((s) => ({ key: s.key, kickMe: !!s.kickMe, penned: !!s.penned, x: s.x, z: s.z, facing: s.facing })); },
+    gathered() { return crowd.filter((c) => c.mode === "gather").length; },
     dares() { return { active: game.dares.map((m) => ({ id: m.id, n: m.n, need: m.need, p: m.p, got: m.got, text: DARES[m.id].text(m) })), offer: game.dareOffer?.id ?? null, done: game.daresDone }; },
     takeDare() { takeDare(); },
     forceDare(id) { const m = { id, n: 0, need: DARES[id].need, p: {}, got: [] }; if (DARES[id].setup && !DARES[id].setup(m)) return false; game.dares.push(m); renderDares(); return m.p; },
