@@ -1,4 +1,4 @@
-// Hallway Skip — build step 18 prototype.
+// Hallway Skip — build step 19 prototype.
 // Step 1: hallway, joystick, a hall monitor that chases, a crowd that thins, and the bell.
 // Step 2: tap-to-interact and hiding spots: lockers, restrooms, classrooms (teacher and sub boot timers).
 // Step 3: security guard, the three-strike ladder, and the PA announcer.
@@ -17,6 +17,7 @@
 // Step 16: fewer lockers (and you can rummage through them: might be junk), nothing spawns in the halls, things stay where they land until staff tidy them up, balls only from the gym.
 // Step 17: slime (science: whoever steps in it is stuck), toilet paper (restrooms: flies like the airplane, leaves a streamer), frisbee (gym: long flight, pick it back up).
 // Step 18: no restroom sweep timer: staff walking past a restroom check it about half the time ("Hey, do you kids have a pass?").
+// Step 19: dares from the kid in the restroom (hold two at a time; some are tied to a period, a hall, or a combo).
 import * as THREE from "three";
 
 // =====================================================================================
@@ -187,7 +188,8 @@ const CFG = {
     stunSec: 3,                   // every staff member is stunned (hands over ears) this long
     items: 8,                     // items scattered around the halls; they don't vanish until picked up
   },
-  flood: { points: 400, heat: 60, noiseRadius: 16 },   // flooding a bathroom: points, heat, and that bathroom is closed for the day
+  flood: { points: 400, heat: 60, noiseRadius: 16 },
+  dares: { max: 2, recentAvoid: 4 },   // dares you can hold at once; don't re-offer the last few you finished   // flooding a bathroom: points, heat, and that bathroom is closed for the day
 
   // Friends in the crowd raise a hand during passing periods: tap their bubble.
   friends: {
@@ -348,6 +350,42 @@ const GRAFFITI = [
 ];
 const LUNCHES = ["mystery tacos.", "rectangle pizza.", "the meatloaf (again).", "\"breakfast for lunch.\"", "chicken nuggets of uncertain origin.", "soup?"];
 
+// Dares: a kid in the restroom hands these out, one per visit; you can hold CFG.dares.max at a time.
+// Each is data: text, points, an optional setup (random room/period/hall), and which game events move it along.
+// period: must be done in that period (fails after). scope "period": progress resets every bell. scope "day": fails at the end of the day.
+const STAFF_ITEM = (item, staffKey) => (m, d) => d.item === item && d.staff === staffKey;
+const DARES = {
+  spitMonitor: { need: 3, points: 300, text: () => "Hit a hall monitor with a spitball 3 times", on: { hit: STAFF_ITEM("spitball", "hallMonitor") } },
+  gumTrade:    { need: 1, points: 150, text: () => "Trade gum with a friend", on: { gumTrade: () => true } },
+  loveNote:    { need: 1, points: 450,
+                 setup(m) { const labs = SPOTS.filter((sp) => sp.roomType === "science" && !roomLocked(sp)); if (!labs.length) return false;
+                   m.p.from = pick(labs).room; m.p.period = Math.min(periodsToday(), game.period + 1 + Math.floor(Math.random() * 2)); return true; },
+                 text: (m) => `Get the love note from the science lab (room ${m.p.from}) to the gym during period ${m.p.period}` + (m.p.has ? " · 💌 got it" : ""),
+                 on: { enterRoom: (m, d) => {
+                   if (d.sp.roomType !== "gym" || !game.hotbar.some((it) => it?.key === "loveNote")) return false;
+                   if (game.period !== m.p.period) { toast(`💌 Not yet: the note's for period ${m.p.period}.`); return false; }
+                   consumeSlot(game.hotbar.findIndex((it) => it?.key === "loveNote")); return true; } } },
+  tagHalls:    { need: 7, points: 800, text: () => "Tag every hallway with graffiti", on: { tag: (m, d) => (m.got.includes(d.h) ? false : (m.got.push(d.h), true)) } },
+  floodPeriod: { need: 1, points: 350,
+                 setup(m) { if (!RESTROOMS.some((sp) => !sp.closed)) return false; m.p.period = Math.min(periodsToday(), game.period + Math.floor(Math.random() * 3)); return true; },
+                 text: (m) => `Flood a bathroom during period ${m.p.period}`, on: { flood: (m) => game.period === m.p.period } },
+  flyOver:     { need: 1, points: 300, text: () => "Fly something over 10 kids in one throw", on: { flyover: (m, d) => d.n >= 10 } },
+  raidHall:    { need: 3, points: 500, scope: "day",
+                 setup(m) { const halls = [0, 3, 6]; m.p.h = pick(halls); m.p.rooms = SPOTS.filter((sp) => sp.kind === "classroom" && sp.h === m.p.h).map((sp) => sp.room); m.need = m.p.rooms.length; return true; },
+                 text: (m) => `Raid every room on the ${HALLS[m.p.h].name} today`,
+                 on: { raid: (m, d) => (m.p.rooms.includes(d.room) && !m.got.includes(d.room) ? (m.got.push(d.room), true) : false) } },
+  combo:       { need: 3, points: 600, scope: "period", text: () => "Hit staff with a basketball, a spitball AND a banana peel in one period",
+                 on: { hit: (m, d) => (d.staff && ["basketball", "spitball", "bananaPeel"].includes(d.item) && !m.got.includes(d.item) ? (m.got.push(d.item), true) : false) } },
+  chaseSlip:   { need: 1, points: 400, text: () => "Make a staff member slip on a banana peel while they're chasing you", on: { hit: (m, d) => d.item === "bananaPeel" && d.staff && d.chasing } },
+  lureWhoopee: { need: 1, points: 250, text: () => "Get a hall monitor to sit... er, step on a whoopee cushion", on: { whoopee: (m, d) => d.staff === "hallMonitor" } },
+  slimeGuard:  { need: 1, points: 350, text: () => "Slime a security guard", on: { hit: STAFF_ITEM("slime", "securityGuard") } },
+  cleanPeriod: { need: 1, points: 300, text: () => "Get through a whole skipping period without anyone chasing you",
+                 on: { bell: (m, d) => d.clean && m.p.armed } },
+  tpTrail:     { need: 1, points: 250, text: () => "TP the halls: leave a 15 m toilet-paper trail", on: { trail: (m, d) => d.len >= 15 } },
+  officeRaid:  { need: 1, points: 250, text: () => "Steal something from the main office", on: { raid: (m, d) => d.type === "office" } },
+};
+const DARE_KID_LINES = ["Psst. Bet you can't", "Hey. You look bored. I dare you to", "Five bucks says you won't", "Legend says nobody's ever managed to"];
+
 // Hiding spots are data: a new kind is one entry here (placement lives in LAYOUT).
 const SPOT_TYPES = {
   locker:    { label: "Locker", halfW: 0.45, maxStaySec: 15,
@@ -419,6 +457,7 @@ const ITEM_TYPES = {
   // seconds: staff can still look around and yell, they just can't move.
   slime:         { label: "Slime", icon: "🟢", kind: "throw", trap: true, speed: [4, 9], pitchDeg: 25, gravity: 9.8,
                    radius: 0.6, maxSticks: 3, stickStaffSec: 4, stickStudentSec: 2.5, stickPlayerSec: 1.5, staffPoints: 120, studentPoints: 30 },
+  loveNote:      { label: "Love note", icon: "💌", kind: "note" },   // for the love-note dare: can't be thrown, just delivered
   sprayPaint:    { label: "Spray paint", icon: "🎨", kind: "spray", uses: 3, points: 100, wallRange: 1.7 },   // art rooms only
   masterKey:     { label: "Master key", icon: "🔑", kind: "key", uses: 3 },   // the principal's office only: opens locked or used doors
   wheelieChair:  { label: "Wheelie chair", icon: "🪑", kind: "ride", rideSpeed: 9.5, maxRideSec: 3, dazeSec: 1.5, leftoverSec: 3,
@@ -1076,7 +1115,7 @@ function readInput() {
 const game = { state: "title", day: 1, period: 1, phase: "passing", phaseT: 0, score: 0, time: 0,
   strikes: 0, highAlert: false, periodScore: 0, periodsSkipped: 0, dayPeriodsSkipped: 0, sceneT: 0, sceneEnd: null,
   lockerUses: 0, pendingOffice: false, hotbar: [], aim: null, havocCount: {}, heat: 0, heatPending: 0, security: 0, survival: false, survivalT: 0, nextArrivalT: 0, nextRadioT: 0, alarmT: 0, alarmPulled: false,
-  unseenT: 0, nearMissT: 0, passShield: false, nextPlaneT: 0, nerveAcc: 0 };
+  unseenT: 0, nearMissT: 0, passShield: false, nextPlaneT: 0, nerveAcc: 0, dares: [], dareOffer: null, daresDone: [], chasedThisSkip: false };
 const cam = { yaw: 0 };
 const $ = (id) => document.getElementById(id);
 const ui = { phase: $("phase"), label: $("phaseLabel"), timer: $("timer"), score: $("score"), uses: $("uses"), banner: $("banner"), fps: $("fps"),
@@ -1108,7 +1147,7 @@ function phaseLen(phase = game.phase) {
 const SAVE_KEY = "hallwaySkip.save.v1";
 function saveGame() {
   try { localStorage.setItem(SAVE_KEY, JSON.stringify({ day: game.day, period: game.period, score: Math.floor(game.score),
-    strikes: game.strikes, highAlert: game.highAlert, periodsSkipped: game.periodsSkipped, security: Math.round(game.security), survival: game.survival })); } catch (e) { /* storage blocked: fine */ }
+    strikes: game.strikes, highAlert: game.highAlert, periodsSkipped: game.periodsSkipped, security: Math.round(game.security), survival: game.survival, dares: game.dares })); } catch (e) { /* storage blocked: fine */ }
 }
 function loadSave() { try { const s = JSON.parse(localStorage.getItem(SAVE_KEY)); return s && s.day ? s : null; } catch (e) { return null; } }
 function clearSave() { try { localStorage.removeItem(SAVE_KEY); } catch (e) { /* fine */ } }
@@ -1156,6 +1195,7 @@ function resetGame(save = null) {
   game.survival = !!save?.survival; game.survivalT = 0; game.alarmT = 0;
   if (game.survival) { game.heat = 100; game.highAlert = true; }   // a saved run in survival mode stays in it
   game.unseenT = 0; game.nearMissT = 0; game.passShield = false;
+  game.dares = (save?.dares ?? []).filter((m) => DARES[m.id]); game.dareOffer = null; game.daresDone = [];
   paLast = {}; Ads.newDay();
   morningSetup();
 }
@@ -1198,12 +1238,16 @@ function startPassing(first) {
 
 function startSkipping() {
   game.phase = "skipping"; game.phaseT = 0;
+  game.chasedThisSkip = false;
+  for (const m of game.dares) m.p.armed = true;   // the clean-period dare counts from the start of a skipping period
   playBell();
   banner("TARDY BELL<small>Hall's clearing out. Stay hidden until the next bell.</small>");
   if (game.alarmT <= 0) for (const c of crowd) if (c.mode === "wander" || c.mode === "toClass") { c.mode = "toClass"; c.speed = CFG.crowd.tardyRushSpeed; }
 }
 
 function periodSurvived() {
+  dareEvent("bell", { clean: !game.chasedThisSkip });
+  daresAtBell(false);
   playBell();
   game.periodsSkipped++; game.dayPeriodsSkipped++;
   if (!game.survival) { game.heat *= 1 - CFG.heat.bellDrop; game.heatPending *= 1 - CFG.heat.bellDrop; }
@@ -1222,6 +1266,7 @@ function dayOver() {
   releaseControls();
   ui.banner.classList.remove("show"); bannerTimer = 0;
   if (player.hidden) exitSpot(false);
+  daresAtBell(true);
   game.score += CFG.days.dayBonus;
   const D = CFG.days, next = game.day + 1;
   $("dayTitle").textContent = `DAY ${game.day} SURVIVED!`;
@@ -1381,6 +1426,8 @@ function startRun(save) {
   if (save) banner(`DAY ${game.day} · PERIOD ${game.period}<small>Welcome back. Strikes: ${game.strikes}/${CFG.strikes.max}</small>`, 2.6);
   else banner("PASSING PERIOD<small>Blend in. When the bell rings, don't be in class.</small>");
   setTimeout(() => game.state === "playing" && pa("start"), 1200);
+  if (!save) setTimeout(() => game.state === "playing" && toast("Psst: there's a kid in the restroom handing out dares.", 3), 9000);
+  renderDares();
   tryFullscreenLandscape();
   saveGame();
 }
@@ -1845,6 +1892,7 @@ function callBackup(caller, announce) {
 }
 
 function startChase(st) {
+  if (game.phase === "skipping") game.chasedThisSkip = true;
   if (st.state !== "chase") { playBlip([520, 780], 0.1, "square", 0.08); addHeat(CFG.heat.seenRunning); bark(st, "chase"); }   // "Hey!"
   st.state = "chase"; st.suspicion = 1;
   st.lastX = player.x; st.lastZ = player.z;
@@ -2019,6 +2067,8 @@ function enterSpot(sp) {
     }
   }
   playBlip([260, 200], 0.07, "triangle", 0.07);
+  if (sp.kind === "classroom") dareEvent("enterRoom", { sp });
+  if (sp.kind === "restroom") game.dareOffer = game.dares.length < CFG.dares.max ? makeDareOffer() : null;   // the kid by the sinks
   ui.hide.hidden = false;
   updateHidePanel();
   return true;
@@ -2089,13 +2139,22 @@ function updateHidePanel() {
 // Rooms as shops: tap an item on the desk to grab it. It costs hiding time, and the teacher might call security.
 const lootEl = $("hpLoot");
 function renderLoot(sp) {
-  const key = sp.kind === "classroom" ? `${sp.room}:${sp.lootVer}:${sp.loot.length}:${[...sp.taken]}:${game.passShield}` : `${sp.kind}${sp.h}:${sp.t}:${!!sp.rummaged}:${!!sp.tpTaken}`;
+  const key = sp.kind === "classroom" ? `${sp.room}:${sp.lootVer}:${sp.loot.length}:${[...sp.taken]}:${game.passShield}` : `${sp.kind}${sp.h}:${sp.t}:${!!sp.rummaged}:${!!sp.tpTaken}:${game.dareOffer?.id}:${game.dares.length}`;
   if (lootEl.dataset.key === key) return;
   lootEl.dataset.key = key; lootEl.innerHTML = "";
   if (sp.kind === "restroom") {   // the bathroom flood: big points and heat, and it's closed for the rest of the day
     const b = document.createElement("button"); b.type = "button"; b.className = "prize";
     b.innerHTML = `🚽 Flood the toilets<small>+${CFG.flood.points} · lots of heat</small>`;
     b.addEventListener("click", floodRestroom);
+    const kid = document.createElement("div"); kid.className = "dareKid";
+    if (game.dareOffer) {
+      kid.innerHTML = `<span>Kid by the sinks: "${game.dareOffer.line ??= pick(DARE_KID_LINES)} ${DARES[game.dareOffer.id].text(game.dareOffer).replace(/^./, (c) => c.toLowerCase())}."</span>`;
+      const d = document.createElement("button"); d.type = "button"; d.className = "prize";
+      d.innerHTML = `📜 Take the dare<small>+${DARES[game.dareOffer.id].points}</small>`;
+      d.addEventListener("click", takeDare);
+      lootEl.appendChild(d);
+    } else kid.innerHTML = `<span>Kid by the sinks: "${game.dares.length >= CFG.dares.max ? "Finish the dares you've got first." : "Nothing today. Come back later."}"</span>`;
+    lootEl.prepend(kid);
     if (!sp.tpTaken) {
       const t = document.createElement("button"); t.type = "button";
       t.innerHTML = `🧻 Grab a roll<small>-1s</small>`;
@@ -2115,6 +2174,13 @@ function renderLoot(sp) {
   }
   if (sp.kind !== "classroom") return;
   const grab = TEACHER_TYPES[sp.teacher].grabSec ?? CFG.rooms.grabSec;
+  const note = game.dares.find((m) => m.id === "loveNote" && m.p.from === sp.room && !m.p.has);
+  if (note) {   // the love note for the dare (no grab time, and it doesn't count as raiding the room)
+    const b = document.createElement("button"); b.type = "button"; b.className = "prize";
+    b.innerHTML = `💌 Love note<small>for the dare</small>`;
+    b.addEventListener("click", () => { if (addItem("loveNote")) { note.p.has = true; renderDares(); lootEl.dataset.key = ""; updateHidePanel(); } });
+    lootEl.appendChild(b);
+  }
   sp.loot.forEach((k, i) => {
     const b = document.createElement("button"); b.type = "button";
     b.innerHTML = `${ITEM_TYPES[k].icon} ${ITEM_TYPES[k].label}<small>-${grab}s</small>`;
@@ -2152,6 +2218,7 @@ function grabLoot(i) {
     sp.loot.splice(i, 1);
   }
   sp.raided = true;   // locked for a while from the next bell
+  dareEvent("raid", { room: sp.room, type: sp.roomType });
   player.hideT += TT.grabSec ?? CFG.rooms.grabSec;
   if (Math.random() < TT.backfire) roomBackfire(sp);
   updateHidePanel();
@@ -2291,7 +2358,7 @@ function updateSpotsUI() {
     if (!show) continue;
     let text, cls = "itag";
     if (sp.kind === "locker") text = blocked ? "Locker · none left" : "Locker";
-    else if (sp.kind === "restroom") text = sp.closed ? "Restroom · out of order" : blocked ? "Restroom · used" : "Restroom";
+    else if (sp.kind === "restroom") text = sp.closed ? "Restroom · out of order" : blocked ? "Restroom · used" : game.dares.length < CFG.dares.max ? "Restroom · 📜" : "Restroom";
     else { text = `Room ${sp.room}${sp.R.label ? " · " + sp.R.label : ""} · ${TEACHER_TYPES[sp.teacher].label}${blocked ? (game.alarmT > 0 ? " · locked (fire alarm)" : roomLocked(sp) ? " · locked" : sp.used ? " · used" : " · guarded") : ""}`; if (sp.teacher === "sub") cls += " sub"; }
     const keyOk = blocked && keyOpens(sp) && hasKey();
     if (keyOk) text += " · 🔑";
@@ -2420,6 +2487,7 @@ function selectSlot(i, fromKey = false) {
   if (game.aim?.slot === i) { cancelAim(); return; }
   const T = ITEM_TYPES[it.key];
   if (T.kind === "spray") { if (sprayPaint()) consumeSlot(i); return; }
+  if (T.kind === "note") { const m = game.dares.find((x) => x.id === "loveNote"); toast(m ? `💌 Deliver it: hide in the gym during period ${m.p.period}.` : "A love note. It's not for you."); return; }
   if (T.kind === "key") { toast(`Master key: walk into a locked door to open it (${it.uses} use${it.uses === 1 ? "" : "s"} left)`, 2.4); return; }
   if (T.kind === "junk") {   // toss it: it lands at your feet, and staff will tidy it up
     consumeSlot(i); toast(T.line);
@@ -2599,6 +2667,7 @@ function hitPerson(o, who, isStaff) {
   o.hitSet ??= new Set();
   if (o.hitSet.has(who)) return false;
   o.hitSet.add(who);
+  dareEvent("hit", { item: o.key, staff: isStaff ? who.key : null, chasing: isStaff && who.state === "chase" });
   if (isStaff) {
     stunStaff(who, Hh.staffSec, Hh.style);
     // a stagger leaves them looking your way; a fall gives you time to get away
@@ -2690,6 +2759,7 @@ function landObject(o) {
       if (n) havoc(o.key, n * T.perStudent + (crowdLand ? T.crowdLandBonus : 0), `${name} over ${n} kid${n === 1 ? "" : "s"}${crowdLand ? " · crowd landing!" : ""}`, { x: o.x, z: o.z });
       else if (!o.hitSet?.size && !o.trail) popup(`The ${T.label.toLowerCase()} lands. Nobody notices.`, "meh");
       if (o.trail) finishTrail(o);
+      dareEvent("flyover", { n });
       if (o.key === "frisbee") { o.state = "resting"; o.mesh.rotation.set(0, o.mesh.rotation.y, 0); break; }   // pick it back up
       o.state = "spent"; o.life = o.trail ? 0.6 : 1.5; break;
     }
@@ -2727,6 +2797,7 @@ function cushionNoise(o, who) {
   const label = who === "player" ? "PFFFT! You sat on your own cushion" : who?.type ? `PFFFT! The ${who.type.name} steps on it` : "PFFFT! A kid steps on it";
   havoc("whoopee", o.T.points, label, { x: o.x, z: o.z, loud: true });
   o.popped = true;   // now staff notice it lying there
+  dareEvent("whoopee", { staff: who?.type ? who.key : null });
   if (who?.type) { bark(who, "slip", true); setTidy(who, o, CFG.tidy.afterTrapSec); }   // they pick it up (it can't go off again)
   makeNoise(o.x, o.z, o.T.noiseRadius, true, who?.type ? who : null);
 }
@@ -2762,6 +2833,7 @@ function trapCheck(o) {
   };
   for (const st of staff) {
     if (st.type.stationary || st.stunT > 0 || o.hitSet.has(st) || Math.hypot(st.x - o.x, st.z - o.z) > 0.55) continue;
+    dareEvent("hit", { item: "bananaPeel", staff: st.key, chasing: st.state === "chase" || st.state === "bust" });
     stunStaff(st, T.slipStaffSec, "fall"); bark(st, "slip", true);
     playBlip([700, 300], 0.12, "sawtooth", 0.07);
     havoc("bananaStaff", T.staffPoints, `Wipeout! The ${st.type.name} slips`, { x: o.x, z: o.z, loud: true });
@@ -2789,6 +2861,7 @@ function slimeCheck(o) {
   if (o.slips >= T.maxSticks) { if (o.age - o.spentAt > 0.2 && !claimedBy(o)) removeObject(o); return; }   // all used up (unless someone's coming to clean it)
   for (const st of staff) {
     if (st.type.stationary || o.hitSet.has(st) || !near(st.x, st.z)) continue;
+    dareEvent("hit", { item: "slime", staff: st.key, chasing: st.state === "chase" });
     st.stuckT = T.stickStaffSec;
     st.bubble.textContent = pick(["I'm STUCK!", "Is this... SLIME?!", "Ugh, my shoes!"]); st.barkUntil = performance.now() + 1800; st.barkAt = game.time;
     playBlip([220, 160, 240], 0.1, "sine", 0.08);   // squelch
@@ -2844,6 +2917,7 @@ function finishTrail(o) {
   while (tpTrails.length > 8) { const m = tpTrails.shift(); scene.remove(m); m.geometry.dispose(); }
   if (len >= 2) havoc("tpTrail", Math.round(len * o.T.trailPointsPerM), `TP'd ${Math.round(len)} m of hallway!`, { x: o.x, z: o.z });
   o.trailLen = len;
+  dareEvent("trail", { len });
   o.trail = null;
 }
 function clearTrails() { for (const m of tpTrails) { scene.remove(m); m.geometry.dispose(); } tpTrails.length = 0; }
@@ -2966,6 +3040,7 @@ function sprayPaint() {
   while (graffiti.length > 16) { const old = graffiti.shift(); scene.remove(old.mesh); old.mesh.material.map.dispose(); old.mesh.material.dispose(); }
   playBlip([2400, 2200, 2600], 0.08, "sawtooth", 0.03);   // psssht
   havoc("sprayPaint", T.points, "Graffiti!", { x: p.x, z: p.z, loud: true });
+  dareEvent("tag", { h: pr.h });
   return true;
 }
 function clearGraffiti() { for (const g of graffiti) { scene.remove(g.mesh); g.mesh.material.map.dispose(); g.mesh.material.dispose(); } graffiti.length = 0; }
@@ -3184,6 +3259,7 @@ function floodRestroom() {
   sp.closed = true;
   exitSpot(false, "Water everywhere. You slosh back out into the hall.");
   havoc("flood", Fl.points, "Flooded the toilets!", { x: f.x, z: f.z });
+  dareEvent("flood");
   addHeat(Fl.heat);
   addSecurity(CFG.security.flood);
   makeNoise(f.x, f.z, Fl.noiseRadius, true);
@@ -3195,6 +3271,65 @@ function floodRestroom() {
   const pp = hallPos(sp.h, sp.t, sp.wallLat - sp.side * 0.9);
   sp.puddle.position.set(pp.x, 0.025, pp.z); sp.puddle.visible = true;
   setTimeout(() => game.state === "playing" && pa("flood"), 1800);
+}
+
+// ---- dares ----
+function makeDareOffer() {
+  const held = new Set(game.dares.map((m) => m.id)), recent = game.daresDone.slice(-CFG.dares.recentAvoid);
+  const ids = Object.keys(DARES).filter((id) => !held.has(id) && !recent.includes(id)).sort(() => Math.random() - 0.5);
+  for (const id of ids) {
+    const D = DARES[id], m = { id, n: 0, need: D.need, p: {}, got: [] };
+    if (D.setup && !D.setup(m)) continue;
+    return m;
+  }
+  return null;
+}
+function takeDare() {
+  const m = game.dareOffer;
+  if (!m || game.dares.length >= CFG.dares.max) return;
+  if (game.phase === "skipping") m.p.armed = false;   // (the clean-period one starts counting next period)
+  game.dares.push(m); game.dareOffer = null;
+  playBlip([523, 784], 0.07, "triangle", 0.06);
+  popup(`📜 Dare: ${DARES[m.id].text(m)}`, "item");
+  renderDares(); updateHidePanel();
+}
+function dareEvent(type, d = {}) {
+  for (const m of [...game.dares]) {
+    const fn = DARES[m.id].on[type];
+    if (!fn || !fn(m, d)) continue;
+    m.n = Math.max(m.n + 1, m.got.length);
+    if (m.n >= m.need) completeDare(m);
+  }
+  renderDares();
+}
+function completeDare(m) {
+  const D = DARES[m.id];
+  game.dares = game.dares.filter((x) => x !== m); game.daresDone.push(m.id);
+  addScore(D.points, "DARE COMPLETE!", "item");
+  banner(`DARE COMPLETE! +${Math.round(D.points * scoreMult())}<small>${D.text(m)}</small>`, 2.4);
+  playBlip([523, 659, 784, 1046], 0.09, "triangle", 0.07);
+}
+// at each bell: dares tied to a period that's over fail; "this period" progress resets. At the end of the day, day dares fail too.
+function daresAtBell(dayEnd) {
+  const failed = [];
+  for (const m of game.dares) {
+    const D = DARES[m.id];
+    if ((m.p.period && (dayEnd || game.period >= m.p.period)) || (D.scope === "day" && dayEnd)) failed.push(m);
+    else if (D.scope === "period") { m.n = 0; m.got = []; }
+  }
+  if (failed.length) {
+    game.dares = game.dares.filter((m) => !failed.includes(m));
+    toast(`Dare failed: ${DARES[failed[0].id].text(failed[0])}`, 2.6);
+  }
+  renderDares();
+}
+const daresEl = $("dares");
+function renderDares() {
+  const html = game.dares.map((m) => {
+    const D = DARES[m.id], prog = m.need > 1 ? ` <b>${m.n}/${m.need}</b>` : "";
+    return `<div>📜 ${D.text(m)}${prog}</div>`;
+  }).join("");
+  if (daresEl.dataset.h !== html) { daresEl.innerHTML = html; daresEl.dataset.h = html; }
 }
 
 const popupsEl = $("popups");
@@ -3270,6 +3405,7 @@ function friendTap(c) {
     const i = game.hotbar.findIndex((s) => s && s.key === "gum");
     if (i < 0) { toast("Friend: \"Got any gum?\" (Bring them gum to trade.)"); return; }
     addScore(R.gumTradePoints, "Gum trade!", "item");
+    dareEvent("gumTrade");
     if (!game.passShield) {   // the main way to get a fake pass
       consumeSlot(i); game.passShield = true;
       popup("🎫 They slip you a fake pass! Your next catch doesn't count.", "item"); playBlip([523, 659, 784], 0.08, "triangle", 0.06);
@@ -3471,6 +3607,8 @@ if (debug) {   // a small test panel for phone playtests (only with ?debug in th
     if (player.hidden) exitSpot(false);
     player.x = f.x; player.z = f.z; cam.yaw = player.heading = Math.atan2(sp.side * H.nx, sp.side * H.nz); manualCamT = 1;
   });
+  add("Give a dare", () => { const m = makeDareOffer(); if (m) { game.dares.push(m); renderDares(); popup(`📜 Dare: ${DARES[m.id].text(m)}`, "item"); } });
+  add("Go to locker", () => { const sp = SPOTS.find((x) => x.kind === "locker"), H = HALLS[sp.h]; goTo(spotFront(sp, {}), Math.atan2(sp.side * H.nx, sp.side * H.nz)); });
   add("Friend here", () => {
     const c = crowd.find((k) => k.friend && k.mode !== "gone") ?? crowd.find((k) => k.friend);
     c.mode = "wander"; c.slipT = 0; c.friend.cd = 0; c.leaveAt = 999; c.x = player.x + Math.sin(player.heading) * 1.6; c.z = player.z + Math.cos(player.heading) * 1.6;
@@ -3561,6 +3699,10 @@ if (debug) {   // test-only helpers (only with ?debug in the URL)
     nodes() { return NODES.map((n) => ({ id: n.id, x: n.x, z: n.z })); },
     tidyInfo() { return staff.map((s) => ({ key: s.key, state: s.state, obj: s.tidyObj && !s.tidyObj.dead && s.state === "tidy" ? s.tidyObj.id : null, stunT: s.stunT, tidyT: s.tidyT, x: s.x, z: s.z, pauseT: s.pauseT })); },
     rummage() { rummageLocker(); },
+    dares() { return { active: game.dares.map((m) => ({ id: m.id, n: m.n, need: m.need, p: m.p, got: m.got, text: DARES[m.id].text(m) })), offer: game.dareOffer?.id ?? null, done: game.daresDone }; },
+    takeDare() { takeDare(); },
+    forceDare(id) { const m = { id, n: 0, need: DARES[id].need, p: {}, got: [] }; if (DARES[id].setup && !DARES[id].setup(m)) return false; game.dares.push(m); renderDares(); return m.p; },
+    dareEvent(t, d) { dareEvent(t, d); },
     grabRoll() { grabRoll(); },
     trails() { return tpTrails.length; },
     stuck() { return { player: player.stuckT, staff: staff.map((s) => s.stuckT ?? 0) }; },
