@@ -49,6 +49,7 @@
 // Step 45: your kid: stealth, speed and strength (0-20, roll and reroll), on a character screen from the title.
 // Step 46: your kid's look: outfit, hair and color, skin, height, weight and build, on a jointed low-poly kid whose arms and legs swing.
 // Step 47: easier classrooms (teacher 80%, sub 95%, secretary 65%); a grab is half as risky as walking in, +6% per grab after.
+// Step 48: the old sock and the moldy sandwich from lockers throw like spitballs and score when they hit someone.
 import * as THREE from "three";
 
 // =====================================================================================
@@ -632,9 +633,13 @@ const ITEM_TYPES = {
                    kidSec: 1.2, kidPoints: 20, staffSec: 2.4, staffPoints: 120, crashDaze: 1.2, wallCrashSpeed: 4.5 },
   energyDrink:   { label: "Energy drink", icon: "⚡", kind: "drink" },   // tap to drink: see CFG.energy
   gum:           { label: "Gum", icon: "🍬", kind: "instant", points: 100, line: "You stick gum under the water fountain. Gross. +havoc" },
+  // Junk from lockers. Step 48: the sock and the sandwich throw like a spitball (heavier, so they arc more), one throw each.
+  // A hit is gross and worth a bit more; whatever they hit, they drop to the floor (pick the sock back up; the custodian gets the sandwich).
+  oldSock:       { label: "Old gym sock", icon: "🧦", kind: "throw", junk: true, direct: true, recoverable: true, speed: [13, 21], pitchDeg: 8, gravity: 7,
+                   hitLine: "Sock to the face! Ew!", hit: { student: 30, staff: 90, studentSec: 0.7, staffSec: 1.2, style: "flinch" } },
+  sandwich:      { label: "Moldy sandwich", icon: "🥪", kind: "throw", junk: true, direct: true, speed: [12, 19], pitchDeg: 9, gravity: 7.5,
+                   hitLine: "Moldy sandwich! Gross!", hit: { student: 35, staff: 110, studentSec: 0.8, staffSec: 1.4, style: "flinch" } },
   // Junk from lockers: takes up a slot until you toss it (select it to drop it). Staff tidy it up like anything else.
-  oldSock:       { label: "Old gym sock", icon: "🧦", kind: "junk", line: "You drop the sock. It lands with a damp slap." },
-  sandwich:      { label: "Moldy sandwich", icon: "🥪", kind: "junk", line: "You toss the sandwich. Something in it moved." },
   homework:      { label: "Crumpled homework", icon: "📄", kind: "junk", line: "You toss someone's homework. It's a D-minus anyway." },
 };
 const REST_Y = { skateboard: 0.06, wetFloor: 0, mopBucket: 0, globe: 0.3, bassDrum: 0.45, trumpet: 0.06, basketball: 0.2, football: 0.14, wheelieChair: 0, whoopee: 0.08, frisbee: 0.03, slime: 0.02, mentos: 0 };   // how high items sit on the floor (default 0.04)
@@ -3158,7 +3163,9 @@ function rummageLocker() {
   if (!takeItem(key)) return;   // inventory full: nothing happens
   sp.rummaged = true;
   player.hideT += CFG.lockers.rummageSec;
-  if (ITEM_TYPES[key].kind === "junk") toast(`${ITEM_TYPES[key].icon} Junk. Great. (Select it to toss it.)`);
+  const J = ITEM_TYPES[key];
+  if (J.junk) toast(`${J.icon} ${J.label}. Gross. Throw it at someone.`);
+  else if (J.kind === "junk") toast(`${J.icon} Junk. Great. (Select it to toss it.)`);
   updateHidePanel();
 }
 // The teacher spots you rummaging and calls security: the nearest guard (or anyone free) heads for the door.
@@ -3450,7 +3457,7 @@ function pickWeighted(pairs) {
   return pairs[0][0];
 }
 // What can turn up "found" (fire alarm spill, gum trades): the locker table without the junk.
-const goodLoot = () => CFG.lockers.loot.filter(([k]) => ITEM_TYPES[k].kind !== "junk");
+const goodLoot = () => CFG.lockers.loot.filter(([k]) => ITEM_TYPES[k].kind !== "junk" && !ITEM_TYPES[k].junk);
 // Things lying around stay until staff tidy them up. If the halls fill up anyway, the oldest get swept away.
 const isLying = (o) => !o.dead && (o.state === "pickup" || o.state === "resting" || o.state === "trap");
 function capLying() {
@@ -3887,10 +3894,10 @@ function hitPerson(o, who, isStaff) {
     if (Hh.style === "flinch") { who.suspicion = Math.max(who.suspicion, 0.6); who.distractT = 1.5; who.dX = player.x; who.dZ = player.z; }
     bark(who, "slip", true);
     playBlip([700, 300], 0.1, "sawtooth", 0.07);
-    havoc(o.key + "Staff", Hh.staff, `${o.T.label} hits the ${who.type.name}!`, { x: o.x, z: o.z, loud: Hh.style === "fall" });
+    havoc(o.key + "Staff", Hh.staff, `${o.T.label} hits the ${who.type.name}!${o.T.hitLine ? " Ew!" : ""}`, { x: o.x, z: o.z, loud: Hh.style === "fall" });
   } else {
     who.slipT = Math.max(who.slipT, Hh.studentSec); who.stunStyle = Hh.style;
-    havoc(o.key + "Student", Hh.student, o.key === "spitball" ? "Spitball! Ew!" : o.key === "mentos" ? "Soaked!" : `${o.T.label} hits a kid!`, { x: o.x, z: o.z });
+    havoc(o.key + "Student", Hh.student, o.T.hitLine ? o.T.hitLine : o.key === "spitball" ? "Spitball! Ew!" : o.key === "mentos" ? "Soaked!" : `${o.T.label} hits a kid!`, { x: o.x, z: o.z });
   }
   return true;
 }
@@ -3944,6 +3951,10 @@ function flyObject(o, dt) {
   if (o.key === "spitball") {
     const p = personHit(o, 0.45, 2.1);
     if (p) { hitPerson(o, p.who, p.isStaff); removeObject(o); return; }
+  }
+  if (T.direct && !o.hitSet?.size) {   // sock, sandwich: hits the first person, then drops
+    const p = personHit(o, 0.45, 2.1);
+    if (p) { hitPerson(o, p.who, p.isStaff); o.vx *= -0.15; o.vz *= -0.15; o.vy = Math.min(o.vy, 0); }
   }
   if (T.bounces && T.hit && Math.hypot(o.vx, o.vz) > T.hit.minSpeed) {
     const p = personHit(o, 0.5, 1.6);
