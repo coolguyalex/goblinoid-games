@@ -46,6 +46,7 @@
 //          each floor has its own custodian, closet, restrooms and rooms. Rooms are now numbered 101-114 and 201-214.
 // Step 43: stronger slow motion while you aim a throw by hand (a fifth of normal speed), easing in and out, with a blue edge.
 // Step 44: sneaking into a classroom is a hide check, and so is every grab. Spotted: out, security's called, room locked 3 periods.
+// Step 45: your kid: stealth, speed and strength (0-20, roll and reroll), on a character screen from the title.
 import * as THREE from "three";
 
 // =====================================================================================
@@ -227,6 +228,13 @@ const CFG = {
       subLines: ["\"Um... are you in this class? I'm calling someone.\"", "\"Hey! Hey, you! ...Security?\""],
       officeLines: ["\"Do you have an appointment? No? SECURITY.\"", "\"Excuse me! That's staff only!\""],
     },
+  },
+
+  // Step 45: your kid's stats, 0-20 (10 = the game as it was). Each number is the change at 20 (or the opposite at 0).
+  stats: {
+    stealth:  { vision: 0.15, cone: 0.15, notice: 0.3, hide: 0.15 },   // staff see 15% less far, 15% narrower, notice 30% slower; +15% room hide checks
+    speed:    { move: 0.15 },                                          // walking, sprinting, wheelie chair, skateboard
+    strength: { throw: 0.1, stun: 0.3, burstRadius: 0.2 },             // throws 10% faster (about 20% farther), stuns 30% longer, bigger locker burst
   },
 
   // Short-term heat, 0-100: "they know it's me". Like a GTA wanted level.
@@ -1410,7 +1418,8 @@ function dayMult(perDay) { return Math.min(CFG.days.maxMult, 1 + perDay * (game.
 function alertMult(k) { return game.highAlert ? CFG.strikes.alert[k] : 1; }
 function staffMult(k) {
   const day = { speed: CFG.days.staffSpeedPerDay, vision: CFG.days.staffVisionPerDay, notice: CFG.days.staffNoticePerDay }[k];
-  return alertMult(k) * dayMult(day) * (1 + CFG.heat.effect[k] * game.heat / 100) * (1 + CFG.security.effect[k] * game.security / 100)
+  const stat = k === "vision" ? 1 - CFG.stats.stealth.vision * statMod("stealth") : k === "notice" ? 1 - CFG.stats.stealth.notice * statMod("stealth") : 1;
+  return stat * alertMult(k) * dayMult(day) * (1 + CFG.heat.effect[k] * game.heat / 100) * (1 + CFG.security.effect[k] * game.security / 100)
     * (k === "vision" && game.blackoutT > 0 ? CFG.breaker.visionMult : 1);
 }
 const periodsToday = () => CFG.periodsPerDay;
@@ -1764,6 +1773,7 @@ function onOverlayTap(e) {
   if (game.state === "title") {   // only the buttons do anything on the title screen
     const id = e?.target?.id ?? "startBtn";
     if (id === "aboutBtn") { $("about").hidden = false; return; }
+    if (id === "startBtn" && !character.made) { openCharacter(null, () => { initAudio(); startRun(null); clock.getDelta(); }); return; }   // first time: make your kid
     if (id === "startBtn" || id === "continueBtn") startRun(id === "continueBtn" ? loadSave() : null);
   }
   else if (game.state === "caught") startRun(null);
@@ -1820,6 +1830,47 @@ $("hoodBtn").addEventListener("pointerdown", (e) => { e.preventDefault(); e.stop
 $("jumpBtn").addEventListener("pointerdown", (e) => { e.preventDefault(); e.stopPropagation(); if (player.board) hopOff(); else jumpOff(); });
 $("pauseBtn").addEventListener("click", (e) => { e.stopPropagation(); pause(); });
 renderOptSummary();
+
+// ---- step 45: your kid. Three stats, 0-20, rolled like 3d6 but stretched to 0-20; reroll as often as you like. ----
+const CHAR_KEY = "hallwaySkip.character.v1";
+const STATS = [
+  { k: "stealth", icon: "🥷", label: "Stealth", what: "Staff see less far, with narrower cones, and take longer to notice you. Better odds sneaking into rooms." },
+  { k: "speed", icon: "👟", label: "Speed", what: "Faster walking and sprinting, and faster on a wheelie chair or skateboard." },
+  { k: "strength", icon: "💪", label: "Strength", what: "Throws go farther, hits keep staff down longer, and bursting out of a locker knocks over more of them." },
+];
+const rollStat = () => Math.round(Math.random() * 20 / 3 + Math.random() * 20 / 3 + Math.random() * 20 / 3);
+const rollStats = () => Object.fromEntries(STATS.map((S) => [S.k, rollStat()]));
+const character = { made: false, stats: rollStats() };
+try { const c = JSON.parse(localStorage.getItem(CHAR_KEY)); if (c?.stats) Object.assign(character, c); } catch (e) { /* storage blocked: a fresh roll */ }
+function saveCharacter() { try { localStorage.setItem(CHAR_KEY, JSON.stringify(character)); } catch (e) { /* fine */ } }
+function statMod(k) { return (clamp(character.stats[k] ?? 10, 0, 20) - 10) / 10; }
+function speedMult() { return 1 + CFG.stats.speed.move * statMod("speed"); }
+function coneHalf(T) { return ((T.visionHalfAngleDeg * Math.PI) / 180) * (1 - CFG.stats.stealth.cone * statMod("stealth")); }
+function renderCharSummary() { $("charSummary").textContent = STATS.map((S) => `${S.icon} ${character.stats[S.k]}`).join("  ·  "); }
+function renderStats() {
+  $("statRows").innerHTML = STATS.map((S) => { const v = character.stats[S.k];
+    return `<div class="statRow"><div class="statHead"><b>${S.icon} ${S.label}</b><span class="statNum">${v}</span></div>
+      <i class="statBar"><b style="width:${(v / 20) * 100}%" class="${v >= 14 ? "hi" : v <= 6 ? "lo" : ""}"></b></i><small>${S.what}</small></div>`; }).join("");
+  $("statTotal").textContent = `Total ${STATS.reduce((a, S) => a + character.stats[S.k], 0)} (average 30)`;
+}
+let charThen = null;   // what to do after "Done" (start the run, the first time you play)
+function openCharacter(e, then = null) {
+  e?.stopPropagation(); charThen = then;
+  $("charDone").textContent = then ? "Let's go" : "Done";
+  renderStats(); $("charScreen").hidden = false;
+}
+$("charBtn").addEventListener("click", openCharacter);
+$("charScreen").addEventListener("click", (e) => e.stopPropagation());
+$("rerollBtn").addEventListener("click", () => {
+  character.stats = rollStats(); for (const k in rangeCache) delete rangeCache[k];   // auto-aim ranges depend on strength
+  renderStats(); playBlip([500 + Math.random() * 300], 0.04, "square", 0.04);
+});
+$("charDone").addEventListener("click", () => {
+  character.made = true; saveCharacter(); renderCharSummary(); $("charScreen").hidden = true;
+  for (const k in rangeCache) delete rangeCache[k];
+  const t = charThen; charThen = null; if (t) t();
+});
+renderCharSummary();
 // the joystick guide (phones only) and hiding the play-only HUD bits on menus
 const isTouch = matchMedia("(pointer: coarse)").matches || URLQ.has("touch");
 let guideKey = "";
@@ -1882,7 +1933,7 @@ function updatePlayer(dt) {
   const f = { x: Math.sin(cam.yaw), z: Math.cos(cam.yaw) }, r = { x: -Math.cos(cam.yaw), z: Math.sin(cam.yaw) };
   const mx = r.x * input.x + f.x * input.y, mz = r.z * input.x + f.z * input.y;
   updateSprint(dt);
-  const sp = CFG.player.speed * (player.sprinting ? CFG.sprint.speedMult : 1);
+  const sp = CFG.player.speed * (player.sprinting ? CFG.sprint.speedMult : 1) * speedMult();
   const ox = player.x, oz = player.z;
   player.x += mx * sp * dt; player.z += mz * sp * dt;
   // students jostle you out of the way (sprinting, you barge through them instead)
@@ -1949,7 +2000,7 @@ function updateBoard(dt) {
   const T = ITEM_TYPES.skateboard, B = player.board;
   const f = { x: Math.sin(cam.yaw), z: Math.cos(cam.yaw) }, r = { x: -Math.cos(cam.yaw), z: Math.sin(cam.yaw) };
   const mx = r.x * input.x + f.x * input.y, mz = r.z * input.x + f.z * input.y;
-  if (input.m > 0) { const k = damp(T.accel, dt); B.vx += (mx * T.speed - B.vx) * k; B.vz += (mz * T.speed - B.vz) * k; }
+  if (input.m > 0) { const k = damp(T.accel, dt), v = T.speed * speedMult(); B.vx += (mx * v - B.vx) * k; B.vz += (mz * v - B.vz) * k; }
   else { const k = Math.exp(-T.coast * dt); B.vx *= k; B.vz *= k; }   // coasting
   player.sprinting = false; player.stamina = Math.min(player.staminaMax, player.stamina + dt / CFG.sprint.rechargeSec);
   const ox = player.x, oz = player.z, sp = Math.hypot(B.vx, B.vz);
@@ -2178,7 +2229,7 @@ function canSeePlayer(st, rangeMult, needCone) {
   if (player.invisT > 0) return { seen: false, d };   // just served a strike: a moment to get away
   if (st.ignoreT > 0) return { seen: false, d };      // the one who just caught you is letting it go
   if (d > T.visionRange * staffMult("vision") * rangeMult) return { seen: false, d };
-  if (needCone && Math.abs(angDiff(st.facing, Math.atan2(dx, dz))) > (T.visionHalfAngleDeg * Math.PI) / 180) return { seen: false, d };
+  if (needCone && Math.abs(angDiff(st.facing, Math.atan2(dx, dz))) > coneHalf(T)) return { seen: false, d };
   return { seen: lineOfSight(st.x, st.z, player.x, player.z), d };
 }
 // suspicion builds faster up close, slower in a crowd and during passing periods
@@ -2408,7 +2459,7 @@ const CONE_COLORS = { patrol: new THREE.Color(0xfff2a8), suspicious: new THREE.C
 const isAlarmed = (st) => st.state === "chase" || st.state === "search" || st.state === "bust" ||
   (st.state === "post" && st.alarmT > st.type.alarmCooldownSec - 3);
 function updateCone(st) {
-  const T = st.type, RAYS = CFG.render.coneRays, half = (T.visionHalfAngleDeg * Math.PI) / 180;
+  const T = st.type, RAYS = CFG.render.coneRays, half = coneHalf(T);
   const range = T.visionRange * staffMult("vision") * (st.state === "chase" ? CFG.detection.chaseSightRangeMult : 1);
   const pos = st.cone.geometry.attributes.position;
   pos.setXYZ(0, st.x, 0.03, st.z);
@@ -2835,7 +2886,7 @@ function burstOut() {
   const f = { x: player.x, z: player.z };
   let n = 0;
   for (const st of staff) {
-    if (Math.hypot(st.x - f.x, st.z - f.z) > B.radius) continue;
+    if (Math.hypot(st.x - f.x, st.z - f.z) > B.radius * (1 + CFG.stats.strength.burstRadius * statMod("strength"))) continue;
     stunStaff(st, B.stunSec, "fall"); st.suspicion = 0; n++;
     st.bubble.textContent = pick(["AAH!", "WHAT THE—", "*falls over*"]); st.barkUntil = performance.now() + 1500; st.barkAt = game.time;
   }
@@ -2875,7 +2926,8 @@ function roomBackfire(sp) {
 // ---- step 44: the hide check for classrooms ----
 function roomHideChance(sp) {
   const C = CFG.rooms.hideCheck;
-  return clamp(TEACHER_TYPES[sp.teacher].hideChance - (sp.grabs || 0) * C.grabPenalty + (player.hoodT > 0 ? C.hoodBonus : 0), C.min, C.max);
+  return clamp(TEACHER_TYPES[sp.teacher].hideChance - (sp.grabs || 0) * C.grabPenalty + (player.hoodT > 0 ? C.hoodBonus : 0)
+    + CFG.stats.stealth.hide * statMod("stealth"), C.min, C.max);
 }
 function roomSpotted(sp) {
   const C = CFG.rooms.hideCheck;
@@ -3315,7 +3367,7 @@ function flickLaunch(a) {
   return { dx: wx, dz: wz, power: clamp(len / (CFG.items.flickFullFrac * Math.min(window.innerWidth, window.innerHeight)), 0.15, 1) };
 }
 function launchVel(T, L) {
-  const sp = T.speed[0] + (T.speed[1] - T.speed[0]) * L.power, p = (T.pitchDeg * Math.PI) / 180;
+  const sp = (T.speed[0] + (T.speed[1] - T.speed[0]) * L.power) * (1 + CFG.stats.strength.throw * statMod("strength")), p = (T.pitchDeg * Math.PI) / 180;
   return { vx: L.dx * Math.cos(p) * sp, vy: Math.sin(p) * sp, vz: L.dz * Math.cos(p) * sp };
 }
 const THROW_Y = 1.3;
@@ -3412,6 +3464,7 @@ function drawObjects() {
 }
 // ---- thrown things hitting people: points (staff pay more) and a stun ----
 function stunStaff(st, sec, style) {
+  sec *= 1 + CFG.stats.strength.stun * statMod("strength");   // step 45: a stronger kid's hits keep them down longer
   st.stunT = Math.max(st.stunT, sec); st.stunStyle = style; st.camping = false;
   if (st.state === "chase" || st.state === "bust") { st.state = "search"; st.searchT = 0; st.lastX = st.tx = player.x; st.lastZ = st.tz = player.z; }
 }
@@ -4006,7 +4059,7 @@ function stickKickMe(slot) {
     return;
   }
   const st = tg.who;
-  const facing = st.stunT <= 0 && st.stuckT <= 0 && Math.abs(angDiff(st.facing, Math.atan2(player.x - st.x, player.z - st.z))) < (st.type.visionHalfAngleDeg * Math.PI) / 180;
+  const facing = st.stunT <= 0 && st.stuckT <= 0 && Math.abs(angDiff(st.facing, Math.atan2(player.x - st.x, player.z - st.z))) < coneHalf(st.type);
   if (facing) {   // they saw it coming
     st.bubble.textContent = "Is that... for ME?"; st.barkUntil = performance.now() + 1800; st.barkAt = game.time;
     toast(`The ${st.type.name} turns around just in time. Get behind them next time.`, 2.4);
@@ -4203,7 +4256,7 @@ function clearGraffiti() { for (const g of graffiti) { scene.remove(g.mesh); g.m
 const jumpBtn = $("jumpBtn");
 function startRide(L) {
   if (player.board) hopOff(true);
-  player.ride = { dx: L.dx, dz: L.dz, t: 0, speed: ITEM_TYPES.wheelieChair.rideSpeed, chair: makeItemMesh("wheelieChair") };
+  player.ride = { dx: L.dx, dz: L.dz, t: 0, speed: ITEM_TYPES.wheelieChair.rideSpeed * speedMult(), chair: makeItemMesh("wheelieChair") };
   player.heading = Math.atan2(L.dx, L.dz);
   toast(isTouch ? "WHEEEEE! Steer with the stick · tap 🦘 to jump off" : "WHEEEEE! A/D steers · E or Space jumps off", 2.4);
   playBlip([400, 600, 800], 0.07, "triangle", 0.06);
@@ -5063,6 +5116,9 @@ if (debug) {   // test-only helpers (only with ?debug in the URL)
     enter(i) { return enterSpot(SPOTS[i]); },
     leave() { exitSpot(false); },
     grab(i) { grabLoot(i); },
+    setStats(o) { Object.assign(character.stats, o); for (const k in rangeCache) delete rangeCache[k]; return { ...character.stats }; },
+    rollMany(n) { const a = []; for (let i = 0; i < n; i++) a.push(rollStat()); return a; },
+    speedMult() { return speedMult(); },
     unlockAll() { for (const sp of SPOTS) { sp.used = false; sp.lockedUntil = 0; } player.graceT = 0; },
     unpost() { for (const st of staff) if (st.post) st.post = null; },
     hideT() { return player.hideT; },
