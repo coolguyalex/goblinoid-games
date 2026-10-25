@@ -63,6 +63,7 @@ Built from `Hallway_Skip_Game_Spec` v0.2. Done so far:
 - **Step 54:** no more accidental zoom on phones. Fast taps (like rapid-firing while a thumb holds the stick) used to trigger Safari's double-tap or pinch zoom, which the page couldn't undo. Those gestures are now blocked in code, and quick taps on menu buttons still go through.
 - **Step 55:** tapping the stairs works more reliably. A dropped item next to the door no longer steals the tap (it used to when your hands were full, leaving just "Inventory full!"). Stairs now answer taps from up to 4.5 m, the door glows whenever a tap will work, and a tap from too far says so instead of doing nothing.
 - **Step 56:** sneaking out of a classroom no longer locks it. Rooms only lock when they kick you out (spotted going in, out of time, or a staff member pulls you out). Slip back in and the teacher's clock picks up where it left off (at least 4 s), so ducking in and out doesn't buy endless hiding.
+- **Step 57:** a much shorter How to play: the goal, a controls table (only your device's controls), and a few one-line tips on hiding, scoring and what to watch out for. Item details are left for players to discover.
 
 ## Before turning on real ads
 
