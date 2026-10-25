@@ -39,6 +39,7 @@
 // Step 37: take anything from the custodian's closet and he locks it for the rest of the day; only the staff key opens it.
 // Step 38: no wet-floor sign in the closet. The custodian puts two out around wet messes while he cleans; steal one and set it down:
 //          staff who aren't onto you turn around when they see it. 10 s after you take one, he drops everything to get it back.
+// Step 39: toilet paper flies higher (clears the banners), the plunger lasts much longer, and the kick-me sign works on kids too.
 import * as THREE from "three";
 
 // =====================================================================================
@@ -525,7 +526,7 @@ const ITEM_TYPES = {
   // Same two-stage flight as the paper airplane, but it unrolls as it goes and leaves a streamer of toilet paper behind
   // (it stays until the custodian clears it overnight). From the restrooms.
   toiletPaper:   { label: "Toilet paper", icon: "🧻", kind: "throw", flight: "glide2", speed: [6, 10], pitchDeg: 8, gravity: 1.2, glide: true,
-                   cruiseY: 2.5, highSec: [0.5, 1.4], lowY: 1.4, sinkRate: 0.8, drag: 0.3,
+                   cruiseY: 2.85, climb: 8, highSec: [0.8, 1.8], lowY: 1.4, sinkRate: 0.8, drag: 0.3,   // high enough to clear the banner wires
                    perStudent: 10, crowdLandBonus: 30, crowdLandCount: 3, trailPointsPerM: 4,
                    hit: { student: 15, staff: 60, studentSec: 0.5, staffSec: 0.8, style: "flinch" } },
   // Same idea again, but it stays up much longer and you can pick it back up. Gym only.
@@ -556,7 +557,8 @@ const ITEM_TYPES = {
                    radius: 1.0, maxSticks: Infinity, stickStaffSec: 6, stickStudentSec: 3.5, stickPlayerSec: 2, staffPoints: 120, studentPoints: 30 },
   // Stick it on a staff member's back (get right up behind them; if they're facing you, they catch on). During a passing
   // period the kids crowd round laughing and pen them in until the tardy bell. Stick it on during class and it waits.
-  kickMe:        { label: "\"Kick me\" sign", icon: "🦵", kind: "sign", range: 1.4, points: 400, penKids: 9, penPoints: 100 },
+  kickMe:        { label: "\"Kick me\" sign", icon: "🦵", kind: "sign", range: 1.4, points: 400, penKids: 9, penPoints: 100,
+                   kidPoints: 150, kidSec: 9, kidCrowd: 7 },   // on a kid: they're stuck in a ring of laughing kids for a while
   // Science labs: lands upright, fizzes for a moment, then a geyser. Loud (staff come to look), kids crowd round to watch
   // (cover for you), and anyone standing in the spray gets soaked.
   mentos:        { label: "Mentos & soda", icon: "🥤", kind: "throw", speed: [3, 6.5], pitchDeg: 30, gravity: 9.8,
@@ -590,7 +592,7 @@ const ITEM_TYPES = {
   mopBucket:     { label: "Mop bucket", icon: "🪣", kind: "throw", trap: true, mess: true, speed: [2.5, 5], pitchDeg: 25, gravity: 9.8, trapRadius: 1.7,
                    slipStaffSec: 2.6, slipStudentSec: 1.3, slipPlayerSec: 0.8, staffPoints: 120, studentPoints: 20 },
   // Hits someone: it sticks on their head and they stumble around blind, bumping into people. Misses: it sticks to the wall.
-  plunger:       { label: "Plunger", icon: "🪠", kind: "throw", recoverable: true, speed: [9, 15], pitchDeg: 6, gravity: 6, blindSec: 5, blindSpeed: 2.6,
+  plunger:       { label: "Plunger", icon: "🪠", kind: "throw", recoverable: true, speed: [9, 15], pitchDeg: 6, gravity: 6, blindSec: 12, blindSpeed: 2.6,
                    staffPoints: 200, studentPoints: 25, bumpPoints: 20, studentSec: 1.8 },
   energyDrink:   { label: "Energy drink", icon: "⚡", kind: "drink" },   // tap to drink: see CFG.energy
   gum:           { label: "Gum", icon: "🍬", kind: "instant", points: 100, line: "You stick gum under the water fountain. Gross. +havoc" },
@@ -1233,7 +1235,7 @@ function interactTarget() {
     if (best) return { kind: "friend", c: best, x: best.x, y: 2.3, z: best.z, label: OFFER_LABELS[best.friend.offer].toLowerCase() };
   }
   const km = game.hotbar.findIndex((s) => s?.key === "kickMe");
-  if (km >= 0) { const st = kickMeTarget(); if (st) return { kind: "kickme", slot: km, x: st.x, y: 2.3 * st.type.scale, z: st.z, label: "stick on the sign" }; }
+  if (km >= 0) { const tg = kickMeTarget(); if (tg) return { kind: "kickme", slot: km, x: tg.who.x, y: 2.3 * (tg.isStaff ? tg.who.type.scale : 1), z: tg.who.z, label: tg.isStaff ? "stick on the sign" : "stick it on the kid" }; }
   let it = null, id = CFG.items.pickupRange;
   for (const o of objects) if (pickable(o)) { const d = Math.hypot(o.x - player.x, o.z - player.z); if (d < id) { id = d; it = o; } }
   if (it) return { kind: "item", o: it, x: it.x, y: it.y + 0.5, z: it.z, label: `pick up ${it.T.label.toLowerCase()}` };
@@ -2306,7 +2308,7 @@ function update(dt) {
   updatePlayer(dt);
   updateCrowd(dt);
   updateStaff(dt, crowdCoverCount());
-  if (game.state === "playing") { updateKickMe(); updateObjects(dt); updateTrails(dt); kidsGrab(dt); updateHeat(dt); updateRisk(dt); updateFriends(dt); updateAirplanes(dt); updateAlarm(dt); }
+  if (game.state === "playing") { updateKickMe(dt); updateObjects(dt); updateTrails(dt); kidsGrab(dt); updateHeat(dt); updateRisk(dt); updateFriends(dt); updateAirplanes(dt); updateAlarm(dt); }
 }
 
 // =====================================================================================
@@ -3319,7 +3321,7 @@ function initPlane(o, power, T = ITEM_TYPES.paperAirplane) { o.stage = 1; o.stag
 function planeStep(o, dt, T = ITEM_TYPES.paperAirplane) {
   o.stageT -= dt;
   if (o.stage === 1 && o.stageT <= 0) o.stage = 2;
-  if (o.stage === 1) o.vy = (T.cruiseY - o.y) * 4;
+  if (o.stage === 1) o.vy = (T.cruiseY - o.y) * (T.climb ?? 4);
   else if (o.stage === 2) o.vy = o.y > T.lowY + 0.12 ? -3.2 : -T.sinkRate;
   else o.vy = -2.5;   // stage 3: hit a wall, falling
   const k = Math.exp(-T.drag * dt); o.vx *= k; o.vz *= k;
@@ -3581,7 +3583,7 @@ const tpMat = new THREE.MeshBasicMaterial({ color: 0xf4f4ee, side: THREE.DoubleS
 function tpSupport(x, z) {
   const pr = hallProject(x, z), H = HALLS[pr.h];
   let s = 0;
-  for (const b of BANNERS) if (b.h === pr.h && Math.abs(pr.t - b.t) < 0.22) s = Math.max(s, b.wireY);
+  for (const b of BANNERS) if (b.h === pr.h && Math.abs(pr.t - b.t) < 0.3) s = Math.max(s, b.wireY);
   const side = pr.lat >= 0 ? 1 : -1, fromWall = Math.abs(wallLat(pr.h, side)) - Math.abs(pr.lat);   // distance out from the wall
   for (const ob of OBSTACLES) if (ob.h === pr.h && ob.side === side && Math.abs(pr.t - ob.t) < ob.halfLen + 0.1 && fromWall < ob.depth + 0.15) s = Math.max(s, ob.height);
   if (H.outerSide === side && fromWall < 0.2) {   // the row of lockers along the outer wall (and the hide lockers, a bit taller)
@@ -3634,15 +3636,18 @@ function stepTrail(tr, dt) {
     if (p === pin) continue;
     const vx = (p.x - p.px) * TP.damping, vy = (p.y - p.py) * TP.damping, vz = (p.z - p.pz) * TP.damping;
     p.px = p.x; p.py = p.y; p.pz = p.z;
-    if (p.held) { p.x += vx * 0.2; p.z += vz * 0.2; p.y += Math.min(0, vy); }   // snagged or on the floor: barely slides
-    else { p.x += vx; p.y += vy - g; p.z += vz; }
+    if (p.snag) { p.x = p.px; p.z = p.pz; p.y = p.snag; continue; }
+    if (p.held) { p.x += vx * 0.2; p.z += vz * 0.2; p.y += Math.min(0, vy); }   // on the floor: barely slides
+    else { p.x += vx; p.y += (vy > 0 ? vy * 0.4 : vy) - g; p.z += vz; }   // (paper doesn't whip upward much)
+    if (p.y > LAYOUT.wallHeight - 0.15) p.y = LAYOUT.wallHeight - 0.15;   // the ceiling
   }
   if (pin) { pin.x = pin.px = tr.o.x; pin.y = pin.py = tr.o.y; pin.z = pin.pz = tr.o.z; }
   for (let k = 0; k < TP.iters; k++) {
     for (let i = 1; i < n; i++) {
       const a = P[i - 1], b = P[i], dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z, d = Math.hypot(dx, dy, dz), r = tr.rest[i - 1];
       if (d <= r || d < 1e-6) continue;   // paper doesn't stretch, but it can bunch up
-      const wa = a === pin ? 0 : a.held ? 0.15 : 1, wb = b === pin ? 0 : b.held ? 0.15 : 1, sum = wa + wb;
+      const w = (p) => (p === pin || p.snag ? 0 : p.held ? 0.15 : 1);   // snagged on something: it stays put
+      const wa = w(a), wb = w(b), sum = wa + wb;
       if (!sum) continue;
       const f = (d - r) / d / sum;
       a.x += dx * f * wa; a.y += dy * f * wa; a.z += dz * f * wa;
@@ -3652,7 +3657,8 @@ function stepTrail(tr, dt) {
       if (p === pin) continue;
       if (p.y < TP.floorY) { p.y = TP.floorY; p.held = true; continue; }
       const s = tpSupport(p.x, p.z);
-      if (s > TP.floorY && p.y < s && p.py >= s - 0.04) { p.y = s + 0.01; p.held = true; }   // it came down onto something: snagged
+      if (p.snag) { p.y = p.snag; continue; }
+      if (s > TP.floorY && p.y < s && p.py >= s - 0.04) { p.y = s + 0.01; p.held = true; p.snag = p.y; }   // it came down onto something: snagged
       else if (p.held && p.y > TP.floorY + 0.02 && p.y < s - 0.06) p.held = false;       // pulled off the edge
     }
   }
@@ -3699,15 +3705,31 @@ const kickMeTex = (() => {
   x.font = "900 30px 'Comic Sans MS', 'Marker Felt', cursive"; x.fillText("KICK", 64, 24); x.fillText("ME", 64, 56);
   const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; return t;
 })();
+// staff first (worth more), otherwise the nearest kid
 function kickMeTarget() {
-  const R = ITEM_TYPES.kickMe.range;
-  return staff.filter((s) => !s.kickMe && Math.hypot(s.x - player.x, s.z - player.z) < R)
-    .sort((a, b) => Math.hypot(a.x - player.x, a.z - player.z) - Math.hypot(b.x - player.x, b.z - player.z))[0] ?? null;
+  const R = ITEM_TYPES.kickMe.range, d = (o) => Math.hypot(o.x - player.x, o.z - player.z);
+  const st = staff.filter((s) => !s.kickMe && d(s) < R).sort((a, b) => d(a) - d(b))[0];
+  if (st) return { who: st, isStaff: true };
+  const c = crowd.filter((k) => isActive(k) && !k.kickMeT && d(k) < R).sort((a, b) => d(a) - d(b))[0];
+  return c ? { who: c, isStaff: false } : null;
 }
+const kidSigns = [];   // kids wearing a kick-me sign: { c, mesh }
 function stickKickMe(slot) {
-  const T = ITEM_TYPES.kickMe, st = kickMeTarget();
-  if (!st) { toast("Sneak right up behind a staff member to stick it on."); return; }
+  const T = ITEM_TYPES.kickMe, tg = kickMeTarget();
+  if (!tg) { toast("Sneak right up behind someone to stick it on."); return; }
   consumeSlot(slot);
+  if (!tg.isStaff) {   // a kid: stuck in a ring of laughing kids
+    const c = tg.who;
+    c.kickMeT = T.kidSec; c.slipT = Math.max(c.slipT, T.kidSec); c.stunStyle = "stuck";
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(0.4, 0.26), new THREE.MeshBasicMaterial({ map: kickMeTex, side: THREE.DoubleSide }));
+    scene.add(mesh); kidSigns.push({ c, mesh });
+    const n = gatherKids(c.x, c.z, T.kidCrowd, 14, [0.7, 1.05], () => !(c.kickMeT > 0));
+    playBlip([700, 900], 0.05, "square", 0.04);
+    havoc("kickMeKid", T.kidPoints + n * 10, `"KICK ME" on a kid!${n ? ` ${n} kids crowd round laughing` : ""} 😂`, { x: c.x, z: c.z });
+    dareEvent("kickMe", { staff: null });
+    return;
+  }
+  const st = tg.who;
   const facing = st.stunT <= 0 && st.stuckT <= 0 && Math.abs(angDiff(st.facing, Math.atan2(player.x - st.x, player.z - st.z))) < (st.type.visionHalfAngleDeg * Math.PI) / 180;
   if (facing) {   // they saw it coming
     st.bubble.textContent = "Is that... for ME?"; st.barkUntil = performance.now() + 1800; st.barkAt = game.time;
@@ -3736,7 +3758,13 @@ function unpen(st) {
   if (st.sign) { st.mesh.remove(st.sign); st.sign.material.dispose(); st.sign = null; }
   st.bubble.textContent = "...Very funny."; st.barkUntil = performance.now() + 1800; st.barkAt = game.time;
 }
-function updateKickMe() {
+function updateKickMe(dt) {
+  for (let i = kidSigns.length - 1; i >= 0; i--) {   // kids wearing a sign: it rides on their back until it falls off
+    const k = kidSigns[i], c = k.c;
+    c.kickMeT -= dt;
+    if (c.kickMeT <= 0 || c.mode === "gone") { c.kickMeT = 0; scene.remove(k.mesh); k.mesh.material.dispose(); kidSigns.splice(i, 1); continue; }
+    const a = c.heading ?? 0; k.mesh.position.set(c.x - Math.sin(a) * 0.3, 1.05, c.z - Math.cos(a) * 0.3); k.mesh.rotation.y = a + Math.PI;
+  }
   for (const st of staff) {
     if (st.penned) st.stuckT = Math.max(st.stuckT || 0, 0.2);   // can look and yell, can't get out
     else if (st.kickMe && game.phase === "passing" && game.phaseT > 3) penStaff(st);   // tagged during class: the next passing period
