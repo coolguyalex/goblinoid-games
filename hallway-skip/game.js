@@ -1608,6 +1608,23 @@ function endPointer(e) {
 }
 canvas.addEventListener("pointerup", endPointer);
 canvas.addEventListener("pointercancel", endPointer);
+// iPhone Safari ignores the "no zoom" viewport setting, so block zoom gestures here:
+// a quick second tap (double-tap zoom), two-finger pinches (thumb on the stick + a tap),
+// and Safari's own pinch events. Text fields still get normal taps. (step 54)
+let lastTouchEnd = 0;
+const zoomOK = (t) => t?.closest?.("input, textarea, select");
+document.addEventListener("touchend", (e) => {
+  const now = performance.now();
+  if (now - lastTouchEnd < 400 && !zoomOK(e.target)) {
+    e.preventDefault();
+    // Blocking the zoom also eats the tap's click, so menu buttons and "tap to continue" screens get it back here.
+    if (e.target?.closest?.("button, label, .overlay")) e.target.click();
+  }
+  lastTouchEnd = now;
+}, { passive: false });
+document.addEventListener("touchmove", (e) => { if (e.touches.length > 1 || (e.scale ?? 1) !== 1) e.preventDefault(); }, { passive: false });
+document.addEventListener("dblclick", (e) => e.preventDefault(), { passive: false });
+for (const g of ["gesturestart", "gesturechange", "gestureend"]) document.addEventListener(g, (e) => e.preventDefault(), { passive: false });
 // Keyboard players get faint key hints (E bubbles, slot numbers). Touching the screen switches them off again.
 let usingKeys = false;
 function setUsingKeys(on) { if (usingKeys === on) return; usingKeys = on; document.body.classList.toggle("kbd", on); }
