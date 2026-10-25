@@ -32,6 +32,7 @@
 // Step 30: staff can't pull you out of a locker. If they saw you go in, they wait outside it until you come out (burst out!).
 // Step 31: the custodian does the cleaning (messes stay until he gets to them; kids grab balls and planes), never chases, radios you in.
 // Step 32: slime holds longer, spitballs fly farther, stuns last about 25% longer, teachers at their doors see less.
+// Step 33: every classroom has a subject (math, English, history); history rooms have a globe you can roll at someone.
 import * as THREE from "three";
 
 // =====================================================================================
@@ -95,7 +96,7 @@ const CFG = {
     mopSec: 7,                    // mopping a flooded restroom (it reopens)
     airSec: 2.5,                  // airing out what's left of a stink bomb
     radioCooldownSec: 15, radioHeat: 5, radioStaff: 2,
-    kidsTake: ["basketball", "football", "frisbee", "paperAirplane", "bassDrum"],
+    kidsTake: ["basketball", "football", "frisbee", "paperAirplane", "bassDrum", "globe"],
     kidGrabRange: 0.9, kidGrabAfterSec: 1.5,
     lingerRadius: 0.55,           // a stink cloud shrinks to this fraction once it fades, and hangs around until he airs it out
   },
@@ -471,6 +472,13 @@ const TEACHER_TYPES = {
 const ROOM_TYPES = {
   classroom: { label: "", count: [1, 2],
                loot: [["spitball", 5], ["paperAirplane", 5], ["gum", 4], ["wheelieChair", 1.2], ["energyDrink", 1], ["hallPass", 0.35], ["masterKey", 0.12]] },
+  // Ordinary classrooms, by subject: mostly for flavor (the sign over the door), with a little twist to each loot table
+  math:      { label: "Math", plaque: 0x5dade2, count: [1, 2],
+               loot: [["spitball", 6], ["paperAirplane", 4], ["gum", 4], ["wheelieChair", 1.2], ["energyDrink", 1], ["hallPass", 0.35], ["masterKey", 0.12]] },
+  english:   { label: "English", plaque: 0xf5b041, count: [1, 2],   // all that essay paper: more paper airplanes
+               loot: [["paperAirplane", 7], ["spitball", 4], ["gum", 4], ["wheelieChair", 1.2], ["energyDrink", 1], ["hallPass", 0.35], ["masterKey", 0.12]] },
+  history:   { label: "History", plaque: 0xa0522d, count: [1, 2],
+               loot: [["globe", 4], ["spitball", 4], ["paperAirplane", 4], ["gum", 3], ["wheelieChair", 1.2], ["energyDrink", 1], ["hallPass", 0.35], ["masterKey", 0.12]] },
   science:   { label: "Science lab", plaque: 0x2ecc71, loot: [["stinkBomb", 4], ["slime", 4], ["mentos", 3]], count: [1, 2] },
   art:       { label: "Art room", plaque: 0xe67e22, always: ["sprayPaint"], count: [1, 1],
                loot: [["kickMe", 3], ["paperAirplane", 3], ["gum", 3], ["spitball", 2], ["wheelieChair", 1]] },
@@ -548,6 +556,10 @@ const ITEM_TYPES = {
   bassDrum:      { label: "Bass drum", icon: "🥁", kind: "throw", roll: true, recoverable: true, speed: [4.5, 9], friction: 0.35, radius: 0.75,
                    noiseRadius: 8, rumbleSec: 0.6,
                    hit: { student: 30, staff: 160, studentSec: 1.6, staffSec: 3, style: "fall", minSpeed: 1.2 } },
+  // History rooms. Rolls like the bass drum, but it's smaller: it knocks over the first person it hits and stops.
+  globe:         { label: "Globe", icon: "🌍", kind: "throw", roll: true, single: true, recoverable: true, speed: [5, 10], friction: 0.6, radius: 0.5, ballR: 0.3,
+                   noiseRadius: 5, rumbleSec: 0.8,
+                   hit: { student: 30, staff: 130, studentSec: 1.5, staffSec: 2.6, style: "fall", minSpeed: 1.2 } },
   energyDrink:   { label: "Energy drink", icon: "⚡", kind: "drink" },   // tap to drink: see CFG.energy
   gum:           { label: "Gum", icon: "🍬", kind: "instant", points: 100, line: "You stick gum under the water fountain. Gross. +havoc" },
   // Junk from lockers: takes up a slot until you toss it (select it to drop it). Staff tidy it up like anything else.
@@ -555,7 +567,7 @@ const ITEM_TYPES = {
   sandwich:      { label: "Moldy sandwich", icon: "🥪", kind: "junk", line: "You toss the sandwich. Something in it moved." },
   homework:      { label: "Crumpled homework", icon: "📄", kind: "junk", line: "You toss someone's homework. It's a D-minus anyway." },
 };
-const REST_Y = { bassDrum: 0.45, trumpet: 0.06, basketball: 0.2, football: 0.14, wheelieChair: 0, whoopee: 0.08, frisbee: 0.03, slime: 0.02, mentos: 0 };   // how high items sit on the floor (default 0.04)
+const REST_Y = { globe: 0.3, bassDrum: 0.45, trumpet: 0.06, basketball: 0.2, football: 0.14, wheelieChair: 0, whoopee: 0.08, frisbee: 0.03, slime: 0.02, mentos: 0 };   // how high items sit on the floor (default 0.04)
 
 // Floor plan: a squared figure 8. An outer loop plus a main hall across the middle, around two classroom blocks.
 // Halls run node to node. "side" on a hall: +1 / -1 = which wall (+1 is the classroom side on the outer loop).
@@ -585,11 +597,11 @@ const LAYOUT = {
   entrance: { h: 3, t: 19.5 },
   // classroom doors: hall index, distance along it, room number. Side defaults to the classroom wall.
   doors: [
-    { h: 0, t: 9.75, room: 101 }, { h: 0, t: 19.5, room: 102, type: "science" }, { h: 0, t: 29.25, room: 103 },
-    { h: 1, t: 8.5, room: 104, type: "art" }, { h: 6, t: 29, side: -1, room: 105, type: "office" }, { h: 6, t: 10, side: -1, room: 106 },
-    { h: 5, t: 8.5, room: 107 },
-    { h: 6, t: 14, side: 1, room: 201, type: "gym" }, { h: 6, t: 25, side: 1, room: 202 }, { h: 2, t: 8.5, room: 203, type: "science" },
-    { h: 3, t: 9.75, room: 204 }, { h: 3, t: 19.5, room: 205, type: "art" }, { h: 3, t: 29.25, room: 206, type: "music" }, { h: 4, t: 8.5, room: 207 },
+    { h: 0, t: 9.75, room: 101, type: "math" }, { h: 0, t: 19.5, room: 102, type: "science" }, { h: 0, t: 29.25, room: 103, type: "english" },
+    { h: 1, t: 8.5, room: 104, type: "art" }, { h: 6, t: 29, side: -1, room: 105, type: "office" }, { h: 6, t: 10, side: -1, room: 106, type: "history" },
+    { h: 5, t: 8.5, room: 107, type: "english" },
+    { h: 6, t: 14, side: 1, room: 201, type: "gym" }, { h: 6, t: 25, side: 1, room: 202, type: "math" }, { h: 2, t: 8.5, room: 203, type: "science" },
+    { h: 3, t: 9.75, room: 204, type: "history" }, { h: 3, t: 19.5, room: 205, type: "art" }, { h: 3, t: 29.25, room: 206, type: "music" }, { h: 4, t: 8.5, room: 207, type: "math" },
   ],
   hideLockers: [ { h: 0, t: 4 }, { h: 0, t: 25 }, { h: 1, t: 13 }, { h: 2, t: 4 }, { h: 3, t: 27 }, { h: 4, t: 13 }, { h: 5, t: 4 } ],
   restrooms: [ { h: 2, t: 12 }, { h: 5, t: 12 } ],
@@ -2711,6 +2723,15 @@ function makeItemMesh(key) {
       const band = new THREE.Mesh(new THREE.BoxGeometry(0.37, 0.1, 0.92), lambert(0x1d2230)); pivot.add(band);   // a stripe so you can see it roll
       break;
     }
+    case "globe": {
+      const pivot = new THREE.Group(); g.add(pivot); g.userData.pivot = pivot;
+      const ball = new THREE.Mesh(new THREE.IcosahedronGeometry(0.3, 2), lambert(0x2e86c1)); pivot.add(ball);
+      for (const [a, b, w] of [[0.4, 0.3, 0.2], [2.2, -0.2, 0.26], [4.0, 0.5, 0.16], [5.3, -0.6, 0.14]]) {   // continents, so you can see it roll
+        const land = new THREE.Mesh(new THREE.BoxGeometry(w, w * 0.8, 0.05), lambert(0x58a55c));
+        land.position.set(Math.sin(a) * Math.cos(b) * 0.29, Math.sin(b) * 0.29, Math.cos(a) * Math.cos(b) * 0.29); land.lookAt(0, 0, 0); pivot.add(land);
+      }
+      break;
+    }
     case "trumpet": {
       const t = m(new THREE.CylinderGeometry(0.025, 0.025, 0.4, 6), 0xe0b030); t.rotation.x = Math.PI / 2;
       const bell = m(new THREE.CylinderGeometry(0.11, 0.025, 0.16, 10), 0xe0b030); bell.rotation.x = Math.PI / 2; bell.position.z = 0.26;
@@ -3268,7 +3289,7 @@ const rollSpeed = (T, power) => T.speed[0] + (T.speed[1] - T.speed[0]) * power;
 function rollDrum(key, L) {
   const T = ITEM_TYPES[key], sp = rollSpeed(T, L.power);
   const o = spawnObject(key, "drum", player.x + L.dx * 0.9, REST_Y[key], player.z + L.dz * 0.9, { vx: L.dx * sp, vz: L.dz * sp });
-  collide(o, 0.45);
+  collide(o, T.ballR ?? 0.45);
   o.mesh.rotation.y = Math.atan2(L.dx, L.dz);
   playBlip([70, 55], 0.18, "sine", 0.12);   // boom
 }
@@ -3278,20 +3299,22 @@ function drumRoll(o, dt) {
   let bonk = false;   // bounce off walls at the drum's own size (wallBounce is for small things)
   for (const ax of ["x", "z"]) {
     const v = ax === "x" ? o.vx : o.vz; if (Math.abs(v) < 1e-4) continue;
-    const reach = Math.abs(v) * dt + 0.46, d = ax === "x" ? raycast(o.x, o.z, Math.sign(v), 0, reach) : raycast(o.x, o.z, 0, Math.sign(v), reach);
+    const reach = Math.abs(v) * dt + (T.ballR ?? 0.45) + 0.01, d = ax === "x" ? raycast(o.x, o.z, Math.sign(v), 0, reach) : raycast(o.x, o.z, 0, Math.sign(v), reach);
     if (d < reach) { if (ax === "x") o.vx = -o.vx * 0.55; else o.vz = -o.vz * 0.55; bonk = true; }
   }
   if (bonk) { playBlip([60, 45], 0.15, "sine", 0.1); makeNoise(o.x, o.z, T.noiseRadius, false); }
-  o.x += o.vx * dt; o.z += o.vz * dt; o.y = REST_Y.bassDrum;
+  o.x += o.vx * dt; o.z += o.vz * dt; o.y = REST_Y[o.key];
   const sp = Math.hypot(o.vx, o.vz);
   if (sp > 0.05) o.mesh.rotation.y = Math.atan2(o.vx, o.vz);
-  o.mesh.userData.pivot.rotation.x += (sp * dt) / 0.45;
+  o.mesh.userData.pivot.rotation.x += (sp * dt) / (T.ballR ?? 0.45);
   o.rumbleT = (o.rumbleT ?? 0) - dt;
   if (o.rumbleT <= 0 && sp > 1) { o.rumbleT = T.rumbleSec; playBlip([48], 0.12, "sine", 0.05); makeNoise(o.x, o.z, T.noiseRadius, false); }
   if (sp > T.hit.minSpeed) {
     let p;
     while ((p = personHit(o, T.radius - 0.1, 2))) {
-      if (hitPerson(o, p.who, p.isStaff)) { o.vx *= 0.88; o.vz *= 0.88; }   // it barely slows down
+      if (!hitPerson(o, p.who, p.isStaff)) continue;
+      if (T.single) { o.vx *= -0.15; o.vz *= -0.15; break; }   // the globe: one person, then it stops dead
+      o.vx *= 0.88; o.vz *= 0.88;   // the drum barely slows down
     }
   }
   if (sp < 0.3) { o.vx = o.vz = 0; o.state = "resting"; capLying(); }
