@@ -48,6 +48,7 @@
 // Step 44: sneaking into a classroom is a hide check, and so is every grab. Spotted: out, security's called, room locked 3 periods.
 // Step 45: your kid: stealth, speed and strength (0-20, roll and reroll), on a character screen from the title.
 // Step 46: your kid's look: outfit, hair and color, skin, height, weight and build, on a jointed low-poly kid whose arms and legs swing.
+// Step 47: easier classrooms (teacher 80%, sub 95%, secretary 65%); a grab is half as risky as walking in, +6% per grab after.
 import * as THREE from "three";
 
 // =====================================================================================
@@ -220,7 +221,8 @@ const CFG = {
     grabSec: 1.5,                 // grabbing an item off a desk eats this much of your hiding time (subs: see TEACHER_TYPES)
     raidLockPeriods: 2,           // grab anything from a room and its door is locked for this many periods (no restock either)
     hideCheck: {                  // step 44: sneaking in, and each grab, is a roll against the teacher's hideChance
-      grabPenalty: 0.1,           // each grab in the same visit makes the next roll this much harder
+      grabRisk: 0.5,              // step 47: a grab is half as risky as walking in...
+      grabPenalty: 0.06,          // ...plus this much more for each grab before it in the same visit
       hoodBonus: 0.1,             // hood up: a little easier
       min: 0.1, max: 0.97,
       lockPeriods: 3,             // spotted: the room's locked this period and the next two
@@ -510,11 +512,11 @@ const SPOT_TYPES = {
 // Who's in the room. Step 44: walking in is a hide check (hideChance); so is every grab off a desk (a little harder each time).
 // Get spotted and you're out, security's called and the room's locked for a few periods. Make it and you can stay bootSec.
 const TEACHER_TYPES = {
-  teacher: { label: "Teacher", bootSec: 15, silhouette: 0x2b2f3a, hideChance: 0.65,
+  teacher: { label: "Teacher", bootSec: 15, silhouette: 0x2b2f3a, hideChance: 0.8,
              stayLine: "You slipped in behind the back row. The teacher's writing on the board.", bootLine: "\"Nice try. Out.\"" },
-  sub:     { label: "Sub", bootSec: 20, silhouette: 0x3a7d44, hideChance: 0.9, grabSec: 0.75,
+  sub:     { label: "Sub", bootSec: 20, silhouette: 0x3a7d44, hideChance: 0.95, grabSec: 0.75,
              stayLine: "The sub is reading a magazine. You're under a desk.", bootLine: "The sub finally looks up: \"Are you even in this class?\"" },
-  office:  { label: "Secretary", bootSec: 12, silhouette: 0x7a4b8c, hideChance: 0.5,
+  office:  { label: "Secretary", bootSec: 12, silhouette: 0x7a4b8c, hideChance: 0.65,
              stayLine: "The secretary is on hold with the district. You duck behind the counter.", bootLine: "\"Do you have an appointment? No? Out.\"" },
 };
 // Rooms as shops: what's lying on the desks, by room type. A new room type is one line.
@@ -2920,7 +2922,7 @@ function enterSpot(sp) {
   playBlip([260, 200], 0.07, "triangle", 0.07);
   if (sp.kind === "classroom") {   // step 44: did the teacher see you slip in?
     sp.grabs = 0;
-    const ch = roomHideChance(sp);
+    const ch = roomHideChance(sp, false);
     if (Math.random() >= ch) { roomSpotted(sp); return true; }
     toast(`🤫 Nobody noticed you slip in. (${Math.round(ch * 100)}% chance)`, 1.8);
     dareEvent("enterRoom", { sp });
@@ -3178,10 +3180,12 @@ function roomBackfire(sp) {
   onRoomBackfire(sp);
 }
 // ---- step 44: the hide check for classrooms ----
-function roomHideChance(sp) {
+// grab: the roll for taking something (once you're in), rather than for walking in
+function roomHideChance(sp, grab = player.hidden === sp) {
   const C = CFG.rooms.hideCheck;
-  return clamp(TEACHER_TYPES[sp.teacher].hideChance - (sp.grabs || 0) * C.grabPenalty + (player.hoodT > 0 ? C.hoodBonus : 0)
-    + CFG.stats.stealth.hide * statMod("stealth"), C.min, C.max);
+  const enter = clamp(TEACHER_TYPES[sp.teacher].hideChance + (player.hoodT > 0 ? C.hoodBonus : 0) + CFG.stats.stealth.hide * statMod("stealth"), C.min, C.max);
+  if (!grab) return enter;
+  return clamp(1 - (1 - enter) * C.grabRisk - (sp.grabs || 0) * C.grabPenalty, C.min, C.max);
 }
 function roomSpotted(sp) {
   const C = CFG.rooms.hideCheck;
