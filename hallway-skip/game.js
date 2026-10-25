@@ -35,6 +35,7 @@
 // Step 33: every classroom has a subject (math, English, history); history rooms have a globe you can roll at someone.
 // Step 34: the custodian's closet: a mop (jams a classroom door), a wet-floor sign, a mop bucket, a plunger, and the breaker box (lights out).
 // Step 35: after a strike (or a "get to class!"), you get a real head start: whoever caught you lets you go and looks the other way for a while.
+// Step 36: balls and frisbees turn up in lockers too; slime, stink bombs and Mentos geysers cover a bigger area.
 import * as THREE from "three";
 
 // =====================================================================================
@@ -193,7 +194,7 @@ const CFG = {
     // Burst out: slam the door open. Staff close by are stunned and you get a head start, but the locker's busted
     // for the rest of the day. Only while you've still got locker time left.
     burst: { radius: 4.5, stunSec: 3, graceSec: 1.2, points: 75, noiseRadius: 12 },
-    loot: [["spitball", 4], ["gum", 4], ["paperAirplane", 3], ["whoopee", 2], ["bananaPeel", 2], ["kickMe", 1], ["energyDrink", 2],
+    loot: [["spitball", 4], ["gum", 4], ["paperAirplane", 3], ["whoopee", 2], ["bananaPeel", 2], ["kickMe", 1], ["energyDrink", 2], ["basketball", 1.5], ["football", 1], ["frisbee", 1.5],
            ["oldSock", 3], ["sandwich", 3], ["homework", 3]],
   },
 
@@ -541,19 +542,19 @@ const ITEM_TYPES = {
                    noiseRadius: 10, bouncePoints: 6,
                    hit: { student: 35, staff: 140, studentSec: 1.2, staffSec: 2.2, style: "fall", minSpeed: 2 } },
   stinkBomb:     { label: "Stink bomb", icon: "🧪", kind: "throw", speed: [4, 9], pitchDeg: 30, gravity: 9.8,   // science labs only
-                   points: 60, cloudRadius: 2.3, cloudSec: 10, noiseRadius: 12,
+                   points: 60, cloudRadius: 3.2, cloudSec: 10, noiseRadius: 12,
                    perStudent: 15, perStaff: 60, studentGagSec: 1, staffGagSec: 1.8 },   // extra points for everyone who walks through it
   // Science labs: lands as a puddle (or on whoever it hits). The first few people to step in it are stuck for a few
   // seconds: staff can still look around and yell, they just can't move.
   slime:         { label: "Slime", icon: "🟢", kind: "throw", trap: true, speed: [4, 9], pitchDeg: 25, gravity: 9.8,
-                   radius: 0.6, maxSticks: Infinity, stickStaffSec: 6, stickStudentSec: 3.5, stickPlayerSec: 2, staffPoints: 120, studentPoints: 30 },
+                   radius: 1.0, maxSticks: Infinity, stickStaffSec: 6, stickStudentSec: 3.5, stickPlayerSec: 2, staffPoints: 120, studentPoints: 30 },
   // Stick it on a staff member's back (get right up behind them; if they're facing you, they catch on). During a passing
   // period the kids crowd round laughing and pen them in until the tardy bell. Stick it on during class and it waits.
   kickMe:        { label: "\"Kick me\" sign", icon: "🦵", kind: "sign", range: 1.4, points: 400, penKids: 9, penPoints: 100 },
   // Science labs: lands upright, fizzes for a moment, then a geyser. Loud (staff come to look), kids crowd round to watch
   // (cover for you), and anyone standing in the spray gets soaked.
   mentos:        { label: "Mentos & soda", icon: "🥤", kind: "throw", speed: [3, 6.5], pitchDeg: 30, gravity: 9.8,
-                   fuseSec: 1.2, geyserSec: 4, points: 150, noiseRadius: 18, watchRadius: 14, watchKids: 10, watchSec: 9, perWatcher: 6, sprayRadius: 1.2,
+                   fuseSec: 1.2, geyserSec: 4, points: 150, noiseRadius: 18, watchRadius: 14, watchKids: 10, watchSec: 9, perWatcher: 6, sprayRadius: 2.2,
                    hit: { student: 20, staff: 80, studentSec: 0.8, staffSec: 1.5, style: "flinch" } },
   loveNote:      { label: "Love note", icon: "💌", kind: "note" },   // for the love-note dare: can't be thrown, just delivered
   sprayPaint:    { label: "Spray paint", icon: "🎨", kind: "spray", uses: 3, points: 100, wallRange: 1.7 },   // art rooms only
@@ -3374,7 +3375,7 @@ function landObject(o) {
       o.state = "spent"; o.life = o.trail ? 0.6 : 1.5; break;
     }
     case "mentos": o.state = "fuse"; o.fuseT = o.T.fuseSec; o.vx = o.vz = 0; o.mesh.rotation.set(0, 0, 0); playBlip([900, 1100], 0.05, "sine", 0.03); break;
-    case "slime": o.state = "trap"; o.mesh.userData.blob.scale.set(4.2, 0.22, 4.2); break;   // a puddle
+    case "slime": o.state = "trap"; o.mesh.userData.blob.scale.set(7.5, 0.22, 7.5); break;   // a puddle (as wide as T.radius)
     case "spitball": o.state = "spent"; o.life = 0.4; break;
     case "bananaPeel": o.state = "trap"; o.mesh.rotation.y = Math.random() * 6; break;
     case "mopBucket": {   // tipped over: a puddle
@@ -3743,7 +3744,8 @@ function geyserStep(o, dt) {
   const T = o.T;
   o.gT -= dt;
   const k = 1 - o.gT / T.geyserSec, h = 2.6 * Math.min(1, k * 4) * Math.pow(Math.max(0, o.gT / T.geyserSec), 0.35);
-  o.foam.scale.set(1 + Math.sin(o.age * 30) * 0.12, Math.max(0.01, h), 1 + Math.cos(o.age * 27) * 0.12);
+  const wide = T.sprayRadius / 1.2;   // the foam spreads as wide as the spray
+  o.foam.scale.set(wide * (1 + Math.sin(o.age * 30) * 0.12), Math.max(0.01, h), wide * (1 + Math.cos(o.age * 27) * 0.12));
   const p = personHit(o, T.sprayRadius, 9);
   if (p) hitPerson(o, p.who, p.isStaff);
   if (o.gT <= 0) { scene.remove(o.foam); o.foam.material.dispose(); o.foam = null; o.state = "resting"; o.popped = true; capLying(); }   // an empty bottle: litter
