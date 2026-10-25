@@ -34,6 +34,7 @@
 // Step 32: slime holds longer, spitballs fly farther, stuns last about 25% longer, teachers at their doors see less.
 // Step 33: every classroom has a subject (math, English, history); history rooms have a globe you can roll at someone.
 // Step 34: the custodian's closet: a mop (jams a classroom door), a wet-floor sign, a mop bucket, a plunger, and the breaker box (lights out).
+// Step 35: after a strike (or a "get to class!"), you get a real head start: whoever caught you lets you go and looks the other way for a while.
 import * as THREE from "three";
 
 // =====================================================================================
@@ -283,7 +284,9 @@ const CFG = {
     max: 3,
     warningSceneSec: 2.6,         // strike 1: "you better get to class"
     officeSceneSec: 3.4,          // strike 2: the office
-    afterStrikeGraceSec: 3.0,     // after a strike scene, staff can't see you for this long
+    afterStrikeGraceSec: 6,       // after a strike scene, staff can't see you for this long (was 3 before step 35)...
+    catcherIgnoreSec: 20,         // ...and whoever caught you ignores you for this long ("Now get to class!")
+    shooGraceSec: 4, shooIgnoreSec: 12,   // the same after a no-strike "get to class!" in a passing period
     officeLosesPeriodPoints: true,   // strike 2 costs you everything earned this period
     alert: { vision: 1.2, notice: 1.4, speed: 1.1 },   // after strike 2, staff stay this much sharper for the rest of the day
   },
@@ -1501,8 +1504,10 @@ function releaseControls() { stick.id = look.id = null; keys.clear(); sprintTouc
   for (const ev of ["pointerup", "pointercancel", "pointerleave"]) b.addEventListener(ev, on(false));
 }
 
+const RELEASE_LINES = ["Now get to class!!!", "Get out of my sight!!!", "Go. GO. Before I change my mind.", "I don't want to see you again today.", "Class. Now. MOVE."];
 function caught(st) {
   cancelAim();
+  game.catcher = st;
   if (player.ride) endRide(false);
   if (game.phase === "passing" && game.heat < CFG.heat.passingCatchAt && !game.survival) { shoo(st); return; }
   game.unseenT = 0;
@@ -1567,7 +1572,15 @@ function shoo(st, line = null) {
     if (o.state !== "patrol") { o.state = "return"; setReturnPoint(o); }
     o.suspicion = 0; o.calledBackup = false; o.pauseT = 1.0;
   }
-  player.invisT = 2.0;
+  player.invisT = CFG.strikes.shooGraceSec;
+  letGo(st, CFG.strikes.shooIgnoreSec, true);
+}
+// whoever caught you shoos you off and looks the other way for a while
+function letGo(st, sec, quiet = false) {
+  if (!st || !staff.includes(st)) return;
+  st.ignoreT = sec; st.suspicion = 0;
+  st.bubble.textContent = pick(RELEASE_LINES); st.barkUntil = performance.now() + 2600; st.barkAt = game.time;
+  if (!quiet) toast(`The ${st.type.name}: "${st.bubble.textContent}"`, 2.6);
 }
 
 function endScene(skipAd = false) {
@@ -1584,6 +1597,7 @@ function endScene(skipAd = false) {
   }
   if (game.strikes === CFG.strikes.max - 1) setTimeout(() => pa("lastStrike"), 4800);
   player.invisT = CFG.strikes.afterStrikeGraceSec;
+  letGo(game.catcher, CFG.strikes.catcherIgnoreSec);
   game.state = "playing";
   saveGame();
   clock.getDelta();
@@ -1938,6 +1952,7 @@ function canSeePlayer(st, rangeMult, needCone) {
   if (player.hidden || st.stunT > 0) return { seen: false, d: Infinity };
   const T = st.type, dx = player.x - st.x, dz = player.z - st.z, d = Math.hypot(dx, dz);
   if (player.invisT > 0) return { seen: false, d };   // just served a strike: a moment to get away
+  if (st.ignoreT > 0) return { seen: false, d };      // the one who just caught you is letting it go
   if (d > T.visionRange * staffMult("vision") * rangeMult) return { seen: false, d };
   if (needCone && Math.abs(angDiff(st.facing, Math.atan2(dx, dz))) > (T.visionHalfAngleDeg * Math.PI) / 180) return { seen: false, d };
   return { seen: lineOfSight(st.x, st.z, player.x, player.z), d };
@@ -1968,6 +1983,7 @@ function updateStaff(dt, cover) {
   for (const st of staff) {
     const T = st.type;
     st.sweep += dt * T.sweepRate;
+    if (st.ignoreT > 0) st.ignoreT -= dt;
     let speed = 0;
     st.distractT = Math.max(0, st.distractT - dt);
     if (st.stunT > 0) {   // slipped on a banana peel (flat on the floor), or hit by something (staggering)
