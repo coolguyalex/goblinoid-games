@@ -34,6 +34,7 @@ Built from `Hallway_Skip_Game_Spec` v0.2. Done so far:
 - **Step 27:** staff are slower to go from suspicious (?) to chasing (!), much slower in passing periods. A hall monitor with no crowd around: about 5–12 s in passing (was 2–4 s), 1–3 s in class time (was 1–2 s). Crowds, heat and later days still change it (`CFG.detection.suspicionRate` 1.7 → 1.1, `passingBeatMult` 2.6 → 4.5).
 - **Step 28:** the band room (room 206, purple plaque). 🎺 **Trumpet** (2 blasts): +350 and a little heat, and every free staff member heads for where you're standing. 🥁 **Bass drum**: roll it down the hall like a bowling ball. It knocks over everyone in its path (+30 a kid, +160 a staff member, knocked flat 2.4 s), barely slows down, bounces off walls, rumbles (staff turn to look), and you can pick it back up once it stops (`ITEM_TYPES.trumpet`, `ITEM_TYPES.bassDrum`).
 - **Step 29:** the wheelie chair steers a little (stick or A/D, about 1.7 rad/s), but steering scrubs off speed, and below 3.5 m/s you roll to a stop. **Jump off** (🦘 button on phones, E or Space) to skip the crash: you hop to the side, and the empty chair rolls on and can flatten a staff member (+150) or a kid (`ITEM_TYPES.wheelieChair`).
+- **Step 30:** staff can't pull you out of a locker. If they saw you go in, they walk over and wait outside it ("I can wait."), and the locker panel warns you. Burst out to flatten them, or wait until your time runs out and get chased. Restrooms and classrooms work as before.
 
 ## Before turning on real ads
 

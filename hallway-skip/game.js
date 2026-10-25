@@ -29,6 +29,7 @@
 // Step 27: staff take longer to go from suspicious (?) to chasing (!), and much longer during passing periods.
 // Step 28: the band room (room 206): the trumpet (every staff member comes running, big points) and the bass drum (roll it down the hall).
 // Step 29: steer the wheelie chair a little (steering slows you down), and jump off before the crash (the chair rolls on without you).
+// Step 30: staff can't pull you out of a locker. If they saw you go in, they wait outside it until you come out (burst out!).
 import * as THREE from "three";
 
 // =====================================================================================
@@ -267,6 +268,7 @@ const CFG = {
 if (URLQ.has("crowd")) CFG.crowd.count = Math.max(20, Math.min(250, parseInt(URLQ.get("crowd"), 10) || CFG.crowd.count));
 
 // Staff are data: adding a type later (principal) is one entry here.
+const CAMP_LINES = ["I can wait.", "I know you're in there.", "Take your time. I've got all day.", "Any minute now...", "*taps foot*"];
 const STAFF_TYPES = {
   hallMonitor: {
     name: "hall monitor",
@@ -1974,13 +1976,26 @@ function updateStaff(dt, cover) {
         const g = { x: st.lastX + st.lastVX * D.predictSec, z: st.lastZ + st.lastVZ * D.predictSec };
         collide(g, 0.4); st.tx = g.x; st.tz = g.z;
       }
+    } else if (st.state === "bust" && st.camping) {
+      // waiting outside your locker: they can't get you out, but they'll be right there when you come out
+      speed = 0;
+      const sp = st.bustSpot, f = spotFront(sp, {});
+      st.facing = lerpAngle(st.facing, Math.atan2(f.x - st.x - sp.side * HALLS[sp.h].nx, f.z - st.z - sp.side * HALLS[sp.h].nz), damp(4, dt));
+      if (player.hidden !== sp) {
+        st.camping = false;
+        if (!player.hidden && canSeePlayer(st, D.chaseSightRangeMult, false).seen) { startChase(st); bark(st, "bust", true); }
+        else { st.state = "search"; st.searchT = 0; st.lastX = st.tx = f.x; st.lastZ = st.tz = f.z; }
+      } else if (performance.now() > (st.barkUntil ?? 0) + 6000) { st.bubble.textContent = pick(CAMP_LINES); st.barkUntil = performance.now() + 2000; }
     } else if (st.state === "bust") {
-      // they saw you duck into a hiding spot: go yank you out
+      // they saw you duck into a hiding spot: go yank you out (or, for a locker, wait outside it)
       speed = chaseSpeed(st, dt);
       const sp = st.bustSpot, f = spotFront(sp, {});
       if (!player.hidden && canSeePlayer(st, D.chaseSightRangeMult, false).seen) startChase(st);
       else if (navToward(st, f.x, f.z, speed, dt) < 0.75) {
-        if (player.hidden === sp) {
+        if (player.hidden === sp && sp.kind === "locker") {
+          st.camping = true; st.bubble.textContent = pick(CAMP_LINES); st.barkUntil = performance.now() + 2200;
+          toast(`The ${T.name} is waiting outside your locker.`, 2.2);
+        } else if (player.hidden === sp) {
           const who = `The ${T.name}`;
           exitSpot(true, sp.kind === "locker" ? `${who} yanks the locker open: "I saw you go in there."`
             : sp.kind === "restroom" ? `${who} bangs on the stall: "I saw you go in there."`
@@ -2228,7 +2243,7 @@ function enterSpot(sp) {
     const d = Math.hypot(st.x - f.x, st.z - f.z);
     if (!lineOfSight(st.x, st.z, f.x, f.z)) continue;
     if ((st.state === "chase" || st.state === "search") && d < st.type.visionRange * CFG.detection.chaseSightRangeMult) {
-      st.state = "bust"; st.bustSpot = sp;
+      st.state = "bust"; st.bustSpot = sp; st.camping = false;
     } else if ((st.state === "patrol" || st.state === "return" || st.state === "tidy") && st.suspicion > 0.5 && d < st.type.visionRange) {
       st.state = "search"; st.searchT = 0; st.lastX = st.tx = f.x; st.lastZ = st.tz = f.z;   // "...was that a kid?"
     }
@@ -2300,6 +2315,12 @@ function updateHidePanel() {
     const C = CFG.hiding.restroomCheck, coming = staff.some((st) => st.state === "check" && st.checkSpot === sp);
     const left = C.foundAfter - (sp.checks || 0);
     warn = (coming ? "Footsteps outside... someone's coming to check! " : "") + (!sp.checks ? "" : left <= 1 ? "One more check and they find you." : `${left} more checks and they find you.`);
+  }
+  if (sp.kind === "locker") {
+    const out = staff.filter((st) => st.state === "bust" && st.bustSpot === sp);
+    const waiting = out.filter((st) => st.camping);
+    if (waiting.length) warn = `👀 The ${waiting[0].type.name}${waiting.length > 1 ? ` and ${waiting.length - 1} more are` : " is"} waiting right outside. Burst out before your time's up!`;
+    else if (out.length) warn = "Someone saw you go in. They're coming to wait outside.";
   }
   ui.hpTitle.textContent = title;
   ui.hpLine.textContent = line;
@@ -2952,7 +2973,7 @@ function drawObjects() {
 }
 // ---- thrown things hitting people: points (staff pay more) and a stun ----
 function stunStaff(st, sec, style) {
-  st.stunT = Math.max(st.stunT, sec); st.stunStyle = style;
+  st.stunT = Math.max(st.stunT, sec); st.stunStyle = style; st.camping = false;
   if (st.state === "chase" || st.state === "bust") { st.state = "search"; st.searchT = 0; st.lastX = st.tx = player.x; st.lastZ = st.tz = player.z; }
 }
 // ---- staff tidying up: they walk over to things lying around and pick them up ----
@@ -4274,7 +4295,7 @@ if (debug) {   // test-only helpers (only with ?debug in the URL)
     hotbar() { return game.hotbar.map((s) => s && `${s.key}${s.uses > 1 ? "x" + s.uses : ""}`); },
     playerState() { return { slipT: player.slipT, dazeT: player.dazeT, riding: !!player.ride, x: player.x, z: player.z, rideSpeed: player.ride?.speed ?? 0, heading: player.heading }; },
     jumpOff() { jumpOff(); },
-    staffFull(k) { const s = staff[k]; return { state: s.state, stunT: s.stunT, distractT: s.distractT, x: s.x, z: s.z, key: s.key }; },
+    staffFull(k) { const s = staff[k]; return { camping: !!s.camping, state: s.state, stunT: s.stunT, distractT: s.distractT, x: s.x, z: s.z, key: s.key }; },
     searchTo(k, x, z) { const st = staff[k]; st.state = "search"; st.searchT = -30; st.lastX = st.tx = x; st.lastZ = st.tz = z; },
     nodes() { return NODES.map((n) => ({ id: n.id, x: n.x, z: n.z })); },
     tidyInfo() { return staff.map((s) => ({ key: s.key, state: s.state, obj: s.tidyObj && !s.tidyObj.dead && s.state === "tidy" ? s.tidyObj.id : null, stunT: s.stunT, tidyT: s.tidyT, x: s.x, z: s.z, pauseT: s.pauseT })); },
