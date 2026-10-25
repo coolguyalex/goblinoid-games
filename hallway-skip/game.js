@@ -37,6 +37,8 @@
 // Step 35: after a strike (or a "get to class!"), you get a real head start: whoever caught you lets you go and looks the other way for a while.
 // Step 36: balls and frisbees turn up in lockers too; slime, stink bombs and Mentos geysers cover a bigger area.
 // Step 37: take anything from the custodian's closet and he locks it for the rest of the day; only the staff key opens it.
+// Step 38: no wet-floor sign in the closet. The custodian puts two out around wet messes while he cleans; steal one and set it down:
+//          staff who aren't onto you turn around when they see it. 10 s after you take one, he drops everything to get it back.
 import * as THREE from "three";
 
 // =====================================================================================
@@ -94,6 +96,9 @@ const CFG = {
   // the radio, then walks over). Kids grab the fun stuff (balls, frisbees, paper airplanes) lying around before he can.
   // He never chases you, but if he gets a good look he radios the nearest staff.
   custodian: {
+    signsFor: ["slime", "mentos", "mopBucket"],   // wet messes get two signs (so do stink clouds and floods)
+    signGap: 1.8,                 // how far either side of the mess he sets them
+    retrieveAfterSec: 10,         // steal a sign and, this long after, he drops everything to get it back
     pickupSec: 1.6,               // picking up an item or litter
     scrubSec: 4,                  // scrubbing graffiti off a wall
     tpSec: 3,                     // pulling down a toilet-paper streamer
@@ -107,7 +112,7 @@ const CFG = {
   // The custodian's closet: each item can be taken once per period; the breaker box once a day.
   closet: {
     grabSec: 1,
-    items: ["mop", "wetFloor", "mopBucket", "plunger"],
+    items: ["mop", "mopBucket", "plunger"],
     foundRange: 2.3,              // the custodian comes by his closet: this close and you're found
     visitEverySec: [35, 70],      // how often he goes to his closet when there's nothing to clean
   },
@@ -578,8 +583,9 @@ const ITEM_TYPES = {
                    hit: { student: 30, staff: 130, studentSec: 1.5, staffSec: 2.6, style: "fall", minSpeed: 1.2 } },
   // Custodian's closet. Jam a classroom door shut with it: the teacher's stuck inside until the custodian frees them.
   mop:           { label: "Mop", icon: "🧹", kind: "mop", range: 2.6, points: 200 },
-  // Set it down: anyone hurrying through (staff chasing or searching, you sprinting) slips. Walkers see it and step around.
-  wetFloor:      { label: "Wet floor sign", icon: "⚠️", kind: "place", mess: true, radius: 1.3, slipStaffSec: 2.6, slipPlayerSec: 0.8, staffPoints: 140 },
+  // The custodian's: he sets two out around a wet mess while he cleans it. Steal one and set it down: staff walking their
+  // rounds (not suspicious, not chasing) turn around when they see it. Staff who are onto you ignore it.
+  wetFloor:      { label: "Wet floor sign", icon: "⚠️", kind: "place", turnRange: 4.5, points: 30 },
   // Kick it over: a big puddle everyone slips on (each person once) until the custodian mops it up.
   mopBucket:     { label: "Mop bucket", icon: "🪣", kind: "throw", trap: true, mess: true, speed: [2.5, 5], pitchDeg: 25, gravity: 9.8, trapRadius: 1.7,
                    slipStaffSec: 2.6, slipStudentSec: 1.3, slipPlayerSec: 0.8, staffPoints: 120, studentPoints: 20 },
@@ -1377,6 +1383,7 @@ function morningSetup() {
   game.alarmPulled = false; stopAlarm();
   for (const sp of SPOTS) if (sp.jammed) unjam(sp);   // the custodian frees everyone overnight
   for (const sp of CLOSETS) sp.locked = false;
+  stolenSigns.length = 0;
   game.breakerUsed = false; if (game.blackoutT > 0) { game.blackoutT = 0; lightsOn(); }
   startPassing(true);
   if (game.strikes >= 2) ensurePrincipal(false);
@@ -3158,11 +3165,15 @@ function jobGone(j) {
   if (j.kind === "graffiti") return !graffiti.includes(j.g);
   if (j.kind === "tp") return !tpTrails.includes(j.tr);
   if (j.kind === "jam") return !j.sp.jammed;
+  if (j.kind === "sign") return j.rec.done;
   if (j.kind === "closet") return false;
   return !j.sp.closed;
 }
-const jobKey = (j) => j.o ?? j.g ?? j.tr ?? (j.kind === "closet" ? "closet" : j.sp);
+const jobKey = (j) => j.o ?? j.g ?? j.tr ?? j.rec ?? (j.kind === "closet" ? "closet" : j.sp);
+const needsSigns = (j) => j.kind === "cloud" || j.kind === "flood" || (j.kind === "obj" && CFG.custodian.signsFor.includes(j.o.key));
 function finishJob(st, j) {
+  if (j.kind === "sign") { if (!finishSignJob(st, j)) return false; return true; }
+  collectSigns(j.o ?? j.sp);
   if (j.kind === "obj" || j.kind === "cloud") removeObject(j.o);
   else if (j.kind === "graffiti") { const i = graffiti.indexOf(j.g); graffiti.splice(i, 1); scene.remove(j.g.mesh); j.g.mesh.material.map.dispose(); j.g.mesh.material.dispose(); }
   else if (j.kind === "tp") { dropTrail(j.tr); tpTrails.splice(tpTrails.indexOf(j.tr), 1); }
@@ -3198,6 +3209,8 @@ function updateCustodian(st, dt, cover, stuck) {
   const speed = T.patrolSpeed * staffMult("speed") * (sus ? 0.3 : 1);
   st.jobScanT = (st.jobScanT ?? 0) - dt;
   if (st.job && jobGone(st.job)) st.job = null;
+  if (st.job?.kind !== "sign") { const sj = signJob(st); if (sj) { st.job = sj; st.workT = 0; if (performance.now() > st.barkUntil) { st.bubble.textContent = "HEY! Where's my sign?!"; st.barkUntil = performance.now() + 2000; } } }
+  if (st.job?.kind === "sign") { const at = st.job.rec.obj && !st.job.rec.obj.dead ? st.job.rec.obj : player; st.job.x = at.x; st.job.z = at.z; st.job.reach = st.job.rec.obj ? 0.9 : 1.2; }
   if (!st.job && st.jobScanT <= 0) {   // the nearest mess nobody else is on
     st.jobScanT = 0.6;
     const taken = new Set(staff.filter((o) => o !== st && o.job).map((o) => jobKey(o.job)));
@@ -3211,10 +3224,11 @@ function updateCustodian(st, dt, cover, stuck) {
   }
   if (st.job) {
     const j = st.job; st.offHall = true;
-    if (navToward(st, j.x, j.z, speed, dt) < j.reach) {
+    if (navToward(st, j.x, j.z, j.kind === "sign" ? speed * 1.5 : speed, dt) < j.reach) {
+      if (st.workT === 0 && needsSigns(j)) putOutSigns(st, j);
       if (!sus) st.facing = lerpAngle(st.facing, j.kind === "graffiti" ? Math.atan2(j.g.side * HALLS[j.g.h].nx, j.g.side * HALLS[j.g.h].nz) : st.facing, damp(4, dt));
       st.workT += dt;
-      if (st.workT >= j.sec) { finishJob(st, j); st.job = null; }
+      if (st.workT >= j.sec) { if (finishJob(st, j) !== false) st.job = null; else st.workT = 0; }
       return 0;
     }
     if (!sus) st.facing = lerpAngle(st.facing, Math.atan2(j.x - st.x, j.z - st.z), damp(4, dt));
@@ -3255,7 +3269,7 @@ function setTidy(st, o, wait = 0) { if (st.type.stationary) return; st.state = "
 function tidyable(o) {
   if (o.dead || o.wild) return false;
   if (o.state === "trap") return o.slips > 0 || !!o.T.mess;
-  if (o.state === "sign") return true;
+  if (o.state === "sign") return false;   // the custodian's signs: he collects them himself
   if (o.state === "resting") return !o.T.trap || o.popped;
   return o.state === "pickup";
 }
@@ -4004,26 +4018,67 @@ function jamDoor() {
   return true;
 }
 function unjam(sp) { sp.jammed = false; if (sp.mopMesh) { scene.remove(sp.mopMesh); sp.mopMesh = null; } }
-// the wet-floor sign: set down just ahead of you
+// ---- wet-floor signs: the custodian's, set out around a wet mess. Steal one, set it down, and staff on their rounds turn back. ----
+const stolenSigns = [];   // { at, cust, obj (where you set it down, or null while you're carrying it), done }
 function placeSign(key) {
   const o = spawnObject(key, "sign", player.x + Math.sin(player.heading) * 0.9, 0, player.z + Math.cos(player.heading) * 0.9);
-  collide(o, 0.3); o.mesh.rotation.y = player.heading; o.hitSet = new Set(); capLying();
+  collide(o, 0.3); o.mesh.rotation.y = player.heading; o.turned = new Map(); capLying();
+  const rec = stolenSigns.find((r) => !r.done && !r.obj); if (rec) { rec.obj = o; o.rec = rec; }
   playBlip([500, 420], 0.06, "triangle", 0.05);
-  toast("Wet floor! Anyone running through here is going down.");
+  toast("Wet floor! Staff on their rounds will turn back here.");
 }
+function signTaken(o) {
+  if (o.rec) { o.rec.obj = null; return; }   // one you'd already stolen: back in your pocket
+  if (!o.custSign) return;
+  const mess = o.mess; if (mess?.signs) mess.signs = mess.signs.filter((x) => x !== o);
+  stolenSigns.push({ at: game.time, cust: o.custSign, obj: null, done: false });
+  toast("You swipe the custodian's sign. He'll notice in a few seconds...", 2.4);
+}
+// the custodian sets two signs out around the mess he's about to clean
+function putOutSigns(st, j) {
+  const holder = j.o ?? j.sp; if (!holder || holder.signs) return;
+  const pr = hallProject(j.x, j.z), C = CFG.custodian, H = HALLS[pr.h];
+  holder.signs = [-1, 1].map((d) => {
+    const p = hallPos(pr.h, clamp(pr.t + d * C.signGap, 0.3, H.len - 0.3), clamp(pr.lat, -1.4, 1.4));
+    const o = spawnObject("wetFloor", "sign", p.x, 0, p.z, { custSign: st, mess: holder, turned: new Map() });
+    o.mesh.rotation.y = hallHeading(pr.h, d); return o;
+  });
+}
+function collectSigns(holder) { if (holder?.signs) { for (const o of holder.signs) if (!o.dead) removeObject(o); holder.signs = null; } }
+// staff on their rounds who see a sign ahead turn back (staff who are onto you ignore it)
 function wetSignCheck(o) {
-  const T = o.T, near = (x, z, r) => Math.hypot(x - o.x, z - o.z) < r;
+  const T = o.T;
   for (const st of staff) {
-    if (!chaser(st) || st.stunT > 0 || o.hitSet.has(st) || !near(st.x, st.z, T.radius)) continue;
-    if (st.state !== "chase" && st.state !== "search" && st.state !== "bust") continue;   // walking, they see the sign and step around
-    o.hitSet.add(st); stunStaff(st, T.slipStaffSec, "fall"); bark(st, "slip", true);
-    playBlip([700, 300], 0.12, "sawtooth", 0.07);
-    havoc("wetFloorStaff", T.staffPoints, `The ${st.type.name} didn't read the sign!`, { x: o.x, z: o.z, loud: true });
-    dareEvent("hit", { item: "wetFloor", staff: st.key, chasing: true });
+    if (!chaser(st) || st.stunT > 0 || st.state !== "patrol" || st.suspicion > 0.05) continue;
+    if ((o.turned.get(st) ?? -99) > game.time - 8) continue;
+    const dx = o.x - st.x, dz = o.z - st.z, d = Math.hypot(dx, dz);
+    if (d > T.turnRange || Math.abs(angDiff(st.facing, Math.atan2(dx, dz))) > 0.6 || !lineOfSight(st.x, st.z, o.x, o.z)) continue;
+    o.turned.set(st, game.time);
+    st.to = otherEnd(st.h, st.to);
+    if (st.route) { st.rstep = -st.rstep; st.ri = mod(st.ri + st.rstep, st.route.length); }
+    st.bubble.textContent = pick(["Wet floor. Nope.", "Not risking it.", "I'll go around.", "Ugh. Fine."]); st.barkUntil = performance.now() + 1800; st.barkAt = game.time;
+    if (!o.custSign) addScore(T.points, `The ${st.type.name} turns back`, "small");
   }
-  if (player.sprinting && !player.hidden && player.slipT <= 0 && o.age > 1 && near(player.x, player.z, T.radius * 0.8) && !o.hitSet.has(player)) {
-    o.hitSet.add(player); player.slipT = T.slipPlayerSec; toast("You ran through your own wet floor!");
+}
+// 10 s after you swipe a sign, the custodian drops everything to get it back (from the floor, or from you)
+function signJob(st) {
+  const rec = stolenSigns.find((r) => !r.done && r.cust === st && game.time - r.at >= CFG.custodian.retrieveAfterSec);
+  if (!rec) return null;
+  const at = rec.obj && !rec.obj.dead ? rec.obj : player;
+  return { kind: "sign", rec, x: at.x, z: at.z, sec: 0.6, reach: rec.obj ? 0.9 : 1.2 };
+}
+function finishSignJob(st, j) {
+  const rec = j.rec;
+  if (rec.obj && !rec.obj.dead) { removeObject(rec.obj); rec.done = true; toast("The custodian takes his sign back."); }
+  else if (player.hidden) return false;   // you're hiding with it: he'll wait
+  else {
+    const i = game.hotbar.findIndex((it) => it?.key === "wetFloor");
+    if (i >= 0) consumeSlot(i);
+    rec.done = true;
+    st.bubble.textContent = pick(["That's MINE.", "I'll take that.", "Nice try, kid."]); st.barkUntil = performance.now() + 2000;
+    toast("The custodian snatches his sign back.", 2.2);
   }
+  return true;
 }
 // the plunger: stuck to whoever it hits (they stumble around blind) or to the wall
 function plungerHit(o, who, isStaff) {
@@ -4082,8 +4137,12 @@ function blindStumble(st, dt) {
 }
 
 // ---- picking things up ----
-function pickable(o) { return o.state === "pickup" || (o.state === "resting" && o.T.recoverable); }
-function pickUp(o) { if (!addItem(o.key, o.key === "spitball" ? o.uses : undefined)) return false; removeObject(o); return true; }
+function pickable(o) { return o.state === "pickup" || o.state === "sign" || (o.state === "resting" && o.T.recoverable); }
+function pickUp(o) {
+  if (!addItem(o.key, o.key === "spitball" ? o.uses : undefined)) return false;
+  if (o.key === "wetFloor") signTaken(o);
+  removeObject(o); return true;
+}
 function pickupNearest() {
   let best = null, bd = CFG.items.pickupRange;
   for (const o of objects) if (pickable(o)) { const d = Math.hypot(o.x - player.x, o.z - player.z); if (d < bd) { bd = d; best = o; } }

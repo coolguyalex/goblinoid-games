@@ -42,6 +42,7 @@ Built from `Hallway_Skip_Game_Spec` v0.2. Done so far:
 - **Step 35:** a real head start after you're caught. After a strike, no staff member can see you for 6 s (was 3), and whoever caught you lets you go ("Now get to class!!!", "Get out of my sight!!!") and ignores you for 20 s. After a no-strike "get to class!" in a passing period: 4 s, and the one who shooed you ignores you for 12 s (`CFG.strikes`).
 - **Step 36:** basketballs, footballs and frisbees turn up in lockers too (still mostly the gym). Bigger areas: slime puddles 1 m across the radius (was 0.6), stink clouds 3.2 m (was 2.3), the Mentos spray 2.2 m (was 1.2), drawn to match.
 - **Step 37:** take anything from the custodian's closet and it's locked (🔒) for the rest of the day. A staff key opens it (one use each time). It still restocks every period. Unlocked again each morning.
+- **Step 38:** the wet-floor sign is no longer in the closet. When the custodian cleans something wet (slime, Mentos, a mop-bucket puddle, a stink cloud, a flooded restroom) he sets two signs out around it and collects them when he's done. Swipe one (E / tap) and set it down: staff on their rounds who see it ahead turn back (+30); staff who are suspicious or chasing ignore it. 10 s after you take one, he drops whatever he's doing to get it back, from the floor or from you (`CFG.custodian.signsFor`, `retrieveAfterSec`).
 
 ## Before turning on real ads
 
