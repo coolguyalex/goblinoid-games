@@ -1,4 +1,4 @@
-// Hallway Skip — build step 24 prototype.
+// Hall Goblin (was Hallway Skip) — prototype. The folder, URL and save keys keep the old name so links and saves still work.
 // Step 1: hallway, joystick, a hall monitor that chases, a crowd that thins, and the bell.
 // Step 2: tap-to-interact and hiding spots: lockers, restrooms, classrooms (teacher and sub boot timers).
 // Step 3: security guard, the three-strike ladder, and the PA announcer.
@@ -54,6 +54,7 @@
 // Step 50: five more outfits (skater, theater kid, prep, pajama kid, band kid, with hats) and dreadlocks and a flat top.
 // Step 51: small phones: controls and HUD sized by screen height, items wrap to a second column, overlays scroll, How to play fixed.
 // Step 52: run stats: a tally of the whole run, and an end screen that calls out only what stood out (vs. your own past runs).
+// Step 53: renamed Hall Goblin; a goblin-green skin tone and a goblin outfit (patched burlap, rope belt, satchel, foot wraps, pointy ears).
 import * as THREE from "three";
 
 // =====================================================================================
@@ -1112,7 +1113,7 @@ function makePerson({ body, skin = 0xf1c27d, scale = 1, hat = null, hood = null 
 }
 
 // ---------- step 46: your kid's look. A jointed low-poly kid (legs and arms swing), built from the look on the character screen ----------
-const SKIN_TONES = [0xffe0c4, 0xf1c27d, 0xe0ac69, 0xc68642, 0xa86b3c, 0x8d5524, 0x5c3a21, 0x3b2414];
+const SKIN_TONES = [0xffe0c4, 0xf1c27d, 0xe0ac69, 0xc68642, 0xa86b3c, 0x8d5524, 0x5c3a21, 0x3b2414, 0x7bb043];   // step 53: the last one is goblin green
 const HAIR_COLORS = [0x15110f, 0x3b2314, 0x6b4423, 0xa0522d, 0xd9b26a, 0xefe6c8, 0xc2502a, 0x9aa0a6, 0x2f6fde, 0xff6fb5, 0x3fbf6f, 0x8e5bd9];
 const HAIR_STYLES = { buzz: "Buzz", short: "Short", spiky: "Spiky", mohawk: "Mohawk", swoop: "Swoop", bob: "Bob", long: "Long", ponytail: "Ponytail", bun: "Bun", pigtails: "Pigtails", afro: "Afro", dreads: "Dreadlocks", flattop: "Flat top", bald: "Bald" };
 function canvasTex(w, h, draw) {
@@ -1158,6 +1159,20 @@ const KID_TEX = {
     g.fillStyle = "#fff6c8"; g.font = "18px system-ui, sans-serif"; g.textAlign = "center"; g.textBaseline = "middle";
     for (let i = 0; i < 12; i++) g.fillText(i % 3 ? "★" : "☾", ((i % 4) + 0.5 + (Math.floor(i / 4) % 2) * 0.5) * (w / 4), (Math.floor(i / 4) + 0.5) * (h / 3));
   }),
+  // step 53: goblin clothes. Patched burlap with a ragged hem.
+  burlap: () => canvasTex(128, 128, (g, w, h) => {
+    g.fillStyle = "#8a6a3e"; g.fillRect(0, 0, w, h);
+    for (let i = 0; i < 900; i++) { g.fillStyle = Math.random() < 0.5 ? "rgba(60,40,20,.25)" : "rgba(200,170,110,.18)"; g.fillRect(Math.random() * w, Math.random() * h, 2, 1); }   // the weave
+    for (const [x, y, c] of [[14, 30, "#5d7a3a"], [80, 52, "#7a3b2e"], [46, 84, "#4f5d6e"]]) {   // patches, stitched on
+      g.fillStyle = c; g.fillRect(x, y, 24, 20); g.strokeStyle = "#e8d9b0"; g.setLineDash([3, 3]); g.lineWidth = 1.5; g.strokeRect(x + 2, y + 2, 20, 16);
+    }
+    g.setLineDash([]); g.fillStyle = "#3b2a17"; for (let x = 0; x < w; x += 10) { g.beginPath(); g.moveTo(x, h); g.lineTo(x + 5, h - 9 - (x % 3) * 2); g.lineTo(x + 10, h); g.fill(); }   // ragged hem
+  }),
+  burlapDark: () => canvasTex(64, 64, (g, w, h) => {
+    g.fillStyle = "#4e3b24"; g.fillRect(0, 0, w, h);
+    for (let i = 0; i < 300; i++) { g.fillStyle = "rgba(0,0,0,.2)"; g.fillRect(Math.random() * w, Math.random() * h, 2, 1); }
+    g.fillStyle = "#6b5a3a"; g.fillRect(8, 20, 14, 12); g.strokeStyle = "#d8c89a"; g.setLineDash([2, 2]); g.strokeRect(9, 21, 12, 10);
+  }),
   bandPants: () => canvasTex(64, 64, (g, w, h) => { g.fillStyle = "#1c2a5a"; g.fillRect(0, 0, w, h); g.fillStyle = "#e0b43c"; g.fillRect(w * 0.22, 0, 5, h); g.fillRect(w * 0.72, 0, 5, h); }),
 };
 const ktex = (k) => (kidTex[k] ??= KID_TEX[k]());
@@ -1177,6 +1192,7 @@ const OUTFITS = {
   prep:      { label: "Prep", top: 0x8cc8ec, sleeves: "short", pants: 0xe8dcc0, legs: "long", shoes: 0x6b3b1e, extras: ["collar", "sweater"], hood: 0x1f2f5c },
   pajama:    { label: "Pajama kid", top: "pajamas", sleeves: "long", pants: "pajamas", legs: "long", shoes: 0xf4c6d6, extras: ["slippers", "pjButtons"], hood: 0x8fb8e8 },
   band:      { label: "Band kid", top: 0x1c2a5a, sleeves: "long", pants: "bandPants", legs: "long", shoes: 0x111111, extras: ["shako", "goldButtons", "sash", "epaulets"], hat: 0x1c2a5a, hood: 0x1c2a5a },
+  goblin:    { label: "Goblin", top: "burlap", sleeves: "short", pants: "burlapDark", legs: "long", cover: 0.72, shoes: 0x6b5a3a, extras: ["ropeBelt", "satchel", "ears", "wraps"], hood: 0x5a4630 },
 };
 // the build slider's ends and middle: an upside-down triangle, a rectangle and an hourglass
 const shapeSvg = (pts) => `<svg viewBox="0 0 20 24" width="18" height="22" aria-hidden="true"><polygon points="${pts}" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>`;
@@ -1206,12 +1222,13 @@ function buildKid(look) {
   const legR = 0.075 * W * (O.baggy ?? 1), legs = [];
   for (const sx of [-1, 1]) {
     const pivot = add(new THREE.Group()); pivot.position.set(sx * hip * 0.5, hipY, 0); legs.push(pivot);
-    const covered = O.legs === "long" ? 1 : O.legs === "shorts" ? 0.4 : 0;
+    const covered = O.legs === "long" ? O.cover ?? 1 : O.legs === "shorts" ? 0.4 : 0;
     if (covered > 0) mesh(new THREE.CylinderGeometry(legR, legR * (O.baggy ? 1 : 0.85), legLen * covered, 7), pantsM, 0, -legLen * covered / 2, 0, pivot);
     if (covered < 1) mesh(new THREE.CylinderGeometry(0.06 * W, 0.05 * W, legLen * (1 - covered), 7), skinM, 0, -legLen * covered - legLen * (1 - covered) / 2, 0, pivot);
     if (O.extras?.includes("socks")) mesh(new THREE.CylinderGeometry(0.056 * W, 0.054 * W, 0.12, 7), lambert(0xffffff), 0, -legLen + 0.06, 0, pivot);
     const boot = O.extras?.includes("boots");
     if (boot) mesh(new THREE.CylinderGeometry(0.07 * W, 0.07 * W, 0.16, 7), shoeM, 0, -legLen + 0.06, 0, pivot);
+    if (O.extras?.includes("wraps")) for (let k = 0; k < 3; k++) mesh(new THREE.CylinderGeometry(0.058 * W, 0.058 * W, 0.03, 7), lambert(0xcdbb8e), 0, -legLen + 0.05 + k * 0.045, 0, pivot);   // cloth foot wraps
     if (O.extras?.includes("slippers")) {   // fluffy, with a pom-pom
       mesh(new THREE.IcosahedronGeometry(0.1, 1), shoeM, 0, -legLen - 0.01, 0.05, pivot).scale.set(0.85, 0.55, 1.45);
       mesh(new THREE.IcosahedronGeometry(0.035, 0), lambert(0xffffff), 0, -legLen + 0.04, 0.12, pivot);
@@ -1284,12 +1301,26 @@ function buildKid(look) {
       const b = mesh(new THREE.BoxGeometry(0.05, len, 0.012), lambert(0xf4f4f4), x, y, sz * surfZ(y, x)); b.rotation.z = -sz * Math.atan2(dx, dy); }
   }
   if (ex.includes("epaulets")) for (const sx of [-1, 1]) mesh(new THREE.BoxGeometry(0.1, 0.025, 0.1), lambert(0xe0b43c), sx * shoulder * 0.85, shoulderY + 0.005, 0);
+  if (ex.includes("ropeBelt")) { const b = mesh(new THREE.TorusGeometry(waist * 1.02, 0.018, 4, 14), lambert(0xc9a86a), 0, waistY - 0.02, 0); b.rotation.x = Math.PI / 2; b.scale.y = depth;
+    mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.12, 4), lambert(0xc9a86a), waist * 0.4, waistY - 0.09, surfZ(waistY - 0.09, waist * 0.4)); }   // the knot's loose end
+  if (ex.includes("satchel")) {
+    mesh(new THREE.BoxGeometry(0.14, 0.12, 0.06), lambert(0x5a4024), -(hip + 0.04), hipY + 0.02, 0.02);
+    const dy = (shoulderY - hipY - 0.05) / 6, dx = (shoulder * 1.5) / 6, len = Math.hypot(dx, dy) + 0.01;
+    for (const sz of [-1, 1]) for (let k = 0; k < 6; k++) {   // strap from the right shoulder to the bag on the left hip, front and back
+      const t = (k + 0.5) / 6, y = shoulderY - 0.02 - t * (shoulderY - hipY - 0.05), x = (0.5 - t) * shoulder * 1.5;
+      const st = mesh(new THREE.BoxGeometry(0.03, len, 0.01), lambert(0x3e2b16), x, y, sz * surfZ(y, x)); st.rotation.z = -Math.atan2(dx, dy);
+    }
+  }
   if (ex.includes("zip")) mesh(new THREE.BoxGeometry(0.015, shoulderY - hipY - 0.02, 0.01), lambert(0xffffff), 0, (shoulderY + hipY) / 2, frontZ((shoulder + waist) / 2) + 0.004);
   // hair
   const hair = add(new THREE.Group());
   const hat = ex.find((e) => e === "beanie" || e === "beret" || e === "shako");
   buildHair(hair, look.hair ?? "short", hairM, headR, headY, !!hat);
-  if (hat) buildHat(hair, hat, lambert(O.hat), headR, headY, look.hair);   // in the hair group, so the hood hides it too
+  if (hat) buildHat(hair, hat, lambert(O.hat), headR, headY, look.hair);
+  if (ex.includes("ears")) for (const sx of [-1, 1]) {   // big pointy goblin ears (skin colored; the hood hides them with the hair)
+    const e = mesh(new THREE.ConeGeometry(0.05, 0.22, 4), skinM, sx * (headR + 0.06), headY + 0.04, -0.01, hair);
+    e.rotation.set(0, 0, -sx * 1.15); e.scale.z = 0.45;
+  }   // in the hair group, so the hood hides it too
   g.userData = { legs, arms, eyes, hair, headY, outfit: O, walk: 0 };
   return g;
 }

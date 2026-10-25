@@ -1,4 +1,6 @@
-# Hallway Skip
+# Hall Goblin
+
+(Formerly Hallway Skip. The folder, the web address and the browser save keys keep the old name, so links and saved runs still work.)
 
 A three.js browser game (mobile first, landscape): slip out with the crowd, then stay out of class until the next bell.
 
@@ -57,6 +59,7 @@ Built from `Hallway_Skip_Game_Spec` v0.2. Done so far:
 - **Step 50:** five more outfits: skater (beanie, red flannel, cargo shorts, skate shoes), theater kid (beret, black and white stripes, mustard scarf), prep (light blue polo, navy sweater tied over the shoulders, cream chinos, loafers), pajama kid (star-and-moon PJs, fuzzy pink slippers) and band kid (marching jacket with gold buttons, epaulets and a white cross belt, striped pants, a tall hat with a plume). Two more hair styles: dreadlocks and a flat top. Hats sit on top of the hair: tall styles (mohawk, spikes, swoop, bun) are flattened under them, and big hair makes the hat bigger.
 - **Step 51:** small phones. The item slots, sprint and hood buttons, timer, score, stamina bar and joystick guide now size themselves to the screen height (tested at 568×320, 667×375, 844×390 and 1280×720). If the items don't fit in one column, the rest wrap into a second column. Short screens also get tighter menus, a compact hiding panel and wrapped messages. Menus taller than the screen now scroll from the top instead of cutting it off. Fixed: How to play was opening behind the title screen.
 - **Step 52:** run stats. The game keeps a tally of the whole run: meters walked, skated and ridden, sprint time, hides (lockers, restrooms, classrooms, the closet), escapes from chases, close calls, stairs, hits on staff and kids by item, kids flown over, meters of TP, gum, graffiti, slips, slime, stink, dares, high fives and more, plus one-offs like the fire alarm. It's saved with each run in this browser. The end screen shows three basics (distance, hides, escapes), then up to five things that made this run stand out: stats at least one standard deviation above your usual (per minute played), and anything you'd never done before ("first time ever!"). Until you have runs on record, "usual" is a guess at a player who does a bit of everything; your own runs replace the guess as they pile up (`RUN_STATS`, `runStatsHtml`).
+- **Step 53:** the game is now called **Hall Goblin** (page title and title screen). A goblin-green skin tone, and a goblin outfit: a patched burlap tunic with a ragged hem, rope belt, satchel, short patched trousers, cloth foot wraps and big pointy ears.
 
 ## Before turning on real ads
 
