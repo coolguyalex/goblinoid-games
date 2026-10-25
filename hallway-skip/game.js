@@ -1,4 +1,4 @@
-// Hallway Skip — build step 16 prototype.
+// Hallway Skip — build step 17 prototype.
 // Step 1: hallway, joystick, a hall monitor that chases, a crowd that thins, and the bell.
 // Step 2: tap-to-interact and hiding spots: lockers, restrooms, classrooms (teacher and sub boot timers).
 // Step 3: security guard, the three-strike ladder, and the PA announcer.
@@ -15,6 +15,7 @@
 // Step 14: keyboard for everything (E hints, slot numbers, arrow-key aiming), sprint with stamina and shoving.
 // Step 15: a bigger crowd (110 kids, ?crowd=N to try others); kids out of view aren't drawn.
 // Step 16: fewer lockers (and you can rummage through them: might be junk), nothing spawns in the halls, things stay where they land until staff tidy them up, balls only from the gym.
+// Step 17: slime (science: whoever steps in it is stuck), toilet paper (restrooms: flies like the airplane, leaves a streamer), frisbee (gym: long flight, pick it back up).
 import * as THREE from "three";
 
 // =====================================================================================
@@ -135,7 +136,7 @@ const CFG = {
   // Lockers: hide in one, and you can rummage through it once per period. It's a blind grab: you might get junk.
   lockers: {
     rummageSec: 2,                // eats this much of your hiding time
-    loot: [["spitball", 4], ["gum", 4], ["paperAirplane", 3], ["whoopee", 2], ["bananaPeel", 2], ["sprayPaint", 1],
+    loot: [["spitball", 4], ["gum", 4], ["paperAirplane", 3], ["whoopee", 2], ["bananaPeel", 2], ["sprayPaint", 1], ["toiletPaper", 1],
            ["oldSock", 3], ["sandwich", 3], ["homework", 3]],
   },
 
@@ -366,9 +367,9 @@ const TEACHER_TYPES = {
 // Rooms as shops: what's lying on the desks, by room type. A new room type is one line.
 const ROOM_TYPES = {
   classroom: { label: "", loot: [["spitball", 4], ["paperAirplane", 4], ["gum", 3], ["bananaPeel", 1]], count: [1, 2] },
-  science:   { label: "Science lab", plaque: 0x2ecc71, loot: [["stinkBomb", 4], ["bananaPeel", 2], ["whoopee", 2], ["spitball", 1]], count: [1, 2] },
+  science:   { label: "Science lab", plaque: 0x2ecc71, loot: [["stinkBomb", 4], ["slime", 3], ["whoopee", 2], ["bananaPeel", 1]], count: [1, 2] },
   art:       { label: "Art room", plaque: 0xe67e22, loot: [["sprayPaint", 4], ["wheelieChair", 3], ["paperAirplane", 2], ["gum", 1]], count: [1, 2] },
-  gym:       { label: "Gym", plaque: 0xe74c3c, loot: [["basketball", 4], ["football", 3], ["whoopee", 1]], count: [1, 2] },
+  gym:       { label: "Gym", plaque: 0xe74c3c, loot: [["basketball", 4], ["football", 3], ["frisbee", 3]], count: [1, 2] },
   office:    { label: "Main office", plaque: 0x34495e, door: 0x4a3426, staff: "office", count: [2, 3],
                loot: [["wheelieChair", 2], ["whoopee", 2], ["gum", 2], ["bananaPeel", 2]],
                // once-per-day specials: the confiscated drawer (points), a fake hall pass, and the master key
@@ -380,11 +381,22 @@ const ROOM_TYPES = {
 // Items are data. kind: "throw" (flick it), "ride" (flick to launch yourself), "instant" (tap to use).
 // hit: what happens when it hits someone. Hitting staff always pays more. Stun "flinch" = a stagger, "fall" = flat on the floor.
 const ITEM_TYPES = {
-  paperAirplane: { label: "Paper airplane", icon: "✈️", kind: "throw", speed: [6, 11], pitchDeg: 8, gravity: 1.2, glide: true,
+  paperAirplane: { label: "Paper airplane", icon: "✈️", kind: "throw", flight: "glide2", speed: [6, 11], pitchDeg: 8, gravity: 1.2, glide: true,
                    // two-stage flight: soars over heads (fly-over points), then drops to head height (can hit people)
                    cruiseY: 2.55, highSec: [0.45, 1.3], lowY: 1.35, sinkRate: 0.75, drag: 0.25,
                    perStudent: 10, crowdLandBonus: 50, crowdLandCount: 3,
                    hit: { student: 20, staff: 80, studentSec: 0.5, staffSec: 0.7, style: "flinch" } },
+  // Same two-stage flight as the paper airplane, but it unrolls as it goes and leaves a streamer of toilet paper behind
+  // (it stays until the custodian clears it overnight). From the restrooms.
+  toiletPaper:   { label: "Toilet paper", icon: "🧻", kind: "throw", flight: "glide2", speed: [6, 10], pitchDeg: 8, gravity: 1.2, glide: true,
+                   cruiseY: 2.5, highSec: [0.5, 1.4], lowY: 1.4, sinkRate: 0.8, drag: 0.3,
+                   perStudent: 10, crowdLandBonus: 30, crowdLandCount: 3, trailPointsPerM: 4,
+                   hit: { student: 15, staff: 60, studentSec: 0.4, staffSec: 0.6, style: "flinch" } },
+  // Same idea again, but it stays up much longer and you can pick it back up. Gym only.
+  frisbee:       { label: "Frisbee", icon: "🥏", kind: "throw", flight: "glide2", recoverable: true, speed: [9, 14], pitchDeg: 6, gravity: 1.2, glide: true,
+                   cruiseY: 2.3, highSec: [1.0, 2.2], lowY: 1.3, sinkRate: 0.45, drag: 0.12,
+                   perStudent: 8, crowdLandBonus: 30, crowdLandCount: 3,
+                   hit: { student: 25, staff: 100, studentSec: 0.6, staffSec: 0.9, style: "flinch" } },
   spitball:      { label: "Spitball", icon: "🫧", kind: "throw", uses: 3, speed: [12, 18], pitchDeg: 4, gravity: 6,
                    hit: { student: 25, staff: 75, studentSec: 0.4, staffSec: 0.8, style: "flinch" } },
   bananaPeel:    { label: "Banana peel", icon: "🍌", kind: "throw", speed: [2, 4.5], pitchDeg: 35, gravity: 9.8,
@@ -402,6 +414,10 @@ const ITEM_TYPES = {
   stinkBomb:     { label: "Stink bomb", icon: "🧪", kind: "throw", speed: [4, 9], pitchDeg: 30, gravity: 9.8,   // science labs only
                    points: 60, cloudRadius: 2.3, cloudSec: 10, noiseRadius: 12,
                    perStudent: 15, perStaff: 60, studentGagSec: 0.8, staffGagSec: 1.4 },   // extra points for everyone who walks through it
+  // Science labs: lands as a puddle (or on whoever it hits). The first few people to step in it are stuck for a few
+  // seconds: staff can still look around and yell, they just can't move.
+  slime:         { label: "Slime", icon: "🟢", kind: "throw", trap: true, speed: [4, 9], pitchDeg: 25, gravity: 9.8,
+                   radius: 0.6, maxSticks: 3, stickStaffSec: 4, stickStudentSec: 2.5, stickPlayerSec: 1.5, staffPoints: 120, studentPoints: 30 },
   sprayPaint:    { label: "Spray paint", icon: "🎨", kind: "spray", uses: 3, points: 100, wallRange: 1.7 },   // art rooms only
   masterKey:     { label: "Master key", icon: "🔑", kind: "key", uses: 3 },   // the principal's office only: opens locked or used doors
   wheelieChair:  { label: "Wheelie chair", icon: "🪑", kind: "ride", rideSpeed: 9.5, maxRideSec: 3, dazeSec: 1.5, leftoverSec: 3,
@@ -412,7 +428,7 @@ const ITEM_TYPES = {
   sandwich:      { label: "Moldy sandwich", icon: "🥪", kind: "junk", line: "You toss the sandwich. Something in it moved." },
   homework:      { label: "Crumpled homework", icon: "📄", kind: "junk", line: "You toss someone's homework. It's a D-minus anyway." },
 };
-const REST_Y = { basketball: 0.2, football: 0.14, wheelieChair: 0, whoopee: 0.08 };   // how high items sit on the floor (default 0.04)
+const REST_Y = { basketball: 0.2, football: 0.14, wheelieChair: 0, whoopee: 0.08, frisbee: 0.03, slime: 0.02 };   // how high items sit on the floor (default 0.04)
 
 // Floor plan: a squared figure 8. An outer loop plus a main hall across the middle, around two classroom blocks.
 // Halls run node to node. "side" on a hall: +1 / -1 = which wall (+1 is the classroom side on the outer loop).
@@ -781,7 +797,7 @@ function makePerson({ body, skin = 0xf1c27d, scale = 1, hat = null, hood = null 
 // ---------- player ----------
 const player = {
   x: 0, z: 0, vx: 0, vz: 0, heading: 0, stamina: 1, sprinting: false, winded: false, shoveCD: 0,
-  hidden: null, hideT: 0, hideArmed: false, graceT: 0, invisT: 0, pushSpot: null, pushT: 0, slipT: 0, dazeT: 0, ride: null,
+  hidden: null, hideT: 0, hideArmed: false, graceT: 0, invisT: 0, pushSpot: null, pushT: 0, slipT: 0, dazeT: 0, stuckT: 0, ride: null,
   mesh: makePerson({ body: 0x8a8f99, hood: 0x7b808a }),   // the gray hoodie
 };
 
@@ -1116,9 +1132,9 @@ function morningSetup() {
     c.mode = "wander"; c.retargetT = rand(1, 4);
   }
   clearStaff();
-  clearObjects(); cancelAim(); clearGraffiti();   // the custodian scrubs the walls overnight
+  clearObjects(); cancelAim(); clearGraffiti(); clearTrails();   // the custodian scrubs the walls (and takes down the TP) overnight
   if (player.ride) { scene.remove(player.ride.chair); player.ride = null; }
-  player.slipT = player.dazeT = 0; player.mesh.rotation.z = 0; player.stamina = 1; player.winded = false;
+  player.slipT = player.dazeT = player.stuckT = 0; player.mesh.rotation.z = 0; player.stamina = 1; player.winded = false;
   game.hotbar = Array(CFG.items.slots).fill(null); renderHotbar();
   rollSubs();             // first, so sub rooms get their extra desk loot
   resetSpotsForPeriod();
@@ -1146,7 +1162,7 @@ function resetGame(save = null) {
 function resetSpotsForPeriod() {
   game.lockerUses = CFG.hiding.lockerUsesPerPeriod;
   for (const sp of SPOTS) {
-    sp.used = false; sp.rummaged = false;
+    sp.used = false; sp.rummaged = false; sp.tpTaken = false;
     if (sp.kind === "classroom") {
       // raided last period: locked for a while, and nothing gets restocked until it opens again
       if (sp.raided) { sp.lockedUntil = game.period + CFG.rooms.raidLockPeriods - 1; sp.raided = false; }
@@ -1448,6 +1464,12 @@ function updatePlayer(dt) {
     player.mesh.position.set(player.x, 0, player.z);
     return;
   }
+  if (player.stuckT > 0) {   // standing in slime: can't move, can still look around
+    player.stuckT -= dt; player.vx = player.vz = 0;
+    player.mesh.rotation.z = player.stuckT > 0 ? Math.sin(game.time * 12) * 0.12 : 0;
+    player.mesh.position.set(player.x, 0, player.z);
+    return;
+  }
   const f = { x: Math.sin(cam.yaw), z: Math.cos(cam.yaw) }, r = { x: -Math.cos(cam.yaw), z: Math.sin(cam.yaw) };
   const mx = r.x * input.x + f.x * input.y, mz = r.z * input.x + f.z * input.y;
   updateSprint(dt);
@@ -1569,7 +1591,7 @@ function drawCrowd() {
           !lineOfSight(cx, cz, c.x + 0.35, c.z + 0.35) && !lineOfSight(cx, cz, c.x - 0.35, c.z - 0.35)) continue;   // peeking round a corner shows)
     }
     crowdMatrix.position.set(c.x, Math.abs(Math.sin(game.time * 8 + c.bob)) * 0.05, c.z);
-    crowdMatrix.rotation.set(c.slipT <= 0 ? 0 : c.stunStyle === "flinch" ? 0.3 + Math.sin(game.time * 16) * 0.15 : 1.35, c.heading, 0, "YXZ");
+    crowdMatrix.rotation.set(c.slipT <= 0 ? 0 : c.stunStyle === "flinch" ? 0.3 + Math.sin(game.time * 16) * 0.15 : c.stunStyle === "stuck" ? Math.sin(game.time * 10 + c.bob) * 0.12 : 1.35, c.heading, 0, "YXZ");
     crowdMatrix.scale.setScalar(c.scale);
     crowdMatrix.updateMatrix();
     crowdBodies.setMatrixAt(n, crowdMatrix.matrix); crowdHeads.setMatrixAt(n, crowdMatrix.matrix);
@@ -1671,6 +1693,8 @@ function updateStaff(dt, cover) {
       continue;
     }
 
+    const stuck = st.stuckT > 0, snap = stuck ? [st.x, st.z, st.h, st.t, st.to, st.ri] : null;   // in slime: can look and yell, can't move
+    if (stuck) st.stuckT -= dt;
     if (st.state === "post") {
       // a teacher at their door: doesn't chase, but yells for backup, and grabs you if you walk right past
       const look = canSeePlayer(st, 1, true);
@@ -1700,6 +1724,7 @@ function updateStaff(dt, cover) {
       else if (st.state === "tidy") {   // "Who left this here?"
         const o = st.tidyObj;
         if (!o || o.dead) { st.state = "return"; setReturnPoint(st); }
+        else if (stuck) { /* wait until they're free */ }
         else if (st.tidyT < 0) st.tidyT += dt;   // just set off a trap: a beat before picking it up
         else {
           speed = T.patrolSpeed * staffMult("speed");
@@ -1765,6 +1790,8 @@ function updateStaff(dt, cover) {
       }
     }
 
+    if (stuck) { [st.x, st.z, st.h, st.t, st.to, st.ri] = snap; speed = 0; }
+    st.mesh.rotation.z = stuck ? Math.sin(game.time * 10) * 0.12 : 0;
     // footsteps
     if (speed > 0.2) {
       st.stepT += dt;
@@ -2063,13 +2090,19 @@ function updateHidePanel() {
 // Rooms as shops: tap an item on the desk to grab it. It costs hiding time, and the teacher might call security.
 const lootEl = $("hpLoot");
 function renderLoot(sp) {
-  const key = sp.kind === "classroom" ? `${sp.room}:${sp.lootVer}:${sp.loot.length}:${[...sp.taken]}:${game.passShield}` : `${sp.kind}${sp.h}:${sp.t}:${!!sp.rummaged}`;
+  const key = sp.kind === "classroom" ? `${sp.room}:${sp.lootVer}:${sp.loot.length}:${[...sp.taken]}:${game.passShield}` : `${sp.kind}${sp.h}:${sp.t}:${!!sp.rummaged}:${!!sp.tpTaken}`;
   if (lootEl.dataset.key === key) return;
   lootEl.dataset.key = key; lootEl.innerHTML = "";
   if (sp.kind === "restroom") {   // the bathroom flood: big points and heat, and it's closed for the rest of the day
     const b = document.createElement("button"); b.type = "button"; b.className = "prize";
     b.innerHTML = `🚽 Flood the toilets<small>+${CFG.flood.points} · lots of heat</small>`;
     b.addEventListener("click", floodRestroom);
+    if (!sp.tpTaken) {
+      const t = document.createElement("button"); t.type = "button";
+      t.innerHTML = `🧻 Grab a roll<small>-1s</small>`;
+      t.addEventListener("click", grabRoll);
+      lootEl.appendChild(t);
+    }
     lootEl.appendChild(b);
     return;
   }
@@ -2122,6 +2155,13 @@ function grabLoot(i) {
   sp.raided = true;   // locked for a while from the next bell
   player.hideT += TT.grabSec ?? CFG.rooms.grabSec;
   if (Math.random() < TT.backfire) roomBackfire(sp);
+  updateHidePanel();
+}
+function grabRoll() {
+  const sp = player.hidden;
+  if (!sp || sp.kind !== "restroom" || sp.tpTaken || game.state !== "playing") return;
+  if (!addItem("toiletPaper")) return;
+  sp.tpTaken = true; player.hideT += 1;
   updateHidePanel();
 }
 function rummageLocker() {
@@ -2262,6 +2302,9 @@ function makeItemMesh(key) {
   switch (key) {
     case "paperAirplane": { const a = m(new THREE.ConeGeometry(0.16, 0.5, 3), 0xffffff); a.rotation.x = Math.PI / 2; a.scale.set(1.6, 1, 0.25); break; }
     case "spitball": m(new THREE.IcosahedronGeometry(0.07, 0), 0xf4f4f4); break;
+    case "toiletPaper": { const r = m(new THREE.CylinderGeometry(0.1, 0.1, 0.18, 10), 0xf6f6f0); r.rotation.z = Math.PI / 2; break; }
+    case "frisbee": m(new THREE.CylinderGeometry(0.2, 0.17, 0.04, 14), 0xff5a36); break;
+    case "slime": { const b = m(new THREE.IcosahedronGeometry(0.13, 1), 0x7ee84a); b.material.emissive.setHex(0x1d4a0c); g.userData.blob = b; break; }
     case "bananaPeel": {
       m(new THREE.BoxGeometry(0.16, 0.05, 0.16), 0xf2d43b);
       for (const a of [0, 2.1, 4.2]) { const p = m(new THREE.BoxGeometry(0.07, 0.03, 0.26), 0xe8c22a); p.rotation.y = a; p.position.set(Math.sin(a) * 0.12, 0, Math.cos(a) * 0.12); }
@@ -2315,7 +2358,7 @@ function spawnObject(key, state, x, y, z, extra = {}) {
   objects.push(o);
   return o;
 }
-function removeObject(o) { scene.remove(o.mesh); scene.remove(o.ring); if (o.cloud) { scene.remove(o.cloud); o.cloud.material.dispose(); } o.dead = true; }
+function removeObject(o) { if (o.trailMesh) { scene.remove(o.trailMesh); o.trailMesh.geometry.dispose(); o.trailMesh = null; } scene.remove(o.mesh); scene.remove(o.ring); if (o.cloud) { scene.remove(o.cloud); o.cloud.material.dispose(); } o.dead = true; }
 function clearObjects() { for (const o of objects) removeObject(o); objects.length = 0; }
 
 function pickWeighted(pairs) {
@@ -2362,7 +2405,7 @@ function selectSlot(i, fromKey = false) {
   if (game.state !== "playing") return;
   const it = game.hotbar[i]; if (!it) return;
   if (player.hidden) { toast("Not while you're hiding"); return; }
-  if (player.ride || player.dazeT > 0 || player.slipT > 0) return;
+  if (player.ride || player.dazeT > 0 || player.slipT > 0 || player.stuckT > 0) return;
   if (game.aim?.slot === i) { cancelAim(); return; }
   const T = ITEM_TYPES[it.key];
   if (T.kind === "spray") { if (sprayPaint()) consumeSlot(i); return; }
@@ -2437,7 +2480,8 @@ function release(a, L = flickLaunch(a)) {
   if (T.kind === "ride") { startRide(L); return; }
   const o = spawnObject(a.key, "flying", player.x + L.dx * 0.45, THROW_Y, player.z + L.dz * 0.45, launchVel(T, L));
   if (T.bounces) o.maxBounces = Math.floor(rand(T.bounces[0], T.bounces[1] + 1));
-  if (a.key === "paperAirplane") initPlane(o, L.power);
+  if (T.flight === "glide2") initPlane(o, L.power, T);
+  if (a.key === "toiletPaper") o.trail = [[o.x, o.y, o.z]];
   playBlip([300, 520], 0.06, "triangle", 0.05);   // whoosh
 }
 
@@ -2455,13 +2499,13 @@ function updateAimPreview() {
   const T = ITEM_TYPES[a.key], L = a.kb ? keyLaunch(a) : flickLaunch(a), pos = arc.geometry.attributes.position, col = arc.geometry.attributes.color, step = 0.04;
   const sim = { x: player.x + L.dx * 0.45, y: T.kind === "ride" ? 0.1 : THROW_Y, z: player.z + L.dz * 0.45, vx: 0, vy: 0, vz: 0 };
   if (T.kind === "ride") { sim.vx = L.dx * T.rideSpeed; sim.vz = L.dz * T.rideSpeed; } else Object.assign(sim, launchVel(T, L));
-  const plane = a.key === "paperAirplane";
-  if (plane) initPlane(sim, L.power);
+  const plane = T.flight === "glide2";
+  if (plane) initPlane(sim, L.power, T);
   const every = plane ? 6 : 4;   // the plane flies farther, so space its dots out more
   let i = 0, stopped = false;
   for (let k = 0; k < 200 && i < ARC_N; k++) {
     if (!stopped) {
-      if (plane) planeStep(sim, step);
+      if (plane) planeStep(sim, step, T);
       else if (T.kind !== "ride") { sim.vy -= T.gravity * step; if (T.glide) sim.vy = Math.max(sim.vy, -0.9); }
       const nx = sim.x + sim.vx * step, nz = sim.z + sim.vz * step;
       if (!lineOfSight(sim.x, sim.z, nx, nz) || sim.y + sim.vy * step < 0.05) stopped = true;
@@ -2490,7 +2534,7 @@ function updateObjects(dt) {
     o.age += dt; o.noiseCD -= dt;
     if (o.state === "flying") flyObject(o, dt);
     else if (o.state === "rolling") rollObject(o, dt);
-    else if (o.state === "trap") trapCheck(o);
+    else if (o.state === "trap") (o.key === "slime" ? slimeCheck : trapCheck)(o);
     else if (o.state === "resting" && o.key === "whoopee") stepOnCushion(o);
     else if (o.state === "cloud") stinkCloud(o, dt);
     if (o.dead) continue;
@@ -2567,9 +2611,8 @@ function personHit(o, r, maxY) {
 
 // The paper airplane's two-stage flight (not realistic on purpose): it climbs and soars over heads,
 // then drops to head height and glides low, where it can hit people. Shared by the real flight and the arc preview.
-function initPlane(o, power) { const T = ITEM_TYPES.paperAirplane; o.stage = 1; o.stageT = T.highSec[0] + (T.highSec[1] - T.highSec[0]) * power; }
-function planeStep(o, dt) {
-  const T = ITEM_TYPES.paperAirplane;
+function initPlane(o, power, T = ITEM_TYPES.paperAirplane) { o.stage = 1; o.stageT = T.highSec[0] + (T.highSec[1] - T.highSec[0]) * power; }
+function planeStep(o, dt, T = ITEM_TYPES.paperAirplane) {
   o.stageT -= dt;
   if (o.stage === 1 && o.stageT <= 0) o.stage = 2;
   if (o.stage === 1) o.vy = (T.cruiseY - o.y) * 4;
@@ -2580,8 +2623,8 @@ function planeStep(o, dt) {
 
 function flyObject(o, dt) {
   const T = o.T;
-  const plane = o.key === "paperAirplane" && !o.wild;
-  if (plane) planeStep(o, dt);
+  const plane = T.flight === "glide2" && !o.wild;
+  if (plane) planeStep(o, dt, T);
   else { o.vy -= T.gravity * dt; if (T.glide) o.vy = Math.max(o.vy, -0.9); }
   if (wallBounce(o, dt, T.bounces ? 0.8 : 0.15)) {
     if (T.bounces) bounceNoise(o);
@@ -2593,6 +2636,12 @@ function flyObject(o, dt) {
   if (plane) {
     if (o.y > 2.0) { for (const c of crowd) if (isActive(c) && Math.hypot(c.x - o.x, c.z - o.z) < 1.3) o.flown.add(c); }   // high: flying over
     else if (o.stage >= 2) { const p = personHit(o, 0.5, 1.9); if (p) { hitPerson(o, p.who, p.isStaff); landObject(o); return; } }   // low: can hit
+  }
+  if (o.trail) growTrail(o);
+  if (o.key === "frisbee") o.mesh.rotation.y += dt * 14;   // spinning
+  if (o.key === "slime") {   // splat on whoever it hits: they're standing in it
+    const p = personHit(o, 0.45, 2.0);
+    if (p) { o.x = p.who.x; o.z = p.who.z; o.y = REST_Y.slime; landObject(o); return; }
   }
   if (o.key === "spitball") {
     const p = personHit(o, 0.45, 2.1);
@@ -2623,14 +2672,17 @@ function landObject(o) {
   o.vy = 0;
   if (!T.bounces) o.vx = o.vz = 0;
   switch (o.key) {
-    case "paperAirplane": {
+    case "paperAirplane": case "toiletPaper": case "frisbee": {
       const n = o.flown.size, near = crowd.filter((c) => isActive(c) && Math.hypot(c.x - o.x, c.z - o.z) < 2.5).length;
-      const crowdLand = near >= T.crowdLandCount;
+      const crowdLand = near >= T.crowdLandCount, name = { paperAirplane: "Airplane", toiletPaper: "TP", frisbee: "Frisbee" }[o.key];
       if (o.wild) { o.state = "spent"; o.life = 1.5; break; }
-      if (n) havoc("paperAirplane", n * T.perStudent + (crowdLand ? T.crowdLandBonus : 0), `Airplane over ${n} kid${n === 1 ? "" : "s"}${crowdLand ? " · crowd landing!" : ""}`, { x: o.x, z: o.z });
-      else if (!o.hitSet?.size) popup("The airplane lands. Nobody notices.", "meh");
-      o.state = "spent"; o.life = 1.5; break;
+      if (n) havoc(o.key, n * T.perStudent + (crowdLand ? T.crowdLandBonus : 0), `${name} over ${n} kid${n === 1 ? "" : "s"}${crowdLand ? " · crowd landing!" : ""}`, { x: o.x, z: o.z });
+      else if (!o.hitSet?.size && !o.trail) popup(`The ${T.label.toLowerCase()} lands. Nobody notices.`, "meh");
+      if (o.trail) finishTrail(o);
+      if (o.key === "frisbee") { o.state = "resting"; o.mesh.rotation.set(0, o.mesh.rotation.y, 0); break; }   // pick it back up
+      o.state = "spent"; o.life = o.trail ? 0.6 : 1.5; break;
     }
+    case "slime": o.state = "trap"; o.mesh.userData.blob.scale.set(4.2, 0.22, 4.2); break;   // a puddle
     case "spitball": o.state = "spent"; o.life = 0.4; break;
     case "bananaPeel": o.state = "trap"; o.mesh.rotation.y = Math.random() * 6; break;
     case "whoopee": o.state = "resting"; o.armedAt = o.age + 0.4; break;   // waits for someone to step on it
@@ -2716,6 +2768,74 @@ function trapCheck(o) {
     slipped(player);
   }
 }
+
+// ---- slime: the first few people to step in it are stuck (staff can still look around and yell) ----
+function slimeCheck(o) {
+  const T = o.T;
+  o.hitSet ??= new Set();
+  const near = (x, z) => Math.hypot(x - o.x, z - o.z) < T.radius;
+  const stuck = (who) => { o.hitSet.add(who); if (++o.slips >= T.maxSticks) o.spentAt ??= o.age; };
+  if (o.slips >= T.maxSticks) { if (o.age - o.spentAt > 0.2 && !claimedBy(o)) removeObject(o); return; }   // all used up (unless someone's coming to clean it)
+  for (const st of staff) {
+    if (st.type.stationary || o.hitSet.has(st) || !near(st.x, st.z)) continue;
+    st.stuckT = T.stickStaffSec;
+    st.bubble.textContent = pick(["I'm STUCK!", "Is this... SLIME?!", "Ugh, my shoes!"]); st.barkUntil = performance.now() + 1800; st.barkAt = game.time;
+    playBlip([220, 160, 240], 0.1, "sine", 0.08);   // squelch
+    havoc("slimeStaff", T.staffPoints, `Slimed! The ${st.type.name} is stuck`, { x: o.x, z: o.z, loud: true });
+    if (!claimedBy(o)) setTidy(st, o, CFG.tidy.afterTrapSec);   // they clean it up once they're free
+    stuck(st);
+    if (o.slips >= T.maxSticks) return;
+  }
+  for (const c of crowd) {
+    if (!isActive(c) || o.hitSet.has(c) || !near(c.x, c.z)) continue;
+    c.slipT = T.stickStudentSec; c.stunStyle = "stuck";
+    havoc("slimeStudent", T.studentPoints, "A kid's stuck in the slime!", { x: o.x, z: o.z });
+    stuck(c);
+    if (o.slips >= T.maxSticks) return;
+  }
+  if (o.age > 1.2 && !player.hidden && !player.ride && player.stuckT <= 0 && !o.hitSet.has(player) && near(player.x, player.z)) {
+    player.stuckT = T.stickPlayerSec; toast("Ew! You stepped in your own slime.");
+    stuck(player);
+  }
+}
+// toilet paper: a streamer along its flight path, hanging down in loops. Stays until the custodian clears it overnight.
+const tpTrails = [];
+const tpMat = new THREE.MeshBasicMaterial({ color: 0xf4f4ee, side: THREE.DoubleSide });
+function trailGeometry(pts) {
+  const pos = [];
+  for (let i = 1; i < pts.length; i++) {   // a ribbon, sagging between points
+    const [ax, ay, az] = pts[i - 1], [bx, by, bz] = pts[i];
+    const sagA = 0.25 * Math.abs(Math.sin(i * 0.9)), sagB = 0.25 * Math.abs(Math.sin((i + 1) * 0.9));
+    const a0 = [ax, ay - sagA, az], a1 = [ax, ay - sagA - 0.16, az], b0 = [bx, by - sagB, bz], b1 = [bx, by - sagB - 0.16, bz];
+    pos.push(...a0, ...a1, ...b0, ...b0, ...a1, ...b1);   // an upright strip (seen from the side)...
+    const dx = bx - ax, dz = bz - az, dl = Math.hypot(dx, dz) || 1, px = -dz / dl * 0.09, pz = dx / dl * 0.09;
+    const c0 = [ax - px, ay - sagA, az - pz], c1 = [ax + px, ay - sagA, az + pz], d0 = [bx - px, by - sagB, bz - pz], d1 = [bx + px, by - sagB, bz + pz];
+    pos.push(...c0, ...c1, ...d0, ...d0, ...c1, ...d1);   // ...and a flat one crossing it (seen from behind or below)
+    if (i % 4 === 0) {   // a loose end hanging toward the floor, crossed so it shows from any angle
+      const len = Math.min(by - 0.3, 1.2), w = 0.06;
+      pos.push(bx - w, by, bz, bx + w, by, bz, bx - w, by - len, bz, bx - w, by - len, bz, bx + w, by, bz, bx + w, by - len, bz);
+      pos.push(bx, by, bz - w, bx, by, bz + w, bx, by - len, bz - w, bx, by - len, bz - w, bx, by, bz + w, bx, by - len, bz + w);
+    }
+  }
+  return new THREE.BufferGeometry().setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+}
+function growTrail(o) {
+  const last = o.trail[o.trail.length - 1];
+  if (Math.hypot(o.x - last[0], o.z - last[2]) < 0.35) return;
+  o.trail.push([o.x, o.y, o.z]);
+  if (o.trailMesh) { scene.remove(o.trailMesh); o.trailMesh.geometry.dispose(); }
+  o.trailMesh = new THREE.Mesh(trailGeometry(o.trail), tpMat); scene.add(o.trailMesh);
+}
+function finishTrail(o) {
+  let len = 0;
+  for (let i = 1; i < o.trail.length; i++) len += Math.hypot(o.trail[i][0] - o.trail[i - 1][0], o.trail[i][2] - o.trail[i - 1][2]);
+  if (o.trailMesh) { tpTrails.push(o.trailMesh); o.trailMesh = null; }
+  while (tpTrails.length > 8) { const m = tpTrails.shift(); scene.remove(m); m.geometry.dispose(); }
+  if (len >= 2) havoc("tpTrail", Math.round(len * o.T.trailPointsPerM), `TP'd ${Math.round(len)} m of hallway!`, { x: o.x, z: o.z });
+  o.trailLen = len;
+  o.trail = null;
+}
+function clearTrails() { for (const m of tpTrails) { scene.remove(m); m.geometry.dispose(); } tpTrails.length = 0; }
 
 // ---- the stink bomb: pops on landing (noise pulls staff over), then a cloud that pays for everyone who walks through ----
 const cloudGeo = new THREE.IcosahedronGeometry(1, 1);
@@ -3429,6 +3549,9 @@ if (debug) {   // test-only helpers (only with ?debug in the URL)
     nodes() { return NODES.map((n) => ({ id: n.id, x: n.x, z: n.z })); },
     tidyInfo() { return staff.map((s) => ({ key: s.key, state: s.state, obj: s.tidyObj && !s.tidyObj.dead && s.state === "tidy" ? s.tidyObj.id : null, stunT: s.stunT, tidyT: s.tidyT, x: s.x, z: s.z, pauseT: s.pauseT })); },
     rummage() { rummageLocker(); },
+    grabRoll() { grabRoll(); },
+    trails() { return tpTrails.length; },
+    stuck() { return { player: player.stuckT, staff: staff.map((s) => s.stuckT ?? 0) }; },
     lockers() { return SPOTS.map((sp, i) => ({ i, kind: sp.kind })).filter((x) => x.kind === "locker").map((x) => x.i); },
     selectSlot(i) { selectSlot(i); },
     phaseLens() { return { passing: phaseLen("passing"), skipping: phaseLen("skipping") }; },
