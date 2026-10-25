@@ -182,6 +182,7 @@ const CFG = {
     walkInDist: 0.62,             // how close to the wall counts as "walking into" a spot
     walkInPushSec: 0.18,          // push into it this long to enter
     tagRange: 6.5,                // name tags show within this distance
+    stairsTapRange: 4.5,          // step 55: stairs answer taps from farther away (the camera sits behind you, so doors look close)
   },
   hiding: {
     lockerUsesPerPeriod: 3,       // shared by all lockers
@@ -3485,7 +3486,9 @@ function updateCheck(st, dt) {   // returns the walking speed this frame
 const projA = new THREE.Vector3(), projB = new THREE.Vector3();
 function handleTap(x, y) {
   if (player.hidden) return;
-  if (tryTapPickup(x, y)) return;
+  // Step 55: a door you tapped beats a dropped item next to it when your hands are full, or when the door is nearer your finger.
+  const spot = tapSpotAt(x, y), item = tapItemAt(x, y);
+  if (item && !(spot && !spot.far && (!game.hotbar.some((s) => !s) || spot.d < item.d))) { pickUp(item.o); return; }
   for (const o of objects) {   // tap a paper airplane in flight to catch it
     if (!o.wild || o.state !== "flying" || Math.hypot(o.x - player.x, o.z - player.z) > 3) continue;
     projA.set(o.x, o.y, o.z).project(camera);
@@ -3499,19 +3502,28 @@ function handleTap(x, y) {
     projA.set(p.x, 1.45, p.z).project(camera);
     if (Math.hypot(x - ((projA.x + 1) / 2) * w, y - ((1 - projA.y) / 2) * h) < CFG.interact.tapRadiusPx) { tryAlarm(a); return; }
   }
-  let best = null, bd = CFG.interact.tapRadiusPx;
+  if (!spot) return;
+  if (spot.far) { toast(spot.sp.kind === "stairs" ? "Too far. Walk closer to the stairs." : "Too far. Walk closer first."); return; }
+  enterSpot(spot.sp);
+}
+// the door under a tap: { sp, d (px from the finger), far (in view but out of reach) }, or null
+function tapSpotAt(x, y) {
+  const w = window.innerWidth, h = window.innerHeight;
+  let best = null, bd = CFG.interact.tapRadiusPx, far = null, fd = CFG.interact.tapRadiusPx;
   for (const sp of SPOTS) {
-    if (spotDist(sp) > CFG.interact.range) continue;
+    const dist = spotDist(sp);
+    if (dist > CFG.interact.tagRange) continue;
     const p = hallPos(sp.h, sp.t, sp.wallLat, tmp);
     projA.set(p.x, 0.1, p.z).applyMatrix4(camera.matrixWorldInverse);
     if (projA.z > -0.2) continue;   // behind the camera
-    projA.set(p.x, 0.1, p.z).project(camera); projB.set(p.x, 2.2, p.z).project(camera);
+    projA.set(p.x, 0.1, p.z).project(camera); projB.set(p.x, 2.6, p.z).project(camera);   // floor to the top of the sign
     const ax = (projA.x + 1) / 2 * w, ay = (1 - projA.y) / 2 * h, bx = (projB.x + 1) / 2 * w, by = (1 - projB.y) / 2 * h;
     const vx = bx - ax, vy = by - ay, t = clamp(((x - ax) * vx + (y - ay) * vy) / (vx * vx + vy * vy || 1), 0, 1);
     const d = Math.hypot(x - (ax + vx * t), y - (ay + vy * t));
-    if (d < bd) { bd = d; best = sp; }
+    if (dist <= (sp.kind === "stairs" ? CFG.interact.stairsTapRange : CFG.interact.range)) { if (d < bd) { bd = d; best = sp; } }
+    else if (d < fd) { fd = d; far = sp; }
   }
-  if (best) enterSpot(best);
+  return best ? { sp: best, d: bd, far: false } : far ? { sp: far, d: fd, far: true } : null;
 }
 
 // Glow on spots within reach, and name tags above nearby ones.
@@ -3538,7 +3550,7 @@ function updateSpotsUI() {
   for (const sp of SPOTS) {
     const d = player.hidden || game.state !== "playing" ? Infinity : spotDist(sp);
     const blocked = d < CFG.interact.tagRange ? spotBlocked(sp) : "";
-    const reach = d < CFG.interact.range && !blocked;
+    const reach = d < (sp.kind === "stairs" ? CFG.interact.stairsTapRange : CFG.interact.range) && !blocked;   // glowing = a tap works
     glowColor.setRGB(1, 0.86, 0.5).multiplyScalar(reach ? pulse : 0);
     for (const m of sp.glow) m.emissive.copy(glowColor);
     // name tag
@@ -5022,7 +5034,7 @@ function pickupNearest() {
   if (best) { pickUp(best); return true; }
   return false;
 }
-function tryTapPickup(x, y) {
+function tapItemAt(x, y) {   // the item under a tap and how far (px) from the finger, or null
   const w = window.innerWidth, h = window.innerHeight;
   let best = null, bd = CFG.interact.tapRadiusPx;
   for (const o of objects) {
@@ -5033,8 +5045,7 @@ function tryTapPickup(x, y) {
     const d = Math.hypot(x - ((projA.x + 1) / 2) * w, y - ((1 - projA.y) / 2) * h);
     if (d < bd) { bd = d; best = o; }
   }
-  if (best) { pickUp(best); return true; }
-  return false;
+  return best && { o: best, d: bd };
 }
 
 // ---- havoc: flat points for mischief, worth less each time you repeat it in a period ----
@@ -5576,6 +5587,9 @@ if (debug) {   // test-only helpers (only with ?debug in the URL)
   Object.assign(window.__hallwaySkip, {
     place(h, t, lat) { const p = hallPos(h, t, lat); player.x = p.x; player.z = p.z; },
     placeXZ(x, z) { player.x = x; player.z = z; },
+    spotScreen(i, y) { const sp = SPOTS[i], q = hallPos(sp.h, sp.t, sp.wallLat, {}); projA.set(q.x, y, q.z).applyMatrix4(camera.matrixWorldInverse); if (projA.z > -0.2) return null; projA.set(q.x, y, q.z).project(camera); return { x: (projA.x + 1) / 2 * innerWidth, y: (1 - projA.y) / 2 * innerHeight, d: spotDist(sp) }; },
+    faceAt(i, along, back, yawOff) { const sp = SPOTS[i], H = HALLS[sp.h], q = hallPos(sp.h, sp.t + along, sp.wallLat - sp.side * back, {}); player.x = q.x; player.z = q.z; player.vx = player.vz = 0; player.heading = cam.yaw = Math.atan2(sp.side * H.nx, sp.side * H.nz) + yawOff; manualCamT = 0; },
+    faceSpot(i, back) { const sp = SPOTS[i], H = HALLS[sp.h], q = hallPos(sp.h, sp.t, sp.wallLat - sp.side * back, {}); player.x = q.x; player.z = q.z; player.vx = player.vz = 0; player.heading = cam.yaw = Math.atan2(sp.side * H.nx, sp.side * H.nz); manualCamT = 0; },
     inFrontOf(k, dist) { const st = staff[k]; player.x = st.x + Math.sin(st.facing) * dist; player.z = st.z + Math.cos(st.facing) * dist;
       cam.yaw = player.heading = st.facing + Math.PI; manualCamT = 99; },
     spotFront(i) { const sp = SPOTS[i], f = spotFront(sp, {}); return { x: f.x, z: f.z, h: sp.h, t: sp.t, wallLat: sp.wallLat, frontLat: sp.frontLat, side: sp.side }; },
