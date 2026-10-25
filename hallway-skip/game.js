@@ -1109,6 +1109,7 @@ function makePerson({ body, skin = 0xf1c27d, scale = 1, hat = null, hood = null 
   g.userData.eyes = eyes;
   if (hood) { const hd = new THREE.Mesh(new THREE.IcosahedronGeometry(0.25, 0), lambert(hood)); hd.position.set(0, 1.36, -0.08); hd.scale.set(1, 1, 0.9); g.add(hd); }
   if (hat) { const ht = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.1, 0.48), lambert(hat)); ht.position.set(0, 1.52, 0.05); g.add(ht); }
+  g.userData.hat = !!hat;
   g.scale.setScalar(scale);
   scene.add(g);
   return g;
@@ -1133,9 +1134,18 @@ const KID_TEX = {
     g.font = "900 30px system-ui, sans-serif"; g.fillText("0", 12, h * 0.55); g.fillText("0", w - 12, h * 0.55);   // front, split across the seam
   }),
   jerseySleeve: () => canvasTex(64, 64, (g, w, h) => { g.fillStyle = "#c0262d"; g.fillRect(0, 0, w, h); g.fillStyle = "#fff"; g.fillRect(0, h * 0.55, w, h * 0.15); }),
-  baja: () => canvasTex(256, 64, (g, w, h) => {
-    const cols = ["#efe3c8", "#7a3b2e", "#efe3c8", "#3e6e8e", "#efe3c8", "#c9a227", "#efe3c8", "#3b3b3b", "#efe3c8", "#a33a3a"];
-    let x = 0; for (let i = 0; x < w; i++) { const sw = [14, 4, 10, 4, 18, 3, 8, 4, 12, 5][i % 10]; g.fillStyle = cols[i % cols.length]; g.fillRect(x, 0, sw, h); x += sw; }
+  baja: () => canvasTex(256, 64, (g, w, h) => {   // step 58: the classic black "drug rug", red, yellow and green stripes
+    g.fillStyle = "#151515"; g.fillRect(0, 0, w, h);
+    for (let x0 = 0; x0 < w; x0 += 64) {
+      let x = x0 + 14;
+      for (const [c, sw] of [["#f2ead6", 1.5], ["#151515", 2], ["#c8282a", 4], ["#e8c22c", 3], ["#2f8f3a", 5], ["#e8c22c", 3], ["#c8282a", 4], ["#151515", 2], ["#f2ead6", 1.5]]) { g.fillStyle = c; g.fillRect(x, 0, sw, h); x += sw; }
+    }
+    g.fillStyle = "rgba(255,255,255,.07)"; for (let y = 0; y < h; y += 3) g.fillRect(0, y, w, 1);   // the weave
+  }),
+  bajaHood: () => canvasTex(128, 64, (g, w, h) => {   // the hood: black, with the stripes running along the face opening (u = 0 and 1)
+    g.fillStyle = "#151515"; g.fillRect(0, 0, w, h);
+    g.fillStyle = "rgba(255,255,255,.07)"; for (let y = 0; y < h; y += 3) g.fillRect(0, y, w, 1);
+    for (const [x0, dir] of [[0, 1], [w, -1]]) { let x = x0; for (const [c, sw] of [["#f2ead6", 1.5], ["#c8282a", 3], ["#e8c22c", 2.5], ["#2f8f3a", 3.5]]) { g.fillStyle = c; g.fillRect(dir > 0 ? x : x - sw, 0, sw, h); x += dir * sw; } }
   }),
   sparkle: () => canvasTex(128, 128, (g, w, h) => {
     g.fillStyle = "#ff5fb0"; g.fillRect(0, 0, w, h);
@@ -1175,17 +1185,47 @@ const KID_TEX = {
     for (let i = 0; i < 300; i++) { g.fillStyle = "rgba(0,0,0,.2)"; g.fillRect(Math.random() * w, Math.random() * h, 2, 1); }
     g.fillStyle = "#6b5a3a"; g.fillRect(8, 20, 14, 12); g.strokeStyle = "#d8c89a"; g.setLineDash([2, 2]); g.strokeRect(9, 21, 12, 10);
   }),
+  // step 58: punk. A denim vest covered in patches (u = 0 and 1 are the open front, 0.5 the middle of the back).
+  punkVest: () => canvasTex(512, 128, (g, w, h) => {
+    g.fillStyle = "#4a6f9e"; g.fillRect(0, 0, w, h);
+    for (let i = 0; i < 1400; i++) { g.fillStyle = Math.random() < 0.5 ? "rgba(255,255,255,.08)" : "rgba(0,0,30,.12)"; g.fillRect(Math.random() * w, Math.random() * h, 3, 1); }
+    const patch = (x, y, pw, ph, bg) => { g.fillStyle = bg; g.fillRect(x, y, pw, ph); g.strokeStyle = "rgba(255,255,255,.55)"; g.setLineDash([3, 3]); g.lineWidth = 1.5; g.strokeRect(x + 2, y + 2, pw - 4, ph - 4); g.setLineDash([]); };
+    const anarchy = (cx, cy, r, col) => {   // Ⓐ
+      g.strokeStyle = col; g.lineWidth = r * 0.16; g.beginPath(); g.arc(cx, cy, r, 0, Math.PI * 2); g.stroke();
+      g.beginPath(); g.moveTo(cx - r * 0.95, cy + r * 1.05); g.lineTo(cx, cy - r * 1.15); g.lineTo(cx + r * 0.95, cy + r * 1.05); g.moveTo(cx - r * 0.75, cy + r * 0.2); g.lineTo(cx + r * 0.75, cy + r * 0.2); g.stroke();
+    };
+    const pentagram = (cx, cy, r, col) => {   // upside down: one point at the bottom
+      g.strokeStyle = col; g.lineWidth = r * 0.12; g.beginPath(); g.arc(cx, cy, r * 1.08, 0, Math.PI * 2); g.stroke();
+      g.beginPath(); for (let k = 0; k <= 5; k++) { const a = Math.PI / 2 + (k * 4 * Math.PI) / 5, x = cx + Math.cos(a) * r, y = cy + Math.sin(a) * r; k ? g.lineTo(x, y) : g.moveTo(x, y); } g.stroke();
+    };
+    patch(w / 2 - 52, 10, 104, 104, "#111"); anarchy(w / 2, 62, 36, "#e0262b");   // big back patch
+    patch(w / 2 - 128, 18, 54, 54, "#e8e2d0"); pentagram(w / 2 - 101, 45, 20, "#111");
+    patch(w / 2 + 76, 30, 52, 40, "#c8282a"); g.fillStyle = "#111"; g.font = "900 15px system-ui, sans-serif"; g.textAlign = "center"; g.fillText("NO", w / 2 + 102, 47); g.fillText("FUTURE", w / 2 + 102, 63);
+    for (let k = 0; k < 4; k++) for (let j = 0; j < 4; j++) { g.fillStyle = (k + j) % 2 ? "#111" : "#eee"; g.fillRect(w / 2 + 84 + k * 9, 80 + j * 9, 9, 9); }   // checkerboard
+    patch(6, 20, 40, 40, "#111"); anarchy(26, 41, 12, "#eee");                            // front, one side
+    patch(w - 46, 22, 40, 40, "#e8e2d0"); pentagram(w - 26, 42, 14, "#c8282a");           // front, the other side
+    g.fillStyle = "#bfc4cc"; for (const [x, y] of [[w / 2 - 70, 100], [w / 2 + 60, 12], [60, 90]]) { g.fillRect(x, y, 14, 3); g.fillRect(x + 12, y - 2, 4, 7); }   // safety pins
+  }),
+  ripped: (skin) => canvasTex(64, 128, (g, w, h) => {   // ripped jeans: knee holes (at the front: u = 0 and 1) show skin and white threads
+    g.fillStyle = "#34507a"; g.fillRect(0, 0, w, h);
+    for (let i = 0; i < 260; i++) { g.fillStyle = "rgba(255,255,255,.07)"; g.fillRect(Math.random() * w, Math.random() * h, 1, 4); }
+    for (const [cy, rx, ry] of [[70, 11, 9], [34, 6, 3]]) for (const cx of [0, w]) {
+      g.fillStyle = "#c9d3e2"; g.beginPath(); g.ellipse(cx, cy, rx + 2.5, ry + 2.5, 0, 0, Math.PI * 2); g.fill();   // frayed edge
+      g.fillStyle = "#" + skin.toString(16).padStart(6, "0"); g.beginPath(); g.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2); g.fill();
+      g.fillStyle = "#f2f2f2"; for (let y = cy - ry + 2; y < cy + ry; y += 3) g.fillRect(cx - rx, y, rx * 2, 1);
+    }
+  }),
   bandPants: () => canvasTex(64, 64, (g, w, h) => { g.fillStyle = "#1c2a5a"; g.fillRect(0, 0, w, h); g.fillStyle = "#e0b43c"; g.fillRect(w * 0.22, 0, 5, h); g.fillRect(w * 0.72, 0, 5, h); }),
 };
-const ktex = (k) => (kidTex[k] ??= KID_TEX[k]());
+const ktex = (k) => (kidTex[k] ??= (([name, arg]) => KID_TEX[name](arg && Number(arg)))(k.split(":")));   // "ripped:15843453" passes the skin color
 const kmat = (c) => (typeof c === "string" ? new THREE.MeshLambertMaterial({ map: ktex(c), flatShading: true }) : lambert(c));
 // Outfits. top/sleeve/pants are a color or a texture name; sleeves: "long", "short" or "none"; pants: "long", "shorts" or "skirt".
 const OUTFITS = {
-  punk:      { label: "Punk", top: 0x222222, sleeves: "short", pants: 0x3d5a80, legs: "long", shoes: 0x151515, extras: ["vest", "converse"], hood: 0x2a2a2a },
+  punk:      { label: "Punk", top: 0x161616, sleeves: "long", pants: "ripped", legs: "long", shoes: 0x111111, extras: ["vest", "boots", "spikeBand", "lockCollar", "noseRing"], hood: 0x1c1c1c },
   jock:      { label: "Jock", top: "jersey", belly: 0xc0262d, sleeve: "jerseySleeve", sleeves: "short", pants: 0x8f939a, legs: "long", shoes: 0xf2f2f2, hood: 0x8f939a },
   goth:      { label: "Goth", top: 0x141414, sleeves: "long", pants: 0x101010, legs: "long", shoes: 0x080808, extras: ["boots", "chains"], hood: 0x141414 },
   nerd:      { label: "Nerd", top: 0xf4f4f4, sleeves: "long", pants: 0xc8b07a, legs: "long", shoes: 0x5a3a22, extras: ["buttons", "suspenders", "glasses"], hood: 0x6b7a8f },
-  burnout:   { label: "Burnout", top: "baja", sleeves: "long", pants: 0x4a6a96, legs: "long", baggy: 1.35, shoes: 0x444444, extras: ["hoodBack", "pocket"], hood: "baja" },
+  burnout:   { label: "Burnout", top: "baja", sleeves: "long", pants: 0x4a6a96, legs: "long", baggy: 1.35, shoes: 0x444444, extras: ["hoodBack", "pocket"], hood: "bajaHood" },
   fabulous:  { label: "Fabulous", top: "sparkle", sleeves: "long", pants: "trackPants", legs: "long", shoes: 0xffffff, extras: ["zip"], hood: "sparkle" },
   cheer:     { label: "Cheerleader", top: "cheerTop", belly: 0xc0262d, sleeves: "none", pants: "skirt", legs: "skirt", shoes: 0xffffff, extras: ["socks"], hood: 0xc0262d },
   // step 50
@@ -1209,7 +1249,7 @@ function buildKid(look) {
   const H = 0.9 + 0.2 * (look.height ?? 0.5), W = 0.85 + 0.45 * (look.weight ?? 0.35), B = clamp(look.build ?? 0, -1, 1);
   const g = new THREE.Group(), add = (m, parent = g) => { parent.add(m); return m; };
   const mesh = (geo, mat, x, y, z, parent) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); return add(m, parent); };
-  const skinM = lambert(skin), topM = kmat(O.top), pantsM = kmat(O.pants), shoeM = lambert(O.shoes), hairM = lambert(hc);
+  const skinM = lambert(skin), topM = kmat(O.top), pantsM = kmat(O.pants === "ripped" ? "ripped:" + skin : O.pants), shoeM = lambert(O.shoes), hairM = lambert(hc);
   // proportions
   const legLen = 0.54 * H, hipY = 0.06 + legLen, torsoLen = 0.5 * H, waistY = hipY + 0.16 * H, shoulderY = hipY + torsoLen;
   const shoulder = (B < 0 ? 0.21 - B * 0.07 : 0.21 - B * 0.015) * W, waist = (B < 0 ? 0.18 + B * 0.01 : 0.18 - B * 0.05) * W, hip = (B < 0 ? 0.18 + B * 0.035 : 0.18 + B * 0.04) * W;
@@ -1248,6 +1288,10 @@ function buildKid(look) {
     if (sleeveLen) mesh(new THREE.CylinderGeometry(armR * 1.15, armR * 1.05, sleeveLen, 7), sleeveM, 0, -sleeveLen / 2, 0, pivot);
     if (armLen - sleeveLen > 0.01) mesh(new THREE.CylinderGeometry(armR * 0.9, armR * 0.8, armLen - sleeveLen, 7), skinM, 0, -sleeveLen - (armLen - sleeveLen) / 2, 0, pivot);
     mesh(new THREE.IcosahedronGeometry(armR * 1.05, 0), skinM, 0, -armLen - 0.02, 0, pivot);
+    if (O.extras?.includes("spikeBand")) {   // step 58: a studded leather wristband
+      const y = -armLen + 0.07, r = armR * 1.02, band = mesh(new THREE.CylinderGeometry(r + 0.012, r + 0.012, 0.06, 10), lambert(0x111111), 0, y, 0, pivot);
+      for (let k = 0; k < 6; k++) { const a = (k / 6) * Math.PI * 2, sp = mesh(new THREE.ConeGeometry(0.012, 0.035, 4), lambert(0xd8dce2), Math.sin(a) * (r + 0.025), y, Math.cos(a) * (r + 0.025), pivot); sp.rotation.set(Math.PI / 2, 0, 0); sp.rotation.order = "YXZ"; sp.rotation.y = a; }
+    }
   }
   // head and face
   const head = mesh(new THREE.IcosahedronGeometry(headR, 1), skinM, 0, headY, 0); head.scale.y = 1.08;
@@ -1264,10 +1308,18 @@ function buildKid(look) {
   const bodyR = (y) => (y >= waistY ? waist + (shoulder - waist) * clamp((y - waistY) / (shoulderY - waistY), 0, 1) : hip + (waist - hip) * clamp((y - hipY) / (waistY - hipY), 0, 1));
   const surfZ = (y, x, grow = 1) => { const r = bodyR(y) * grow; return depth * r * Math.sqrt(Math.max(0, 1 - (x / r) ** 2)) + 0.006; };
   if (ex.includes("vest")) {   // denim vest: a shell over the shirt, open down the front
-    const v = mesh(new THREE.CylinderGeometry(shoulder * 1.07, waist * 1.08, shoulderY - waistY + 0.02, 10, 1, true, 0.5, Math.PI * 2 - 1.0), new THREE.MeshLambertMaterial({ color: 0x4f78b0, flatShading: true, side: THREE.DoubleSide }), 0, (shoulderY + waistY) / 2, 0);
+    const v = mesh(new THREE.CylinderGeometry(shoulder * 1.07, waist * 1.08, shoulderY - waistY + 0.02, 16, 1, true, 0.5, Math.PI * 2 - 1.0), new THREE.MeshLambertMaterial({ map: ktex("punkVest"), side: THREE.DoubleSide }), 0, (shoulderY + waistY) / 2, 0);
     v.scale.z = depth;
     for (let i = 0; i < 6; i++) { const x = (i % 2 ? 1 : -1) * shoulder * 0.5, y = shoulderY - 0.07 - Math.floor(i / 2) * 0.07; mesh(new THREE.BoxGeometry(0.022, 0.022, 0.022), lambert(0xd8d8d8), x, y, surfZ(y, x, 1.07)); }   // studs
   }
+  if (ex.includes("lockCollar")) {   // step 58: spiked collar with a padlock
+    const ny = shoulderY + 0.055, cr = 0.072;
+    const c = mesh(new THREE.TorusGeometry(cr, 0.016, 5, 14), lambert(0x111111), 0, ny, 0); c.rotation.x = Math.PI / 2;
+    for (let k = 0; k < 7; k++) { const a = Math.PI + ((k - 3) / 7) * Math.PI * 1.6, sp = mesh(new THREE.ConeGeometry(0.01, 0.03, 4), lambert(0xd8dce2), Math.sin(a) * (cr + 0.018), ny, Math.cos(a) * (cr + 0.018)); sp.rotation.order = "YXZ"; sp.rotation.set(Math.PI / 2, a, 0); }
+    mesh(new THREE.BoxGeometry(0.04, 0.035, 0.015), lambert(0xc9a227), 0, ny - 0.04, cr + 0.02);   // the padlock
+    const sh = mesh(new THREE.TorusGeometry(0.013, 0.004, 4, 8, Math.PI), lambert(0xd8dce2), 0, ny - 0.022, cr + 0.02);
+  }
+  if (ex.includes("noseRing")) { const nr = mesh(new THREE.TorusGeometry(0.016, 0.0045, 4, 10), lambert(0xe8ecf0), 0.012, headY - 0.045, headR + 0.003); nr.rotation.y = Math.PI / 2; }
   if (ex.includes("buttons")) for (let i = 0; i < 4; i++) { const y = shoulderY - 0.07 - i * 0.09; mesh(new THREE.BoxGeometry(0.02, 0.02, 0.01), lambert(0xbbbbbb), 0, y, surfZ(y, 0)); }
   if (ex.includes("suspenders")) {
     const sm = lambert(0x8b1e2d);
@@ -1284,7 +1336,12 @@ function buildKid(look) {
       const c = mesh(new THREE.TorusGeometry(r * W, 0.012, 4, 14, Math.PI), cm, hip * 0.98, y, 0); c.rotation.set(0, Math.PI / 2, Math.PI);
     }
   }
-  if (ex.includes("hoodBack")) { const hb = mesh(new THREE.IcosahedronGeometry(0.15, 1), kmat("baja"), 0, shoulderY + 0.02, -shoulder * depth - 0.04); hb.scale.set(1.3, 0.75, 0.6); }
+  let hoodBack = null;
+  if (ex.includes("hoodBack")) {   // a hoodie's hood, down: a folded pouch lying on the upper back
+    const hm = new THREE.MeshLambertMaterial({ map: ktex("bajaHood"), side: THREE.DoubleSide });
+    hoodBack = mesh(new THREE.SphereGeometry(0.15, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2), hm, 0, shoulderY - 0.07, -shoulder * depth + 0.01);
+    hoodBack.rotation.set(-Math.PI / 2 + 0.2, -Math.PI / 2, 0); hoodBack.scale.set(1.0, 0.42, 1.2);   // (turned so the striped seam is underneath)   // a flat dome lying against the back
+  }
   if (ex.includes("pocket")) mesh(new THREE.BoxGeometry(waist * 1.2, 0.1, 0.02), kmat("baja"), 0, waistY - 0.02, frontZ(waist) + 0.005);
   // step 50
   if (ex.includes("collar")) for (const sx of [-1, 1]) { const c = mesh(new THREE.BoxGeometry(0.08, 0.025, 0.06), topM, sx * 0.05, shoulderY + 0.01, frontZ(shoulder) * 0.55); c.rotation.set(0.5, 0, sx * 0.35); }
@@ -1323,7 +1380,19 @@ function buildKid(look) {
     const e = mesh(new THREE.ConeGeometry(0.05, 0.22, 4), skinM, sx * (headR + 0.06), headY + 0.04, -0.01, hair);
     e.rotation.set(0, 0, -sx * 1.15); e.scale.z = 0.45;
   }   // in the hair group, so the hood hides it too
-  g.userData = { legs, arms, eyes, hair, headY, outfit: O, walk: 0 };
+  // step 58: the hood, up. Shaped around the head with the face showing (it used to be a plain ball over everything).
+  const hood = add(new THREE.Group()); hood.visible = false;
+  {
+    const hm = typeof O.hood === "string" ? new THREE.MeshLambertMaterial({ map: ktex(O.hood), side: THREE.DoubleSide }) : new THREE.MeshLambertMaterial({ color: O.hood ?? 0x5d626b, flatShading: true, side: THREE.DoubleSide });
+    // one lathe profile from the crown, around the head, down the neck and out over the shoulders; the front is left open for the face
+    const P = [[0.001, headY + headR * 1.22], [0.1, headY + headR * 1.13], [0.17, headY + headR * 0.8], [headR * 1.16, headY + headR * 0.15], [headR * 1.12, headY - headR * 0.5],
+      [headR * 0.92, headY - headR * 0.95], [headR * 0.95, shoulderY + 0.07], [shoulder * 0.8, shoulderY + 0.01], [shoulder * 0.98, shoulderY - 0.05]].map(([r, y]) => new THREE.Vector2(r, y - headY));
+    const gap = 1.7, shell = mesh(new THREE.LatheGeometry(P, 18, gap / 2, Math.PI * 2 - gap), hm, 0, headY, -0.03, hood);
+    shell.scale.set(1.02, 1, 1.12);   // a little longer front to back
+    const peak = mesh(new THREE.ConeGeometry(0.06, 0.13, 6), hm, 0, headY + headR * 0.75, -headR * 1.05, hood); peak.rotation.x = -2.0;   // the point at the back
+    if (ex.includes("hoodBack")) for (const sx of [-1, 1]) mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.16, 4), lambert(0xf2ead6), sx * 0.06, shoulderY - 0.02, surfZ(shoulderY - 0.02, sx * 0.06) + 0.012, hood);   // drawstrings
+  }
+  g.userData = { legs, arms, eyes, hair, hood, hoodBack, headY, outfit: O, walk: 0 };
   return g;
 }
 // a dome over the top of the head, open at the front, or a shell around the sides and back (for longer styles)
@@ -1399,9 +1468,8 @@ const player = {
   hoodT: 0, hoodCD: 0,
 };
 // the hood (step 40), pulled up over your kid's head
-const hoodUpMesh = new THREE.Mesh(new THREE.IcosahedronGeometry(0.25, 1), lambert(0x5d626b));
-hoodUpMesh.position.set(0, 1.37, -0.03); hoodUpMesh.scale.set(1.05, 1.1, 1.0); hoodUpMesh.visible = false; player.mesh.add(hoodUpMesh);
-const showHood = (up) => { hoodUpMesh.visible = up; if (player.kid) { player.kid.userData.eyes.visible = !up; player.kid.userData.hair.visible = !up; } };
+const setHood = (kid, up) => { const U = kid.userData; U.hood.visible = up; U.hair.visible = !up; if (U.hoodBack) U.hoodBack.visible = !up; };
+const showHood = (up) => { if (player.kid) setHood(player.kid, up); };
 
 // ---------- crowd (instanced: one mesh for bodies, one for heads) ----------
 const crowd = [];
@@ -2272,8 +2340,6 @@ function coneHalf(T) { return ((T.visionHalfAngleDeg * Math.PI) / 180) * (1 - CF
 function applyLook() {
   if (player.kid) { player.mesh.remove(player.kid); disposeTree(player.kid); }
   player.kid = buildKid(character.look); player.mesh.add(player.kid);
-  const O = player.kid.userData.outfit, hy = player.kid.userData.headY;
-  hoodUpMesh.material = kmat(O.hood ?? 0x5d626b); hoodUpMesh.position.set(0, hy + 0.03, -0.03);
   showHood(player.hoodT > 0);
 }
 function disposeTree(o) { o.traverse((m) => { if (m.geometry) m.geometry.dispose(); if (m.material && !m.material.map) m.material.dispose(); }); }
@@ -3666,8 +3732,9 @@ function makeItemMesh(key) {
       break;
     }
     case "plunger": {
-      const cup = m(new THREE.SphereGeometry(0.1, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2), 0xc0392b); cup.rotation.x = Math.PI;
-      const stick = m(new THREE.CylinderGeometry(0.022, 0.022, 0.5, 5), 0xc8a46a); stick.position.y = 0.25;
+      // step 58: a real plunger: the rubber cup's open side faces down (-y), the handle comes out of the top of the dome
+      const cup = m(new THREE.SphereGeometry(0.1, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2), 0xc0392b); cup.material.side = THREE.DoubleSide;
+      const stick = m(new THREE.CylinderGeometry(0.022, 0.022, 0.5, 5), 0xc8a46a); stick.position.y = 0.34;
       break;
     }
     case "globe": {
@@ -4967,6 +5034,8 @@ function finishSignJob(st, j) {
   }
   return true;
 }
+let snapHold = 0;
+const PLUNGER_HEAD_Y = 1.45;   // where the cup sits on a staff member's head (head center 1.32, before their scale)
 // the plunger: stuck to whoever it hits (they stumble around blind) or to the wall
 function plungerHit(o, who, isStaff) {
   const T = o.T;
@@ -4976,8 +5045,9 @@ function plungerHit(o, who, isStaff) {
     havoc("plungerStaff", T.staffPoints, `Plunger! Right on the ${who.type.name}!`, { x: who.x, z: who.z, loud: true });
   } else if (isStaff) {
     who.plungerT = T.blindSec; who.blindDir = who.facing; who.bumpCD = 0;
+    if (who.plungerMesh) who.mesh.remove(who.plungerMesh);   // hit again while already plungered: one plunger, not two
     who.plungerMesh = makeItemMesh("plunger"); scene.remove(who.plungerMesh);
-    who.plungerMesh.position.set(0, 2.05, 0.05); who.plungerMesh.rotation.x = Math.PI; who.mesh.add(who.plungerMesh);
+    who.plungerMesh.position.set(0.02, PLUNGER_HEAD_Y + (who.mesh.userData.hat ? 0.13 : 0), 0.1); who.plungerMesh.scale.setScalar(1.5); who.plungerMesh.rotation.set(0.38, rand(-0.5, 0.5), 0.2, "YXZ"); who.mesh.add(who.plungerMesh);   // cup over the face, handle up, a bit crooked
     if (who.state === "chase" || who.state === "bust") { who.state = "search"; who.searchT = 0; }
     who.camping = false; who.cone.visible = false;
     who.bubble.textContent = "MMMPH!"; who.barkUntil = performance.now() + 2000; who.barkAt = game.time;
@@ -4992,7 +5062,7 @@ function plungerHit(o, who, isStaff) {
 function stickPlungerToWall(o) {
   const yaw = Math.atan2(-o.vx, -o.vz);   // (wallBounce already turned it around: this points back into the wall)
   o.vx = o.vy = o.vz = 0; o.state = "resting"; o.wallStuck = true;
-  o.mesh.rotation.set(Math.PI / 2, yaw, 0, "YXZ");
+  o.mesh.rotation.set(-Math.PI / 2, yaw, 0, "YXZ");   // cup against the wall, handle sticking out
   playBlip([180, 260], 0.06, "sine", 0.06);   // thwop
   popup("Thwop! Stuck to the wall.", "meh");
   capLying();
@@ -5504,7 +5574,7 @@ renderer.setAnimationLoop(() => {
   updateSpotsUI();
   drawFriends();
   updateHud();
-  renderer.render(scene, camera);
+  if (performance.now() > snapHold) renderer.render(scene, camera);   // (a test close-up holds the frame briefly)
   if (debug) { fpsAcc += dt; fpsN++; if (fpsAcc > 0.5) { ui.fps.textContent = `${Math.round(fpsN / fpsAcc)} fps · ${crowdDrawn}/${crowd.length} kids drawn`; fpsAcc = fpsN = 0; } }
 });
 
@@ -5597,6 +5667,8 @@ if (debug) {   // test-only helpers (only with ?debug in the URL)
     spotFront(i) { const sp = SPOTS[i], f = spotFront(sp, {}); return { x: f.x, z: f.z, h: sp.h, t: sp.t, wallLat: sp.wallLat, frontLat: sp.frontLat, side: sp.side }; },
     faceSpot(i) { const sp = SPOTS[i], H = HALLS[sp.h]; cam.yaw = player.heading = Math.atan2(sp.side * H.nx, sp.side * H.nz); manualCamT = 99; },
     faceHall(h, dir) { cam.yaw = player.heading = hallHeading(h, dir); manualCamT = 99; },
+    plungerT(k) { return staff[k].plungerT ?? 0; },
+    snapStaff(k, dist, yaw, h = 1.6) { const st = staff[k], sc = st.type.scale ?? 1; camera.position.set(st.x + Math.sin(yaw) * dist, h * sc, st.z + Math.cos(yaw) * dist); camera.lookAt(st.x, 1.35 * sc, st.z); renderer.render(scene, camera); snapHold = performance.now() + 600; },   // a close-up for screenshots (call right before one)
     staffTo(k, x, z, state) { const st = staff[k]; st.x = x; st.z = z; if (state) { st.state = state; st.suspicion = 1; } },
     setTime(t) { game.phaseT = t; },
     catchNow(k = 0) { caught(staff[k]); },
@@ -5653,6 +5725,7 @@ if (debug) {   // test-only helpers (only with ?debug in the URL)
     speedMult() { return speedMult(); },
     setLook(o) { Object.assign(character.look, o); applyLook(); if (!$("charScreen").hidden) { renderLooks(); lookChanged(); } return { ...character.look }; },
     previewYaw(y) { pv.yaw = y; },
+    previewHood(up) { if (pv.kid) setHood(pv.kid, up); },
     walkPhase() { return player.kid.userData.walk; },
     unlockAll() { for (const sp of SPOTS) { sp.used = false; sp.lockedUntil = 0; } player.graceT = 0; },
     unpost() { for (const st of staff) if (st.post) st.post = null; },

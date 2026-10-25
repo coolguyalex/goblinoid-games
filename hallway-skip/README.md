@@ -64,6 +64,7 @@ Built from `Hallway_Skip_Game_Spec` v0.2. Done so far:
 - **Step 55:** tapping the stairs works more reliably. A dropped item next to the door no longer steals the tap (it used to when your hands were full, leaving just "Inventory full!"). Stairs now answer taps from up to 4.5 m, the door glows whenever a tap will work, and a tap from too far says so instead of doing nothing.
 - **Step 56:** sneaking out of a classroom no longer locks it. Rooms only lock when they kick you out (spotted going in, out of time, or a staff member pulls you out). Slip back in and the teacher's clock picks up where it left off (at least 4 s), so ducking in and out doesn't buy endless hiding.
 - **Step 57:** a much shorter How to play: the goal, a controls table (only your device's controls), and a few one-line tips on hiding, scoring and what to watch out for. Item details are left for players to discover.
+- **Step 58:** the burnout's Baja is now the classic black "drug rug" with red, yellow and green stripes. A new hood that frames the face and drapes onto the shoulders (it used to be a plain ball that hid the face). A punk who looks punk: black long sleeves, a patched denim vest (Ⓐ on the back, an upside-down pentagram, NO FUTURE, safety pins), a spiked collar with a padlock, studded wristbands, a nose ring, ripped jeans and boots. The plunger sticks cup-down on a staff member's head with the handle up at a crooked angle (it was upside down), sits on top of caps, and hitting someone twice no longer leaves two plungers.
 
 ## Before turning on real ads
 
