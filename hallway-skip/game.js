@@ -1,4 +1,4 @@
-// Hallway Skip — build step 23 prototype.
+// Hallway Skip — build step 24 prototype.
 // Step 1: hallway, joystick, a hall monitor that chases, a crowd that thins, and the bell.
 // Step 2: tap-to-interact and hiding spots: lockers, restrooms, classrooms (teacher and sub boot timers).
 // Step 3: security guard, the three-strike ladder, and the PA announcer.
@@ -22,6 +22,7 @@
 // Step 21: loot by room and rarity (specialty items only from their room; hall passes and staff keys are rare finds), the office always has a pass and a key but its alarm calls everyone.
 // Step 22: the "kick me" sign (kids pen the staff member in until the tardy bell) and Mentos & soda (a geyser kids crowd round to watch).
 // Step 23: best runs saved in the browser (top 3, new high score / longest run badges); restroom: found on the third check in one stay.
+// Step 24: burst out of a locker: stuns staff close by and gives you a head start, but busts that locker for the day.
 import * as THREE from "three";
 
 // =====================================================================================
@@ -143,6 +144,9 @@ const CFG = {
   // Lockers: hide in one, and you can rummage through it once per period. It's a blind grab: you might get junk.
   lockers: {
     rummageSec: 2,                // eats this much of your hiding time
+    // Burst out: slam the door open. Staff close by are stunned and you get a head start, but the locker's busted
+    // for the rest of the day. Only while you've still got locker time left.
+    burst: { radius: 4.5, stunSec: 2.5, graceSec: 1.2, points: 75, noiseRadius: 12 },
     loot: [["spitball", 4], ["gum", 4], ["paperAirplane", 3], ["whoopee", 2], ["bananaPeel", 2], ["kickMe", 1],
            ["oldSock", 3], ["sandwich", 3], ["homework", 3]],
   },
@@ -789,7 +793,8 @@ function addSpot(kind, h, t, side, extra = {}) {
 
 for (const { h, t } of LAYOUT.hideLockers) {
   const side = HALLS[h].outerSide, wl = wallLat(h, side), sp = addSpot("locker", h, t, side);
-  sp.glow.push(wallBox(h, t, wl + side * LAYOUT.lockerDepth / 2, 0.9, 2.1, LAYOUT.lockerDepth, 0x7d9a86, 1.05).material);
+  sp.door = wallBox(h, t, wl + side * LAYOUT.lockerDepth / 2, 0.9, 2.1, LAYOUT.lockerDepth, 0x7d9a86, 1.05);
+  sp.glow.push(sp.door.material); sp.doorRot = sp.door.rotation.y;
   for (let k = 0; k < 3; k++) wallBox(h, t, wl - side * 0.01, 0.5, 0.035, 0.02, 0x2a3a30, 1.62 + k * 0.09);
 }
 for (const { h, t } of LAYOUT.restrooms) {
@@ -1231,6 +1236,7 @@ function morningSetup() {
   game.hotbar = Array(CFG.items.slots).fill(null); renderHotbar();
   rollSubs();             // first, so sub rooms get their extra desk loot
   resetSpotsForPeriod();
+  for (const sp of SPOTS) if (sp.kind === "locker" && sp.busted) { sp.busted = false; sp.door.material.color.setHex(0x7d9a86); sp.door.rotation.y = sp.doorRot; }   // the custodian fixes the lockers
   for (const sp of SPOTS) if (sp.kind === "restroom") {
     sp.closed = false; if (sp.puddle) sp.puddle.visible = false;   // mopped overnight
   }
@@ -2091,7 +2097,7 @@ function keyOpens(sp) {
   return sp.kind === "restroom" && sp.used;
 }
 function spotBlocked(sp) {   // why this spot can't be used right now ("" if it can)
-  if (sp.kind === "locker") return game.lockerUses > 0 ? "" : "No locker uses left this period";
+  if (sp.kind === "locker") return sp.busted ? "This locker's busted (you burst out of it)" : game.lockerUses > 0 ? "" : "No locker uses left this period";
   if (sp.kind === "classroom" && game.alarmT > 0) return "Fire alarm! Every classroom is locked";
   if (sp.closed) return "Out of order (somebody flooded it)";
   if (roomLocked(sp)) return `Room ${sp.room} is locked (you raided it)`;
@@ -2234,12 +2240,18 @@ function renderLoot(sp) {
     lootEl.appendChild(b);
     return;
   }
-  if (sp.kind === "locker") {   // a blind grab: could be good, could be junk
-    if (sp.rummaged) { lootEl.innerHTML = `<span class="none">You already went through this one.</span>`; return; }
-    const b = document.createElement("button"); b.type = "button";
-    b.innerHTML = `🎒 Rummage around<small>-${CFG.lockers.rummageSec}s · might be junk</small>`;
-    b.addEventListener("click", rummageLocker);
-    lootEl.appendChild(b);
+  if (sp.kind === "locker") {   // a blind grab (could be junk), or burst out
+    if (sp.rummaged) lootEl.innerHTML = `<span class="none">You already went through this one.</span>`;
+    else {
+      const b = document.createElement("button"); b.type = "button";
+      b.innerHTML = `🎒 Rummage around<small>-${CFG.lockers.rummageSec}s · might be junk</small>`;
+      b.addEventListener("click", rummageLocker);
+      lootEl.appendChild(b);
+    }
+    const x = document.createElement("button"); x.type = "button"; x.className = "prize";
+    x.innerHTML = `💥 Burst out<small>stuns staff nearby · busts this locker</small>`;
+    x.addEventListener("click", burstOut);
+    lootEl.appendChild(x);
     return;
   }
   if (sp.kind !== "classroom") return;
@@ -2305,6 +2317,26 @@ function grabRoll() {
   if (!addItem("toiletPaper")) return;
   sp.tpTaken = true; player.hideT += 1;
   updateHidePanel();
+}
+// Slam the locker door open: everyone close by is stunned, you get a head start, and the locker's busted for the day.
+function burstOut() {
+  const sp = player.hidden, B = CFG.lockers.burst;
+  if (!sp || sp.kind !== "locker" || game.state !== "playing" || player.hideT >= hideLimit(sp)) return;
+  sp.busted = true;
+  sp.door.material.color.setHex(0x4f5d55); sp.door.rotation.y = sp.doorRot + 0.35;   // hanging open, dented
+  exitSpot(false);
+  player.graceT = Math.max(player.graceT, B.graceSec);
+  const f = { x: player.x, z: player.z };
+  let n = 0;
+  for (const st of staff) {
+    if (Math.hypot(st.x - f.x, st.z - f.z) > B.radius) continue;
+    stunStaff(st, B.stunSec, "fall"); st.suspicion = 0; n++;
+    st.bubble.textContent = pick(["AAH!", "WHAT THE—", "*falls over*"]); st.barkUntil = performance.now() + 1500; st.barkAt = game.time;
+  }
+  playBlip([140, 90, 600, 300], 0.08, "sawtooth", 0.1);   // BANG
+  banner(`BURST OUT!<small>${n ? `${n} staff member${n === 1 ? "" : "s"} knocked flat. Go!` : "Nobody there, but it sure was loud."}</small>`, 1.8);
+  havoc("burstOut", B.points + n * 50, n ? `Burst out! ${n} down` : "Burst out!", { x: f.x, z: f.z, loud: true });
+  makeNoise(f.x, f.z, B.noiseRadius, true);
 }
 function rummageLocker() {
   const sp = player.hidden;
@@ -2446,7 +2478,7 @@ function updateSpotsUI() {
     sp.tag.style.display = show ? "block" : "none";
     if (!show) continue;
     let text, cls = "itag";
-    if (sp.kind === "locker") text = blocked ? "Locker · none left" : "Locker";
+    if (sp.kind === "locker") text = sp.busted ? "Locker · busted" : blocked ? "Locker · none left" : "Locker";
     else if (sp.kind === "restroom") text = sp.closed ? "Restroom · out of order" : blocked ? "Restroom · used" : game.dares.length < CFG.dares.max ? "Restroom · 📜" : "Restroom";
     else { text = `Room ${sp.room}${sp.R.label ? " · " + sp.R.label : ""} · ${TEACHER_TYPES[sp.teacher].label}${blocked ? (game.alarmT > 0 ? " · locked (fire alarm)" : roomLocked(sp) ? " · locked" : sp.used ? " · used" : " · guarded") : ""}`; if (sp.teacher === "sub") cls += " sub"; }
     const keyOk = blocked && keyOpens(sp) && hasKey();
@@ -3889,6 +3921,7 @@ if (debug) {   // test-only helpers (only with ?debug in the URL)
     nodes() { return NODES.map((n) => ({ id: n.id, x: n.x, z: n.z })); },
     tidyInfo() { return staff.map((s) => ({ key: s.key, state: s.state, obj: s.tidyObj && !s.tidyObj.dead && s.state === "tidy" ? s.tidyObj.id : null, stunT: s.stunT, tidyT: s.tidyT, x: s.x, z: s.z, pauseT: s.pauseT })); },
     rummage() { rummageLocker(); },
+    burst() { burstOut(); },
     runs() { return loadRuns(); },
     forceScore(sc, per) { game.score = sc; game.periodsSkipped = per; },
     clearRuns() { saveRuns([]); },
