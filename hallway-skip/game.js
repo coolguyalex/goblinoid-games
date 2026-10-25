@@ -31,6 +31,7 @@
 // Step 29: steer the wheelie chair a little (steering slows you down), and jump off before the crash (the chair rolls on without you).
 // Step 30: staff can't pull you out of a locker. If they saw you go in, they wait outside it until you come out (burst out!).
 // Step 31: the custodian does the cleaning (messes stay until he gets to them; kids grab balls and planes), never chases, radios you in.
+// Step 32: slime holds longer, spitballs fly farther, stuns last about 25% longer, teachers at their doors see less.
 import * as THREE from "three";
 
 // =====================================================================================
@@ -180,7 +181,7 @@ const CFG = {
     rummageSec: 2,                // eats this much of your hiding time
     // Burst out: slam the door open. Staff close by are stunned and you get a head start, but the locker's busted
     // for the rest of the day. Only while you've still got locker time left.
-    burst: { radius: 4.5, stunSec: 2.5, graceSec: 1.2, points: 75, noiseRadius: 12 },
+    burst: { radius: 4.5, stunSec: 3, graceSec: 1.2, points: 75, noiseRadius: 12 },
     loot: [["spitball", 4], ["gum", 4], ["paperAirplane", 3], ["whoopee", 2], ["bananaPeel", 2], ["kickMe", 1], ["energyDrink", 2],
            ["oldSock", 3], ["sandwich", 3], ["homework", 3]],
   },
@@ -229,7 +230,7 @@ const CFG = {
   fireAlarm: {
     points: 500,
     sec: 30,                      // how long it rings
-    stunSec: 3,                   // every staff member is stunned (hands over ears) this long
+    stunSec: 3.5,                 // every staff member is stunned (hands over ears) this long
     items: 8,                     // items scattered around the halls; they don't vanish until picked up
   },
   flood: { points: 400, heat: 45, noiseRadius: 16 },
@@ -333,7 +334,7 @@ const STAFF_TYPES = {
   hallTeacher: {
     name: "teacher",
     stationary: true,                          // stands at their classroom door
-    visionRange: 7.5, visionHalfAngleDeg: 45,
+    visionRange: 6, visionHalfAngleDeg: 35,   // (was 7.5 m and 45° before step 32)
     sweepDeg: 70, sweepRate: 0.5,              // slowly looks up and down the hall
     notice: 0.9,
     alarmCooldownSec: 9,                       // after yelling for backup, a breather before the next yell
@@ -491,39 +492,39 @@ const ITEM_TYPES = {
                    // two-stage flight: soars over heads (fly-over points), then drops to head height (can hit people)
                    cruiseY: 2.55, highSec: [0.45, 1.3], lowY: 1.35, sinkRate: 0.75, drag: 0.25,
                    perStudent: 10, crowdLandBonus: 50, crowdLandCount: 3,
-                   hit: { student: 20, staff: 80, studentSec: 0.5, staffSec: 0.7, style: "flinch" } },
+                   hit: { student: 20, staff: 80, studentSec: 0.6, staffSec: 0.9, style: "flinch" } },
   // Same two-stage flight as the paper airplane, but it unrolls as it goes and leaves a streamer of toilet paper behind
   // (it stays until the custodian clears it overnight). From the restrooms.
   toiletPaper:   { label: "Toilet paper", icon: "🧻", kind: "throw", flight: "glide2", speed: [6, 10], pitchDeg: 8, gravity: 1.2, glide: true,
                    cruiseY: 2.5, highSec: [0.5, 1.4], lowY: 1.4, sinkRate: 0.8, drag: 0.3,
                    perStudent: 10, crowdLandBonus: 30, crowdLandCount: 3, trailPointsPerM: 4,
-                   hit: { student: 15, staff: 60, studentSec: 0.4, staffSec: 0.6, style: "flinch" } },
+                   hit: { student: 15, staff: 60, studentSec: 0.5, staffSec: 0.8, style: "flinch" } },
   // Same idea again, but it stays up much longer and you can pick it back up. Gym only.
   frisbee:       { label: "Frisbee", icon: "🥏", kind: "throw", flight: "glide2", recoverable: true, speed: [9, 14], pitchDeg: 6, gravity: 1.2, glide: true,
                    cruiseY: 2.3, highSec: [1.0, 2.2], lowY: 1.3, sinkRate: 0.45, drag: 0.12,
                    perStudent: 8, crowdLandBonus: 30, crowdLandCount: 3,
-                   hit: { student: 25, staff: 100, studentSec: 0.6, staffSec: 0.9, style: "flinch" } },
-  spitball:      { label: "Spitball", icon: "🫧", kind: "throw", uses: 3, speed: [16, 24], pitchDeg: 4, gravity: 5,
-                   hit: { student: 25, staff: 75, studentSec: 0.4, staffSec: 0.8, style: "flinch" } },
+                   hit: { student: 25, staff: 100, studentSec: 0.8, staffSec: 1.1, style: "flinch" } },
+  spitball:      { label: "Spitball", icon: "🫧", kind: "throw", uses: 3, speed: [20, 30], pitchDeg: 4, gravity: 4.5,
+                   hit: { student: 25, staff: 75, studentSec: 0.5, staffSec: 1, style: "flinch" } },
   bananaPeel:    { label: "Banana peel", icon: "🍌", kind: "throw", speed: [2, 4.5], pitchDeg: 35, gravity: 9.8,
                    maxSlips: Infinity,   // stays down (each person slips once) until the custodian cleans it up
-                   slipStaffSec: 2.5, slipStudentSec: 1.0, slipPlayerSec: 0.8, staffPoints: 150, studentPoints: 30 },
+                   slipStaffSec: 3.1, slipStudentSec: 1.2, slipPlayerSec: 0.8, staffPoints: 150, studentPoints: 30 },
   whoopee:       { label: "Whoopee cushion", icon: "💨", kind: "throw", recoverable: true, trap: true, speed: [3, 8], pitchDeg: 35, gravity: 9.8,
                    noiseRadius: 14, points: 50 },   // goes off when someone steps on it (you too)
   basketball:    { label: "Basketball", icon: "🏀", kind: "throw", recoverable: true, speed: [5, 11], pitchDeg: 30, gravity: 9.8,
                    bounces: [6, 8], restitution: 0.72, noiseRadius: 10, bouncePoints: 5,
-                   hit: { student: 35, staff: 140, studentSec: 1.0, staffSec: 1.8, style: "fall", minSpeed: 2 } },
+                   hit: { student: 35, staff: 140, studentSec: 1.2, staffSec: 2.2, style: "fall", minSpeed: 2 } },
   football:      { label: "Football", icon: "🏈", kind: "throw", recoverable: true, speed: [8, 15], pitchDeg: 26, gravity: 9.8,
                    bounces: [4, 7], restitution: [0.45, 0.85], erratic: 1.3,   // each bounce turns it up to ±1.3 rad, at a random bounciness
                    noiseRadius: 10, bouncePoints: 6,
-                   hit: { student: 35, staff: 140, studentSec: 1.0, staffSec: 1.8, style: "fall", minSpeed: 2 } },
+                   hit: { student: 35, staff: 140, studentSec: 1.2, staffSec: 2.2, style: "fall", minSpeed: 2 } },
   stinkBomb:     { label: "Stink bomb", icon: "🧪", kind: "throw", speed: [4, 9], pitchDeg: 30, gravity: 9.8,   // science labs only
                    points: 60, cloudRadius: 2.3, cloudSec: 10, noiseRadius: 12,
-                   perStudent: 15, perStaff: 60, studentGagSec: 0.8, staffGagSec: 1.4 },   // extra points for everyone who walks through it
+                   perStudent: 15, perStaff: 60, studentGagSec: 1, staffGagSec: 1.8 },   // extra points for everyone who walks through it
   // Science labs: lands as a puddle (or on whoever it hits). The first few people to step in it are stuck for a few
   // seconds: staff can still look around and yell, they just can't move.
   slime:         { label: "Slime", icon: "🟢", kind: "throw", trap: true, speed: [4, 9], pitchDeg: 25, gravity: 9.8,
-                   radius: 0.6, maxSticks: Infinity, stickStaffSec: 4, stickStudentSec: 2.5, stickPlayerSec: 1.5, staffPoints: 120, studentPoints: 30 },
+                   radius: 0.6, maxSticks: Infinity, stickStaffSec: 6, stickStudentSec: 3.5, stickPlayerSec: 2, staffPoints: 120, studentPoints: 30 },
   // Stick it on a staff member's back (get right up behind them; if they're facing you, they catch on). During a passing
   // period the kids crowd round laughing and pen them in until the tardy bell. Stick it on during class and it waits.
   kickMe:        { label: "\"Kick me\" sign", icon: "🦵", kind: "sign", range: 1.4, points: 400, penKids: 9, penPoints: 100 },
@@ -531,7 +532,7 @@ const ITEM_TYPES = {
   // (cover for you), and anyone standing in the spray gets soaked.
   mentos:        { label: "Mentos & soda", icon: "🥤", kind: "throw", speed: [3, 6.5], pitchDeg: 30, gravity: 9.8,
                    fuseSec: 1.2, geyserSec: 4, points: 150, noiseRadius: 18, watchRadius: 14, watchKids: 10, watchSec: 9, perWatcher: 6, sprayRadius: 1.2,
-                   hit: { student: 20, staff: 80, studentSec: 0.6, staffSec: 1.2, style: "flinch" } },
+                   hit: { student: 20, staff: 80, studentSec: 0.8, staffSec: 1.5, style: "flinch" } },
   loveNote:      { label: "Love note", icon: "💌", kind: "note" },   // for the love-note dare: can't be thrown, just delivered
   sprayPaint:    { label: "Spray paint", icon: "🎨", kind: "spray", uses: 3, points: 100, wallRange: 1.7 },   // art rooms only
   masterKey:     { label: "Staff key", icon: "🔑", kind: "key", uses: 3 },
@@ -539,14 +540,14 @@ const ITEM_TYPES = {
   // Push off and roll. Left/right steers a little, but steering scrubs off speed; too slow and you roll to a stop.
   // Jump off (button, E or Space) to skip the crash: the chair rolls on without you and can still flatten someone.
   wheelieChair:  { label: "Wheelie chair", icon: "🪑", kind: "ride", rideSpeed: 9.5, maxRideSec: 3.5, dazeSec: 1.5, leftoverSec: 3,
-                   studentPoints: 40, steerRate: 1.7, steerDrag: 4.5, minSpeed: 3.5, jumpSec: 0.35, emptyFriction: 0.5, emptyStaffPoints: 150, emptyStaffSec: 1.8 },
+                   studentPoints: 40, steerRate: 1.7, steerDrag: 4.5, minSpeed: 3.5, jumpSec: 0.35, emptyFriction: 0.5, emptyStaffPoints: 150, emptyStaffSec: 2.2 },
   // Band room. The trumpet: one big blast and every free staff member heads for where you're standing. Lots of points, some heat.
   trumpet:       { label: "Trumpet", icon: "🎺", kind: "instrument", uses: 2, points: 350, heat: 8 },
   // Band room. The bass drum: rolled along the floor like a bowling ball, it knocks over everyone in its path and keeps going.
   // Loud as it rumbles along (staff turn to look). Pick it back up once it stops.
   bassDrum:      { label: "Bass drum", icon: "🥁", kind: "throw", roll: true, recoverable: true, speed: [4.5, 9], friction: 0.35, radius: 0.75,
                    noiseRadius: 8, rumbleSec: 0.6,
-                   hit: { student: 30, staff: 160, studentSec: 1.3, staffSec: 2.4, style: "fall", minSpeed: 1.2 } },
+                   hit: { student: 30, staff: 160, studentSec: 1.6, staffSec: 3, style: "fall", minSpeed: 1.2 } },
   energyDrink:   { label: "Energy drink", icon: "⚡", kind: "drink" },   // tap to drink: see CFG.energy
   gum:           { label: "Gum", icon: "🍬", kind: "instant", points: 100, line: "You stick gum under the water fountain. Gross. +havoc" },
   // Junk from lockers: takes up a slot until you toss it (select it to drop it). Staff tidy it up like anything else.
