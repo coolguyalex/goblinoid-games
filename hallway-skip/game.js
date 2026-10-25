@@ -1,4 +1,4 @@
-// Hallway Skip — build step 22 prototype.
+// Hallway Skip — build step 23 prototype.
 // Step 1: hallway, joystick, a hall monitor that chases, a crowd that thins, and the bell.
 // Step 2: tap-to-interact and hiding spots: lockers, restrooms, classrooms (teacher and sub boot timers).
 // Step 3: security guard, the three-strike ladder, and the PA announcer.
@@ -21,6 +21,7 @@
 // Step 20: "they found you, run for it!", farther spitballs, slower heat (and a bigger heat bar), a bigger score, survival mode renamed Rebel Run.
 // Step 21: loot by room and rarity (specialty items only from their room; hall passes and staff keys are rare finds), the office always has a pass and a key but its alarm calls everyone.
 // Step 22: the "kick me" sign (kids pen the staff member in until the tardy bell) and Mentos & soda (a geyser kids crowd round to watch).
+// Step 23: best runs saved in the browser (top 3, new high score / longest run badges); restroom: found on the third check in one stay.
 import * as THREE from "three";
 
 // =====================================================================================
@@ -113,7 +114,8 @@ const CFG = {
   hiding: {
     lockerUsesPerPeriod: 3,       // shared by all lockers
     // Restrooms: no timer. When staff walk past one, about half the time they stick their head in to check.
-    restroomCheck: { chance: 0.5, passRange: 3.5, cooldownSec: 25, peekSec: 1.6 },
+    // A check while you're inside is a close call; the third check in one stay, they find you.
+    restroomCheck: { chance: 0.5, passRange: 3.5, cooldownSec: 25, peekSec: 1.6, foundAfter: 3 },
     subsPerDay: [1, 2],           // how many classrooms get a substitute each day (min, max)
     bustPauseSec: 0.9,            // monitor pauses after yanking you out ("I saw you go in there")
     bootGraceSec: 1.2,            // after being booted, you can't be caught for this long
@@ -1174,6 +1176,33 @@ function saveGame() {
     strikes: game.strikes, highAlert: game.highAlert, periodsSkipped: game.periodsSkipped, security: Math.round(game.security), survival: game.survival, dares: game.dares })); } catch (e) { /* storage blocked: fine */ }
 }
 function loadSave() { try { const s = JSON.parse(localStorage.getItem(SAVE_KEY)); return s && s.day ? s : null; } catch (e) { return null; } }
+// ---- best runs, kept in this browser: every finished run, your top 3, and whether you beat your records ----
+const RUNS_KEY = "hallwaySkip.runs.v1";
+function loadRuns() { try { const r = JSON.parse(localStorage.getItem(RUNS_KEY)); return Array.isArray(r) ? r : []; } catch (e) { return []; } }
+function saveRuns(runs) { try { localStorage.setItem(RUNS_KEY, JSON.stringify(runs.slice(-100))); } catch (e) { /* storage blocked: fine */ } }
+const runLength = (r) => `${r.periods} period${r.periods === 1 ? "" : "s"}`;
+const runLine = (r, i, me) => `<li${me ? ' class="me"' : ""}><b>${i + 1}.</b> ${Math.floor(r.score).toLocaleString()} <span>· day ${r.day} · ${runLength(r)}</span></li>`;
+// records a finished run; returns the HTML for the end screen
+function recordRun(ending) {
+  const runs = loadRuns();
+  const best = runs.reduce((m, r) => Math.max(m, r.score), 0), longest = runs.reduce((m, r) => Math.max(m, r.periods), 0);
+  const run = { score: Math.floor(game.score), periods: game.periodsSkipped, day: game.day, period: game.period, ending, at: Date.now() };
+  runs.push(run); saveRuns(runs);
+  const badges = [];
+  if (runs.length === 1) badges.push(`<b class="rec">First run on the board!</b>`);
+  else {
+    if (run.score > best) badges.push(`<b class="rec">🏆 NEW HIGH SCORE!</b> <small>(was ${best.toLocaleString()})</small>`);
+    if (run.periods > longest) badges.push(`<b class="rec">⏱ LONGEST RUN!</b> <small>(was ${longest} period${longest === 1 ? "" : "s"})</small>`);
+    if (!badges.length) badges.push(`<small>Your best: ${best.toLocaleString()} · longest: ${longest} period${longest === 1 ? "" : "s"}</small>`);
+  }
+  const top = [...runs].sort((a, b) => b.score - a.score).slice(0, 3);
+  return `<div class="badges">${badges.join(" ")}</div><ol class="board">${top.map((r, i) => runLine(r, i, r === run)).join("")}</ol>`;
+}
+function renderBestRuns() {
+  const top = loadRuns().sort((a, b) => b.score - a.score).slice(0, 3);
+  $("bestRuns").innerHTML = top.length ? `<div class="bt">Best runs</div><ol class="board">${top.map((r, i) => runLine(r, i, false)).join("")}</ol>` : "";
+}
+
 function clearSave() { try { localStorage.removeItem(SAVE_KEY); } catch (e) { /* fine */ } }
 
 // Kid walks in from the entrance; the hall is full of students already out and about.
@@ -1358,6 +1387,7 @@ function caught(st) {
     $("caughtText").innerHTML = `The ${st.type.name} walks you to the office. ${pick(E.lines)}<br>` +
       (game.survival ? `Your rebel run lasted ${Math.round(game.survivalT)} seconds.<br>` : "") +
       `<b>Score ${Math.floor(game.score)}</b> · Day ${game.day}, period ${game.period} · ${game.periodsSkipped} period${game.periodsSkipped === 1 ? "" : "s"} skipped`;
+    $("caughtBest").innerHTML = recordRun(E.title);
     $("caught").hidden = false;
     return;
   }
@@ -1498,6 +1528,7 @@ document.addEventListener("visibilitychange", () => { if (document.hidden) pause
     $("continueBtn").hidden = false;
     $("startBtn").textContent = "New run";
   }
+  renderBestRuns();
 }
 
 function tryFullscreenLandscape() {
@@ -2102,6 +2133,7 @@ function enterSpot(sp) {
   }
   playBlip([260, 200], 0.07, "triangle", 0.07);
   if (sp.kind === "classroom") dareEvent("enterRoom", { sp });
+  if (sp.kind === "restroom") sp.checks = 0;   // a new stay
   if (sp.kind === "restroom") game.dareOffer = game.dares.length < CFG.dares.max ? makeDareOffer() : null;   // the kid by the sinks
   ui.hide.hidden = false;
   updateHidePanel();
@@ -2162,7 +2194,11 @@ function updateHidePanel() {
   renderLoot(sp);
   const line = sp.kind === "classroom" ? TEACHER_TYPES[sp.teacher].stayLine : sp.T.stayLine;
   let warn = "";
-  if (sp.kind === "restroom" && staff.some((st) => st.state === "check" && st.checkSpot === sp)) warn = "Footsteps outside... someone's coming to check!";
+  if (sp.kind === "restroom") {
+    const C = CFG.hiding.restroomCheck, coming = staff.some((st) => st.state === "check" && st.checkSpot === sp);
+    const left = C.foundAfter - (sp.checks || 0);
+    warn = (coming ? "Footsteps outside... someone's coming to check! " : "") + (!sp.checks ? "" : left <= 1 ? "One more check and they find you." : `${left} more checks and they find you.`);
+  }
   ui.hpTitle.textContent = title;
   ui.hpLine.textContent = line;
   ui.hpWarn.textContent = warn;
@@ -2322,7 +2358,12 @@ function updateCheck(st, dt) {   // returns the walking speed this frame
   st.checkT += dt;
   st.facing = lerpAngle(st.facing, Math.atan2(sp.side * HALLS[sp.h].nx, sp.side * HALLS[sp.h].nz), damp(6, dt));   // looking in
   if (st.checkT < CFG.hiding.restroomCheck.peekSec) return 0;
-  if (player.hidden === sp) {   // found you
+  if (player.hidden === sp && ++sp.checks < CFG.hiding.restroomCheck.foundAfter) {   // a close call: you hold your breath, they move on
+    const left = CFG.hiding.restroomCheck.foundAfter - sp.checks;
+    toast(`The ${T.name} looks in: "Hey, do you kids have a pass?" ...You hold your breath. They move on. (${left} more and they'll find you)`, 3);
+    playBlip([300, 240], 0.08, "triangle", 0.05);
+    st.state = "return"; setReturnPoint(st);
+  } else if (player.hidden === sp) {   // found you
     exitSpot(true, `The ${T.name} pokes their head in: "Hey, do you kids have a pass?"`);
     banner(`THEY FOUND YOU!<small>RUN FOR IT!</small>`, 2.2);
     startChase(st); st.pauseT = CFG.hiding.bustPauseSec + 0.4; bark(st, "check", true);
@@ -3848,6 +3889,9 @@ if (debug) {   // test-only helpers (only with ?debug in the URL)
     nodes() { return NODES.map((n) => ({ id: n.id, x: n.x, z: n.z })); },
     tidyInfo() { return staff.map((s) => ({ key: s.key, state: s.state, obj: s.tidyObj && !s.tidyObj.dead && s.state === "tidy" ? s.tidyObj.id : null, stunT: s.stunT, tidyT: s.tidyT, x: s.x, z: s.z, pauseT: s.pauseT })); },
     rummage() { rummageLocker(); },
+    runs() { return loadRuns(); },
+    forceScore(sc, per) { game.score = sc; game.periodsSkipped = per; },
+    clearRuns() { saveRuns([]); },
     kickMe() { const i = game.hotbar.findIndex((x) => x?.key === "kickMe"); if (i >= 0) stickKickMe(i); },
     penInfo() { return staff.map((s) => ({ key: s.key, kickMe: !!s.kickMe, penned: !!s.penned, x: s.x, z: s.z, facing: s.facing })); },
     gathered() { return crowd.filter((c) => c.mode === "gather").length; },
