@@ -1126,14 +1126,17 @@ function canvasTex(w, h, draw) {
 const kidTex = {};   // made the first time an outfit needs them
 const KID_TEX = {
   // a cylinder's texture starts at the front (u = 0) and wraps around, so the back is the middle of the image
-  jersey: () => canvasTex(256, 128, (g, w, h) => {
-    g.fillStyle = "#c0262d"; g.fillRect(0, 0, w, h);
-    g.fillStyle = "#fff"; g.fillRect(0, 6, w, 8);   // shoulder stripe
-    g.font = "900 64px system-ui, sans-serif"; g.textAlign = "center"; g.textBaseline = "middle";
-    g.fillText("00", w / 2, h * 0.58);                        // back
-    g.font = "900 30px system-ui, sans-serif"; g.fillText("0", 12, h * 0.55); g.fillText("0", w - 12, h * 0.55);   // front, split across the seam
+  // step 60: a green Goblins jersey. "GOBLINS" across the chest (centered on the seam at u = 0 / 1), a big block 0 on the back.
+  jersey: () => canvasTex(512, 128, (g, w, h) => {
+    g.fillStyle = "#1f7a3a"; g.fillRect(0, 0, w, h);
+    g.fillStyle = "#fff"; g.fillRect(0, 4, w, 7); g.fillStyle = "#f2c230"; g.fillRect(0, 11, w, 3);   // shoulder stripes
+    const zero = (cx, top, zw, zh, t) => { g.fillRect(cx - zw / 2, top, zw, t); g.fillRect(cx - zw / 2, top + zh - t, zw, t); g.fillRect(cx - zw / 2, top, t, zh); g.fillRect(cx + zw / 2 - t, top, t, zh); };
+    g.fillStyle = "#f2c230"; zero(w / 2, 24, 64, 92, 20);   // gold outline
+    g.fillStyle = "#fff"; zero(w / 2, 28, 56, 84, 13);      // the 0, squared off like jersey lettering
+    g.font = "900 30px Impact, 'Arial Black', system-ui, sans-serif"; g.textAlign = "center"; g.textBaseline = "middle";
+    for (const cx of [0, w]) { g.lineWidth = 4; g.strokeStyle = "#f2c230"; g.strokeText("GOBLINS", cx, 46); g.fillStyle = "#fff"; g.fillText("GOBLINS", cx, 46); }
   }),
-  jerseySleeve: () => canvasTex(64, 64, (g, w, h) => { g.fillStyle = "#c0262d"; g.fillRect(0, 0, w, h); g.fillStyle = "#fff"; g.fillRect(0, h * 0.55, w, h * 0.15); }),
+  jerseySleeve: () => canvasTex(64, 64, (g, w, h) => { g.fillStyle = "#1f7a3a"; g.fillRect(0, 0, w, h); g.fillStyle = "#fff"; g.fillRect(0, h * 0.55, w, h * 0.12); g.fillStyle = "#f2c230"; g.fillRect(0, h * 0.67, w, h * 0.06); }),
   baja: () => canvasTex(256, 64, (g, w, h) => {   // step 58: the classic black "drug rug", red, yellow and green stripes
     g.fillStyle = "#151515"; g.fillRect(0, 0, w, h);
     for (let x0 = 0; x0 < w; x0 += 64) {
@@ -1222,8 +1225,8 @@ const kmat = (c) => (typeof c === "string" ? new THREE.MeshLambertMaterial({ map
 // Outfits. top/sleeve/pants are a color or a texture name; sleeves: "long", "short" or "none"; pants: "long", "shorts" or "skirt".
 const OUTFITS = {
   punk:      { label: "Punk", top: 0x161616, sleeves: "long", pants: "ripped", legs: "long", shoes: 0x111111, extras: ["vest", "boots", "spikeBand", "lockCollar", "noseRing"], hood: 0x1c1c1c },
-  jock:      { label: "Jock", top: "jersey", belly: 0xc0262d, sleeve: "jerseySleeve", sleeves: "short", pants: 0x8f939a, legs: "long", shoes: 0xf2f2f2, hood: 0x8f939a },
-  goth:      { label: "Goth", top: 0x141414, sleeves: "long", pants: 0x101010, legs: "long", shoes: 0x080808, extras: ["boots", "chains"], hood: 0x141414 },
+  jock:      { label: "Jock", top: "jersey", belly: 0x1f7a3a, sleeve: "jerseySleeve", sleeves: "short", pants: 0x8f939a, legs: "long", shoes: 0xf2f2f2, hood: 0x1f7a3a },
+  goth:      { label: "Goth", top: 0x141414, sleeves: "long", pants: 0x101010, legs: "long", shoes: 0x080808, extras: ["boots", "coat", "walletChain", "crossChoker"], hood: 0x141414 },
   nerd:      { label: "Nerd", top: 0xf4f4f4, sleeves: "long", pants: 0xc8b07a, legs: "long", shoes: 0x5a3a22, extras: ["buttons", "suspenders", "glasses"], hood: 0x6b7a8f },
   burnout:   { label: "Burnout", top: "baja", sleeves: "long", pants: 0x4a6a96, legs: "long", baggy: 1.35, shoes: 0x444444, extras: ["hoodBack", "pocket"], hood: "bajaHood" },
   fabulous:  { label: "Fabulous", top: "sparkle", sleeves: "long", pants: "trackPants", legs: "long", shoes: 0xffffff, extras: ["zip"], hood: "sparkle" },
@@ -1330,11 +1333,28 @@ function buildKid(look) {
       }
     }
   }
-  if (ex.includes("chains")) {   // two loops of chain from the front belt loop around to the back pocket
-    const cm = new THREE.MeshLambertMaterial({ color: 0xc8ccd2, flatShading: true });
-    for (const [r, y] of [[0.16, hipY - 0.02], [0.22, hipY - 0.05]]) {
-      const c = mesh(new THREE.TorusGeometry(r * W, 0.012, 4, 14, Math.PI), cm, hip * 0.98, y, 0); c.rotation.set(0, Math.PI / 2, Math.PI);
+  // step 60: goth. A long black coat open at the front, a wallet chain drooping from a front belt loop to the back pocket, and a choker with a silver cross.
+  if (ex.includes("coat")) {
+    const top = shoulderY + 0.01, bot = hipY - legLen * 0.62, gap = 0.8;
+    const coatM = new THREE.MeshLambertMaterial({ color: 0x1c1a22, flatShading: true }), liningM = new THREE.MeshLambertMaterial({ color: 0x5a0f1e, flatShading: true, side: THREE.BackSide });
+    const coatGeo = new THREE.CylinderGeometry(shoulder * 1.1, hip * 1.75, top - bot, 16, 1, true, gap / 2, Math.PI * 2 - gap);
+    for (const m of [coatM, liningM]) mesh(coatGeo, m, 0, (top + bot) / 2, -0.01).scale.z = 0.78;   // black outside, blood-red lining inside
+    for (const sx of [-1, 1]) { const lap = mesh(new THREE.BoxGeometry(0.07, 0.2, 0.015), coatM, sx * shoulder * 0.42, shoulderY - 0.09, surfZ(shoulderY - 0.09, sx * shoulder * 0.42, 1.1) + 0.01); lap.rotation.z = sx * 0.35; }   // lapels
+    for (const sx of [-1, 1]) for (let k = 0; k < 3; k++) mesh(new THREE.BoxGeometry(0.018, 0.018, 0.01), lambert(0x9aa0a8), sx * shoulder * 0.62, waistY + 0.1 - k * 0.1, surfZ(waistY + 0.1 - k * 0.1, sx * shoulder * 0.62, 1.12) + 0.01);   // silver buttons
+  }
+  if (ex.includes("walletChain")) {   // a loop of chain drooping across the front of the hip, from a belt loop to the pocket
+    const cm = new THREE.MeshLambertMaterial({ color: 0xc8ccd2, flatShading: true }), N = 16, pts = [];
+    for (let i = 0; i <= N; i++) { const t = i / N, a = -0.25 + t * 1.25, r = hip * 1.06; pts.push(new THREE.Vector3(Math.sin(a) * r, hipY - 0.01 - 0.16 * Math.sin(Math.PI * t), Math.cos(a) * r * depth + 0.03)); }
+    for (let i = 0; i < N; i++) {
+      const p0 = pts[i], p1 = pts[i + 1], link = mesh(new THREE.TorusGeometry(0.016, 0.005, 4, 8), cm, (p0.x + p1.x) / 2, (p0.y + p1.y) / 2, (p0.z + p1.z) / 2);
+      link.lookAt(link.position.clone().add(p1.clone().sub(p0))); link.rotateY(Math.PI / 2); if (i % 2) link.rotateX(Math.PI / 2);   // alternating links, like a real chain
+      link.scale.set(1.5, 1, 1);
     }
+  }
+  if (ex.includes("crossChoker")) {
+    const ny = shoulderY + 0.06; const c = mesh(new THREE.TorusGeometry(0.07, 0.012, 4, 14), lambert(0x111111), 0, ny, 0); c.rotation.x = Math.PI / 2;
+    const sm = lambert(0xd8dce2), z = 0.07 + 0.014;
+    mesh(new THREE.BoxGeometry(0.018, 0.09, 0.012), sm, 0, ny - 0.06, z); mesh(new THREE.BoxGeometry(0.055, 0.017, 0.012), sm, 0, ny - 0.04, z);   // the cross
   }
   let hoodBack = null;
   if (ex.includes("hoodBack")) {   // a hoodie's hood, down: a folded pouch lying on the upper back

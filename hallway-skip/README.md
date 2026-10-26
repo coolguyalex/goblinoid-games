@@ -66,6 +66,7 @@ Built from `Hallway_Skip_Game_Spec` v0.2. Done so far:
 - **Step 57:** a much shorter How to play: the goal, a controls table (only your device's controls), and a few one-line tips on hiding, scoring and what to watch out for. Item details are left for players to discover.
 - **Step 58:** the burnout's Baja is now the classic black "drug rug" with red, yellow and green stripes. A new hood that frames the face and drapes onto the shoulders (it used to be a plain ball that hid the face). A punk who looks punk: black long sleeves, a patched denim vest (Ⓐ on the back, an upside-down pentagram, NO FUTURE, safety pins), a spiked collar with a padlock, studded wristbands, a nose ring, ripped jeans and boots. The plunger sticks cup-down on a staff member's head with the handle up at a crooked angle (it was upside down), sits on top of caps, and hitting someone twice no longer leaves two plungers.
 - **Step 59:** stats roll on a wider bell curve: centered on 10 with a standard deviation of 4, so about 1 stat in 5 is 6 or lower, 1 in 5 is 14 or higher, stats run 1–20 and 1s and 20s turn up (the old roll gave 18+ under 1% of the time).
+- **Step 60:** the goth gets a long black coat with a blood-red lining and silver buttons, a wallet chain that actually drapes (a loop of links hanging across the hip; it used to be two stiff half circles), and a black choker with a silver cross. The jock's jersey is now Goblins green: GOBLINS across the chest and a big squared-off 0 on the back, outlined in gold.
 
 ## Before turning on real ads
 
