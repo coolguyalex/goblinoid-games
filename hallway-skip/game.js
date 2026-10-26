@@ -1137,19 +1137,19 @@ const KID_TEX = {
     for (const cx of [0, w]) { g.lineWidth = 4; g.strokeStyle = "#f2c230"; g.strokeText("GOBLINS", cx, 46); g.fillStyle = "#fff"; g.fillText("GOBLINS", cx, 46); }
   }),
   jerseySleeve: () => canvasTex(64, 64, (g, w, h) => { g.fillStyle = "#1f7a3a"; g.fillRect(0, 0, w, h); g.fillStyle = "#fff"; g.fillRect(0, h * 0.55, w, h * 0.12); g.fillStyle = "#f2c230"; g.fillRect(0, h * 0.67, w, h * 0.06); }),
-  baja: () => canvasTex(256, 64, (g, w, h) => {   // step 58: the classic black "drug rug", red, yellow and green stripes
-    g.fillStyle = "#151515"; g.fillRect(0, 0, w, h);
-    for (let x0 = 0; x0 < w; x0 += 64) {
-      let x = x0 + 14;
-      for (const [c, sw] of [["#f2ead6", 1.5], ["#151515", 2], ["#c8282a", 4], ["#e8c22c", 3], ["#2f8f3a", 5], ["#e8c22c", 3], ["#c8282a", 4], ["#151515", 2], ["#f2ead6", 1.5]]) { g.fillStyle = c; g.fillRect(x, 0, sw, h); x += sw; }
-    }
-    g.fillStyle = "rgba(255,255,255,.07)"; for (let y = 0; y < h; y += 3) g.fillRect(0, y, w, 1);   // the weave
+  // step 61: the Baja, after a real one. Dense black, red, yellow and green stripes with a woven chevron look. Up and down on the body,
+  // across on the chest panel, the pocket, the sleeves and the hood, which gives it those squared-off blocks.
+  baja: () => canvasTex(512, 128, (g, w, h) => {
+    bajaStripes(g, 0, 0, w, h, "v");
+    const pw = w * 0.13;
+    for (const x0 of [0, w - pw]) bajaStripes(g, x0, 0, pw, h * 0.42, "h");   // the chest panel (the front is u = 0 and 1)
+    g.fillStyle = "#111"; g.fillRect(pw - 2, 0, 4, h); g.fillRect(w - pw - 2, 0, 4, h);   // seams around the panel
+    g.fillStyle = "#3d4a3e"; g.beginPath(); g.moveTo(0, 0); g.lineTo(16, 0); g.lineTo(0, 30); g.fill(); g.beginPath(); g.moveTo(w, 0); g.lineTo(w - 16, 0); g.lineTo(w, 30); g.fill();   // V-neck
   }),
-  bajaHood: () => canvasTex(128, 64, (g, w, h) => {   // the hood: black, with the stripes running along the face opening (u = 0 and 1)
-    g.fillStyle = "#151515"; g.fillRect(0, 0, w, h);
-    g.fillStyle = "rgba(255,255,255,.07)"; for (let y = 0; y < h; y += 3) g.fillRect(0, y, w, 1);
-    for (const [x0, dir] of [[0, 1], [w, -1]]) { let x = x0; for (const [c, sw] of [["#f2ead6", 1.5], ["#c8282a", 3], ["#e8c22c", 2.5], ["#2f8f3a", 3.5]]) { g.fillStyle = c; g.fillRect(dir > 0 ? x : x - sw, 0, sw, h); x += dir * sw; } }
-  }),
+  bajaBelly: () => canvasTex(512, 64, (g, w, h) => bajaStripes(g, 0, 0, w, h, "v")),
+  bajaPocket: () => canvasTex(128, 64, (g, w, h) => { bajaStripes(g, 0, 0, w, h, "h"); g.strokeStyle = "#111"; g.lineWidth = 4; g.strokeRect(2, 2, w - 4, h - 4); }),
+  bajaSleeve: () => canvasTex(64, 128, (g, w, h) => bajaStripes(g, 0, 0, w, h, "h")),   // rings around the arm
+  bajaHood: () => canvasTex(128, 96, (g, w, h) => bajaStripes(g, 0, 0, w, h, "h")),     // rings around the head
   sparkle: () => canvasTex(128, 128, (g, w, h) => {
     g.fillStyle = "#ff5fb0"; g.fillRect(0, 0, w, h);
     for (let i = 0; i < 70; i++) { g.fillStyle = Math.random() < 0.5 ? "#fff" : "#ffd6ef"; const s = Math.random() < 0.2 ? 3 : 2; g.fillRect(Math.random() * w, Math.random() * h, s, s); }
@@ -1220,6 +1220,23 @@ const KID_TEX = {
   }),
   bandPants: () => canvasTex(64, 64, (g, w, h) => { g.fillStyle = "#1c2a5a"; g.fillRect(0, 0, w, h); g.fillStyle = "#e0b43c"; g.fillRect(w * 0.22, 0, 5, h); g.fillRect(w * 0.72, 0, 5, h); }),
 };
+// Baja stripes: black, red, yellow, green, over and over, each with little woven chevrons. dir "v" runs them up and down, "h" across.
+function bajaStripes(g, x0, y0, w, h, dir, sw = 9) {
+  const cols = ["#151515", "#c22a2e", "#e2b82c", "#1f9a4e"];
+  g.save(); g.beginPath(); g.rect(x0, y0, w, h); g.clip();
+  const span = dir === "v" ? w : h;
+  for (let i = 0; i * sw < span; i++) {
+    const a = i * sw; g.fillStyle = cols[i % 4];
+    if (dir === "v") g.fillRect(x0 + a, y0, sw, h); else g.fillRect(x0, y0 + a, w, sw);
+    g.strokeStyle = i % 4 ? "rgba(0,0,0,.4)" : "rgba(255,255,255,.12)"; g.lineWidth = 1; g.beginPath();
+    for (let b = 0; b < (dir === "v" ? h : w); b += 4) {
+      if (dir === "v") { g.moveTo(x0 + a + 1, y0 + b); g.lineTo(x0 + a + sw / 2, y0 + b + 2.5); g.lineTo(x0 + a + sw - 1, y0 + b); }
+      else { g.moveTo(x0 + b, y0 + a + 1); g.lineTo(x0 + b + 2.5, y0 + a + sw / 2); g.lineTo(x0 + b, y0 + a + sw - 1); }
+    }
+    g.stroke();
+  }
+  g.restore();
+}
 const ktex = (k) => (kidTex[k] ??= (([name, arg]) => KID_TEX[name](arg && Number(arg)))(k.split(":")));   // "ripped:15843453" passes the skin color
 const kmat = (c) => (typeof c === "string" ? new THREE.MeshLambertMaterial({ map: ktex(c), flatShading: true }) : lambert(c));
 // Outfits. top/sleeve/pants are a color or a texture name; sleeves: "long", "short" or "none"; pants: "long", "shorts" or "skirt".
@@ -1228,7 +1245,7 @@ const OUTFITS = {
   jock:      { label: "Jock", top: "jersey", belly: 0x1f7a3a, sleeve: "jerseySleeve", sleeves: "short", pants: 0x8f939a, legs: "long", shoes: 0xf2f2f2, hood: 0x1f7a3a },
   goth:      { label: "Goth", top: 0x141414, sleeves: "long", pants: 0x101010, legs: "long", shoes: 0x080808, extras: ["boots", "coat", "walletChain", "crossChoker"], hood: 0x141414 },
   nerd:      { label: "Nerd", top: 0xf4f4f4, sleeves: "long", pants: 0xc8b07a, legs: "long", shoes: 0x5a3a22, extras: ["buttons", "suspenders", "glasses"], hood: 0x6b7a8f },
-  burnout:   { label: "Burnout", top: "baja", sleeves: "long", pants: 0x4a6a96, legs: "long", baggy: 1.35, shoes: 0x444444, extras: ["hoodBack", "pocket"], hood: "bajaHood" },
+  burnout:   { label: "Burnout", top: "baja", belly: "bajaBelly", sleeve: "bajaSleeve", sleeves: "long", pants: 0x4a6a96, legs: "long", baggy: 1.35, shoes: 0x444444, extras: ["hoodBack", "pocket"], hood: "bajaHood" },
   fabulous:  { label: "Fabulous", top: "sparkle", sleeves: "long", pants: "trackPants", legs: "long", shoes: 0xffffff, extras: ["zip"], hood: "sparkle" },
   cheer:     { label: "Cheerleader", top: "cheerTop", belly: 0xc0262d, sleeves: "none", pants: "skirt", legs: "skirt", shoes: 0xffffff, extras: ["socks"], hood: 0xc0262d },
   // step 50
@@ -1259,7 +1276,7 @@ function buildKid(look) {
   const depth = 0.62, headR = 0.19, headY = shoulderY + 0.07 + headR;
   // torso: chest (waist up to shoulders) and belly (hips up to waist), flattened front to back
   const chest = mesh(new THREE.CylinderGeometry(shoulder, waist, shoulderY - waistY, 10), topM, 0, (shoulderY + waistY) / 2, 0); chest.scale.z = depth;
-  const belly = mesh(new THREE.CylinderGeometry(waist, hip, waistY - hipY + 0.04, 10), O.belly != null ? lambert(O.belly) : topM, 0, (waistY + hipY) / 2 - 0.02, 0); belly.scale.z = depth;
+  const belly = mesh(new THREE.CylinderGeometry(waist, hip, waistY - hipY + 0.04, 10), O.belly != null ? kmat(O.belly) : topM, 0, (waistY + hipY) / 2 - 0.02, 0); belly.scale.z = depth;
   const shoulderCap = mesh(new THREE.SphereGeometry(shoulder, 10, 4, 0, Math.PI * 2, 0, Math.PI / 2), topM, 0, shoulderY - 0.005, 0); shoulderCap.scale.set(1, 0.32, depth);
   const pelvis = mesh(new THREE.CylinderGeometry(hip, hip * 0.92, 0.12, 10), O.legs === "skirt" ? skinM : pantsM, 0, hipY - 0.04, 0); pelvis.scale.z = depth;
   mesh(new THREE.CylinderGeometry(0.06, 0.07, 0.1, 6), skinM, 0, shoulderY + 0.04, 0);   // neck
@@ -1358,11 +1375,11 @@ function buildKid(look) {
   }
   let hoodBack = null;
   if (ex.includes("hoodBack")) {   // a hoodie's hood, down: a folded pouch lying on the upper back
-    const hm = new THREE.MeshLambertMaterial({ map: ktex("bajaHood"), side: THREE.DoubleSide });
-    hoodBack = mesh(new THREE.SphereGeometry(0.15, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2), hm, 0, shoulderY - 0.07, -shoulder * depth + 0.01);
-    hoodBack.rotation.set(-Math.PI / 2 + 0.2, -Math.PI / 2, 0); hoodBack.scale.set(1.0, 0.42, 1.2);   // (turned so the striped seam is underneath)   // a flat dome lying against the back
+    // step 61: folded flat against the upper back, stripes running across (a round shape turned them into a bullseye)
+    hoodBack = mesh(new THREE.BoxGeometry(shoulder * 1.35, 0.17, 0.05), kmat("bajaPocket"), 0, shoulderY - 0.06, -surfZ(shoulderY - 0.06, 0) - 0.02);
+    hoodBack.rotation.x = 0.18;
   }
-  if (ex.includes("pocket")) mesh(new THREE.BoxGeometry(waist * 1.2, 0.1, 0.02), kmat("baja"), 0, waistY - 0.02, frontZ(waist) + 0.005);
+  if (ex.includes("pocket")) mesh(new THREE.BoxGeometry(waist * 1.25, 0.17, 0.025), kmat("bajaPocket"), 0, waistY - 0.03, frontZ(waist) + 0.008);   // the kangaroo pocket
   // step 50
   if (ex.includes("collar")) for (const sx of [-1, 1]) { const c = mesh(new THREE.BoxGeometry(0.08, 0.025, 0.06), topM, sx * 0.05, shoulderY + 0.01, frontZ(shoulder) * 0.55); c.rotation.set(0.5, 0, sx * 0.35); }
   if (ex.includes("sweater")) {   // a sweater tied over the shoulders, sleeves knotted in front
