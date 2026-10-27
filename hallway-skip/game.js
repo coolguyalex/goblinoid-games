@@ -254,33 +254,27 @@ const CFG = {
   },
 
   // Short-term heat, 0-100: "they know it's me". Like a GTA wanted level.
+  // Step 74: one heat level, shown as 0-5 stars (like a wanted level). It only goes up when staff SEE you do
+  // something. Each star adds pressure; it cools off when nobody's on to you, drops some at each bell, and resets overnight.
   heat: {
-    seenHavocMult: 0.15,          // seen doing havoc: heat += the points it earned * this...  (step 20: was 0.25)
-    seenHavocMax: 15,             // ...but no more than this per event (was 25)
-    seenRunning: 8,               // a chase starts (you were seen running away) (was 12)
-    roomCall: 10,                 // a teacher calls security on you (was 15)
-    bellDrop: 0.6,                // each bell takes away this fraction (steep, per the spec)
-    hiddenCoolPerSec: 1.5,        // cooling while hidden, to reward patience (was 1.0)
-    calmCoolPerSec: 0.3,          // slow cooling any time nobody's chasing, searching or squinting at you
-    maxRisePerSec: 30,            // heat can't climb faster than this, so one mistake can't blow past every threshold at once
-    passingCatchAt: 50,           // at or above this, staff can detain you during passing periods (PA announces it)
-    shooHeat: 10,                 // caught in a passing period below that: no strike, just shooed to class (and a bit of heat)
-    effect: { speed: 0.25, vision: 0.2, notice: 0.5 },   // at 100 heat: staff +25% speed, +20% vision range, +50% notice
+    stars: [12, 30, 50, 70, 90],  // heat (0-100) for 1..5 stars
+    seenHavocMult: 0.25,          // seen doing havoc: heat += the points it earned * this...
+    seenHavocMax: 20,             // ...but no more than this per event...
+    seenLoud: 5,                  // ...plus this if it was loud
+    seenRunning: 10,              // a chase starts (you were seen running away)
+    roomCall: 12,                 // a teacher calls security on you
+    bellDrop: 0.4,                // each bell takes away this fraction
+    hiddenCoolPerSec: 1.5,        // cooling while hidden, to reward patience
+    calmCoolPerSec: 0.4,          // slow cooling any time nobody's chasing, searching or squinting at you
+    maxRisePerSec: 30,            // heat can't climb faster than this, so one mistake can't blow past every star at once
+    shooHeat: 12,                 // caught in a passing period at 0 stars: no strike, just shooed to class (and a star)
+    vision: [0.72, 0.8, 0.9, 1, 1.12, 1.25],   // staff vision cones (width and reach) at 0..5 stars; today's size at 3
+    noticePerStar: 0.08,          // and they notice you this much faster per star
+    radioEverySec: 10,            // at 5 stars: this often, the two nearest staff are radioed where you are
+    extraLeaveSec: 6,             // extra staff (from stars) head home this long after your heat drops below their star
   },
-  // Persistent security level, 0-100: "they know something happened". Drops only between days.
-  security: {
-    loudUnseen: 3,                // loud havoc nobody saw
-    loudSeen: 10,                 // loud havoc someone saw
-    quietSeen: 2,                 // quiet havoc someone saw
-    dayDecay: 0.4,                // overnight it drops by this fraction
-    effect: { speed: 0.15, vision: 0.15, notice: 0.3 },   // at 100
-    extraGuardAt: 50,             // at or above this, one extra guard is on duty...
-    secondGuardAt: 100,           // ...and maxed out, two
-    alarmSeen: 100, alarmUnseen: 30,   // pulling the fire alarm: maxed if anyone saw you, a big jump if not
-    flood: 20,                    // flooding a bathroom
-  },
-  // Survival mode: anything that maxes your heat. Staff stay on high alert, heat never drops, more staff keep
-  // arriving, and you score double until you're caught. Getting caught ends the run.
+  // Rebel run (survival mode): the fire alarm. On top of 5 stars: staff stay on high alert, heat never drops, more
+  // staff keep arriving, and you score double until you're caught. Getting caught ends the run.
   survival: {
     scoreMult: 2,
     staffEverySec: 8,             // another staff member shows up this often...
@@ -295,7 +289,7 @@ const CFG = {
     stunSec: 3.5,                 // every staff member is stunned (hands over ears) this long
     items: 8,                     // items scattered around the halls; they don't vanish until picked up
   },
-  flood: { points: 400, heat: 45, noiseRadius: 16 },
+  flood: { points: 400, noiseRadius: 16 },
   dares: { max: 3, recentAvoid: 6 },   // dares you can hold at once; don't re-offer the last few you finished   // flooding a bathroom: points, heat, and that bathroom is closed for the day
 
   // Friends in the crowd raise a hand during passing periods: tap their bubble.
@@ -752,7 +746,7 @@ const LAYOUT = {
   hideLockers: [ { h: 0, t: 4 }, { h: 0, t: 25 }, { h: 1, t: 13 }, { h: 2, t: 4 }, { h: 3, t: 27 }, { h: 4, t: 13 }, { h: 5, t: 4 } ],
   restrooms: [ { h: 2, t: 12 }, { h: 5, t: 12 } ],
   closets: [ { h: 1, t: 4 } ],   // the custodian's closet (one per floor)
-  fireAlarms: [ { h: 6, t: 14.5, side: -1 }, { h: 1, t: 13.5 }, { h: 3, t: 24.5 } ],   // side defaults to the classroom wall
+  fireAlarms: [ { h: 6, t: 14.5, side: -1 }, { h: 1, t: 13.5 } ],   // step 74: two per floor (the one by the entrance is gone)   // side defaults to the classroom wall
   stairs: [ { h: 0, t: 1.9 }, { h: 3, t: 1.9 } ],   // stairwell doors (northwest and southeast corners), same spot on both floors
   // The second floor: same footprint (it's the same building), its own rooms and stuff. Hall numbers here are per floor (0-6).
   floor2: {
@@ -2068,7 +2062,7 @@ function readInput() {
 // =====================================================================================
 const game = { state: "title", day: 1, period: 1, phase: "passing", phaseT: 0, score: 0, time: 0,
   strikes: 0, highAlert: false, periodScore: 0, periodsSkipped: 0, dayPeriodsSkipped: 0, sceneT: 0, sceneEnd: null,
-  lockerUses: 0, pendingOffice: false, hotbar: [], aim: null, havocCount: {}, heat: 0, heatPending: 0, security: 0, survival: false, survivalT: 0, nextArrivalT: 0, nextRadioT: 0, alarmT: 0, alarmPulled: false,
+  lockerUses: 0, pendingOffice: false, hotbar: [], aim: null, havocCount: {}, heat: 0, heatPending: 0, stars: 0, survival: false, survivalT: 0, nextArrivalT: 0, nextRadioT: 0, alarmT: 0, alarmPulled: false,
   unseenT: 0, nearMissT: 0, passShield: false, nextPlaneT: 0, nerveAcc: 0, dares: [], dareOffer: null, daresDone: [], chasedThisSkip: false, blackoutT: 0, breakerUsed: false };
 let tut = null;   // step 72: the tutorial, while it's running
 const cam = { yaw: 0 };
@@ -2090,7 +2084,7 @@ function alertMult(k) { return game.highAlert ? CFG.strikes.alert[k] : 1; }
 function staffMult(k) {
   const day = { speed: CFG.days.staffSpeedPerDay, vision: CFG.days.staffVisionPerDay, notice: CFG.days.staffNoticePerDay }[k];
   const stat = k === "vision" ? 1 - CFG.stats.stealth.vision * statMod("stealth") : k === "notice" ? 1 - CFG.stats.stealth.notice * statMod("stealth") : 1;
-  return stat * alertMult(k) * dayMult(day) * (1 + CFG.heat.effect[k] * game.heat / 100) * (1 + CFG.security.effect[k] * game.security / 100)
+  return stat * alertMult(k) * dayMult(day) * (k === "vision" ? starVision() : k === "notice" ? 1 + CFG.heat.noticePerStar * game.stars : 1)
     * (k === "vision" && game.blackoutT > 0 ? CFG.breaker.visionMult : 1);
 }
 const periodsToday = () => CFG.periodsPerDay;
@@ -2105,7 +2099,7 @@ const SAVE_KEY = "hallwaySkip.save.v1";
 function saveGame() {
   if (tut) return;   // step 72: the tutorial isn't a run
   try { localStorage.setItem(SAVE_KEY, JSON.stringify({ day: game.day, period: game.period, score: Math.floor(game.score),
-    strikes: game.strikes, highAlert: game.highAlert, periodsSkipped: game.periodsSkipped, security: Math.round(game.security), survival: game.survival, dares: game.dares, tally: game.tally })); } catch (e) { /* storage blocked: fine */ }
+    strikes: game.strikes, highAlert: game.highAlert, periodsSkipped: game.periodsSkipped, survival: game.survival, dares: game.dares, tally: game.tally })); } catch (e) { /* storage blocked: fine */ }
 }
 function loadSave() { try { const s = JSON.parse(localStorage.getItem(SAVE_KEY)); return s && s.day ? s : null; } catch (e) { return null; } }
 // ---- step 52: run stats. A tally of everything you did this run, saved with the run. At the end, each stat is compared
@@ -2290,9 +2284,9 @@ function resetGame(save = null) {
   game.day = save?.day ?? 1; game.period = save?.period ?? 1; game.score = save?.score ?? 0; game.time = 0;
   game.strikes = save?.strikes ?? 0; game.highAlert = save?.highAlert ?? false;
   game.periodScore = 0; game.periodsSkipped = save?.periodsSkipped ?? 0; game.dayPeriodsSkipped = 0;
-  game.security = save?.security ?? 0; game.heat = game.heatPending = 0;
+  game.heat = game.heatPending = 0; game.stars = 0;
   game.survival = !!save?.survival; game.survivalT = 0; game.alarmT = 0;
-  if (game.survival) { game.heat = 100; game.highAlert = true; }   // a saved run in survival mode stays in it
+  if (game.survival) { game.heat = 100; game.stars = 5; game.highAlert = true; }   // a saved run in survival mode stays in it
   game.unseenT = 0; game.nearMissT = 0; game.passShield = false;
   game.dares = (save?.dares ?? []).filter((m) => DARES[m.id]); game.dareOffer = null; game.daresDone = [];
   game.tally = { ...(save?.tally ?? {}) }; game.chaseOn = false; game.lastPX = null;
@@ -2329,9 +2323,8 @@ function startPassing(first) {
   }
   // staff for this period (the within-day curve); they stay on for the rest of the day
   for (const [key, table, line] of [["hallMonitor", CFG.monitorsPerPeriod], ["securityGuard", CFG.guardsPerPeriod, "guardOnDuty"], ["hallTeacher", CFG.teachersPerPeriod, "teacherOut"], ["custodian", CFG.custodiansPerPeriod]]) {
-    let have = staff.filter((st) => st.key === key).length;
-    const S = CFG.security, extra = key !== "securityGuard" ? 0 : (game.security >= S.extraGuardAt ? 1 : 0) + (game.security >= S.secondGuardAt ? 1 : 0);
-    const want = perPeriod(table) + extra;
+    let have = staff.filter((st) => st.key === key && !st.wanted).length;   // (extra staff from your heat don't count)
+    const want = perPeriod(table);
     if (have < want && line && game.state === "playing") pa(line);
     while (have < want) { spawnStaff(key, pickStaffPlace(key)); have++; }
   }
@@ -2376,15 +2369,12 @@ function dayOver() {
   $("dayStats").innerHTML = `${game.dayPeriodsSkipped} periods skipped today · +${D.dayBonus} day bonus<br><b>Score ${Math.floor(game.score)}</b> · Strikes ${game.strikes}/${CFG.strikes.max}<br><small>Tomorrow's lunch: ${pick(LUNCHES)}</small>`;
   const pass = Math.max(D.minPassingSec, CFG.passingSec + D.passingSecPerDay * (next - 1));
   const skip = Math.min(D.maxSkippingSec, CFG.skippingSec + D.skippingSecPerDay * (next - 1));
-  const S = CFG.security, before = Math.round(game.security);
-  game.security *= 1 - S.dayDecay;
   $("dayNext").innerHTML = (game.survival ? `<b class="warn">You're still on a REBEL RUN. They'll be waiting for you tomorrow.</b> ` : "") +
-    `Day ${next}: staff are faster and sharper. Passing ${pass}s, skipping ${skip}s. School alert ${before}% → ${Math.round(game.security)}% overnight` +
-    (game.security >= S.extraGuardAt ? ` (${game.security >= S.secondGuardAt ? "two extra guards" : "an extra guard"} on duty).` : ".");
+    `Day ${next}: staff are faster and sharper. Passing ${pass}s, skipping ${skip}s.` + (game.survival ? "" : " Your heat cools off overnight.");
   $("dayPassBtn").hidden = !Ads.canRewarded("fakePass") || game.passShield;
   $("dayEnd").hidden = false;
   game.day = next; game.period = 1; game.highAlert = game.survival; game.dayPeriodsSkipped = 0;
-  if (!game.survival) game.heat = game.heatPending = 0;
+  if (!game.survival) { game.heat = game.heatPending = 0; game.stars = 0; }
   saveGame();
 }
 function startNextDay() {
@@ -2419,7 +2409,7 @@ function caught(st) {
   game.catcher = st;
   hopOff(true);
   if (player.ride) endRide(false);
-  if (game.phase === "passing" && game.heat < CFG.heat.passingCatchAt && !game.survival) { shoo(st); return; }
+  if (game.phase === "passing" && game.stars < 1 && !game.survival) { shoo(st); return; }
   game.unseenT = 0;
   if (game.passShield) {   // the fake pass: one free get-out
     game.passShield = false; tally("passUsed");
@@ -2435,7 +2425,7 @@ function caught(st) {
     clearSave(); stopAlarm();
     pa("runOver");
     // how it ends depends on how hot you were
-    const E = game.survival || game.heat >= 100 ? RUN_ENDINGS.maxed : game.heat >= CFG.heat.passingCatchAt ? RUN_ENDINGS.high : RUN_ENDINGS.normal;
+    const E = game.survival || game.stars >= 5 ? RUN_ENDINGS.maxed : game.stars >= 3 ? RUN_ENDINGS.high : RUN_ENDINGS.normal;
     $("caughtTitle").textContent = E.title;
     $("caughtText").innerHTML = `The ${st.type.name} walks you to the office. ${pick(E.lines)}<br>` +
       (game.survival ? `Your rebel run lasted ${Math.round(game.survivalT)} seconds.<br>` : "") +
@@ -2470,9 +2460,9 @@ function caught(st) {
   game.pendingOffice = office;
 }
 
-// Caught during a passing period while heat is low: no strike, just "get to class!" and a little heat.
+// Caught during a passing period at 0 stars: no strike, just "get to class!" and a little heat.
 function shoo(st, line = null) {
-  toast(line ?? `The ${st.type.name}: "Get to class!" (No strike: heat is low during passing.)`, 2.6);
+  toast(line ?? `The ${st.type.name}: "Get to class!" (No strike: you had no heat.)`, 2.6);
   playBlip([520, 390], 0.1, "triangle", 0.07);
   if (!line) addHeat(CFG.heat.shooHeat);
   for (const o of staff) {
@@ -2643,7 +2633,7 @@ try { const c = JSON.parse(localStorage.getItem(CHAR_KEY)); if (c?.stats) Object
 function saveCharacter() { try { localStorage.setItem(CHAR_KEY, JSON.stringify(character)); } catch (e) { /* fine */ } }
 function statMod(k) { return (clamp(character.stats[k] ?? 10, 0, 20) - 10) / 10; }
 function speedMult() { return 1 + CFG.stats.speed.move * statMod("speed"); }
-function coneHalf(T) { return ((T.visionHalfAngleDeg * Math.PI) / 180) * (1 - CFG.stats.stealth.cone * statMod("stealth")); }
+function coneHalf(T) { return ((T.visionHalfAngleDeg * Math.PI) / 180) * (1 - CFG.stats.stealth.cone * statMod("stealth")) * starVision(); }
 // put your kid (from your look) into the game
 function applyLook() {
   if (player.kid) { player.mesh.remove(player.kid); disposeTree(player.kid); }
@@ -3143,6 +3133,7 @@ function canSeePlayer(st, rangeMult, needCone) {
 // suspicion builds faster up close, slower in a crowd and during passing periods
 function noticeRate(st, d, cover) {
   const D = CFG.detection, T = st.type;
+  if (game.phase === "passing" && game.stars < 1 && !game.survival) return 0;   // step 74: at 0 stars you're just another kid in the crowd
   const closeness = Math.max(0, 1 - d / (T.visionRange * staffMult("vision")));
   let rate = D.suspicionRate * T.notice * staffMult("notice") * (D.farRateFrac + (1 - D.farRateFrac) * closeness);
   rate /= 1 + cover * CFG.crowd.coverPerStudent;
@@ -3493,12 +3484,11 @@ function updateHud() {
   const label = `DAY ${game.day} · PERIOD ${game.period} · ${game.phase === "passing" ? "PASSING" : "SKIPPING"} · ${floorOf(player.x) ? "2F" : "1F"}`;
   const label2 = game.survival ? label.replace(/ · (PASSING|SKIPPING)$/, " · REBEL RUN") : label;
   const multTxt = [streakMult() > 1 ? `STREAK ×${streakMult()}` : "", game.nearMissT > 0 ? "NEAR MISS ×2" : "", game.survival ? `REBEL RUN ×${CFG.survival.scoreMult}` : ""].filter(Boolean).join(" · ");
-  const key = multTxt + game.passShield + label2 + left + Math.floor(game.score) + "|" + game.lockerUses + "|" + game.strikes + game.highAlert + "|" + Math.round(game.heat) + "|" + Math.round(game.security);
+  const key = multTxt + game.passShield + label2 + left + Math.floor(game.score) + "|" + game.lockerUses + "|" + game.strikes + game.highAlert + "|" + Math.round(game.heat) + game.stars + game.survival;
   if (key === lastHud) return;
   lastHud = key;
   ui.label.textContent = label2;
-  $("heatFill").style.width = game.heat + "%"; $("secFill").style.width = game.security + "%";
-  $("heatMeter").classList.toggle("hot", game.heat >= CFG.heat.passingCatchAt);
+  drawStars();
   ui.timer.textContent = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
   ui.phase.className = game.phase + (game.survival ? " survival" : "");
   if (Math.floor(game.score) > (+ui.score.textContent || 0)) { ui.score.classList.remove("bump"); void ui.score.offsetWidth; ui.score.classList.add("bump"); }
@@ -4905,7 +4895,6 @@ function playTrumpet() {
   const n = summonStaff(player.x, player.z);
   banner(`🎺 BWAAAMP!<small>${n ? `${n} staff member${n === 1 ? "" : "s"} heard that. Get moving!` : "Nobody's around to hear it. Shame."}</small>`, 2.4);
   havoc("trumpet", T.points, "Trumpet solo!", { x: player.x, z: player.z, loud: true }); dareEvent("trumpet");
-  addHeat(T.heat);
   for (const c of crowd) if (isActive(c) && Math.hypot(c.x - player.x, c.z - player.z) < 6) { c.slipT = Math.max(c.slipT, 0.5); c.stunStyle = "flinch"; }   // kids jump
 }
 function summonStaff(x, z) {
@@ -5738,43 +5727,103 @@ function havoc(kind, base, label, opts = {}) {
   onHavoc(kind, pts, opts);
   return pts;
 }
-// Heat if someone saw you do it; the security level goes up for loud havoc even if nobody did.
+// Heat only if someone saw you do it (step 74: nothing for what they didn't see)
 function onHavoc(kind, pts, opts) {
   const seen = staff.some((st) => canSeePlayer(st, 1, !(st.state === "chase" || st.state === "search")).seen);
-  const S = CFG.security;
   if (seen) {
-    addHeat(Math.min(CFG.heat.seenHavocMax, pts * CFG.heat.seenHavocMult));
-    addSecurity(opts.loud ? S.loudSeen : S.quietSeen);
+    addHeat(Math.min(CFG.heat.seenHavocMax, pts * CFG.heat.seenHavocMult) + (opts.loud ? CFG.heat.seenLoud : 0));
     popup("...and they SAW that.", "bad");
-  } else if (opts.loud) addSecurity(S.loudUnseen);
+  }
 }
 function addHeat(n) { game.heatPending += n; }
-function addSecurity(n) {
-  const before = game.security;
-  game.security = Math.min(100, game.security + n);
-  if (before < CFG.security.extraGuardAt && game.security >= CFG.security.extraGuardAt) pa("securityUp");
-}
-// heat flows in no faster than maxRisePerSec; cools slowly while you're hidden
+// heat flows in no faster than maxRisePerSec; cools slowly while you're hidden or nobody's on to you
+const starVision = () => CFG.heat.vision[game.stars] ?? 1;
+const starsFor = (h) => CFG.heat.stars.filter((x) => h >= x).length;
 function updateHeat(dt) {
-  const H = CFG.heat, before = game.heat;
-  if (game.survival) { game.heat = 100; game.heatPending = 0; updateSurvival(dt); return; }   // pinned at the max
+  const H = CFG.heat;
+  if (game.survival) { game.heat = 100; game.heatPending = 0; setStars(5); updateSurvival(dt); updateWanted(dt); return; }   // pinned at the max
   const flow = Math.min(game.heatPending, H.maxRisePerSec * dt);
   game.heatPending -= flow;
   game.heat = Math.min(100, game.heat + flow);
-  if (game.heat >= 100) { startSurvival(); return; }   // anything that maxes your heat
   if (player.hidden) game.heat = Math.max(0, game.heat - H.hiddenCoolPerSec * dt);
   else if (!staff.some((st) => isAlarmed(st) || st.suspicion > 0.05)) game.heat = Math.max(0, game.heat - H.calmCoolPerSec * dt);
-  if (before < H.passingCatchAt && game.heat >= H.passingCatchAt) {
-    pa("heatHigh");
-    banner("HEAT RISING<small>Staff can now detain you during passing periods too.</small>", 2.6);
-  }
+  setStars(starsFor(game.heat));
+  updateWanted(dt);
 }
+// the star row: full stars, plus the next one filling as heat builds toward it
+const starEls = [...document.querySelectorAll("#stars .st")];
+function drawStars() {
+  const S = CFG.heat.stars, n = game.stars;
+  starEls.forEach((el, i) => {
+    el.classList.toggle("on", i < n);
+    const lo = i ? S[i - 1] : 0, f = i === n ? clamp((game.heat - lo) / (S[i] - lo), 0, 1) : i < n ? 1 : 0;
+    el.firstChild.style.width = Math.round(f * 100) + "%";
+    el.firstChild.style.opacity = i < n ? 1 : 0.55;
+  });
+  $("stars").classList.toggle("rebel", game.survival);
+}
+const STAR_NEWS = [
+  "",
+  "★ Staff can spot you in passing periods now",
+  "★★ An extra hall monitor is out looking",
+  "★★★ Security's sending another guard",
+  "★★★★ The principal's out of the office",
+  "★★★★★ Every staff member is looking for you",
+];
+function setStars(n) {
+  const was = game.stars;
+  if (n === was) return;
+  game.stars = n;
+  if (tut) return;
+  if (n > was) {
+    banner(`${"★".repeat(n)}<small>${STAR_NEWS[n].replace(/^★+ /, "")}</small>`, 2.4);
+    playBlip([520, 660, 880].slice(0, 1 + Math.min(2, n - 1)), 0.09, "square", 0.06);
+    if (n >= 1 && was < 1) pa("heatHigh");
+    if (n >= 5 && was < 5) radioAll();
+  } else toast(n ? `Heat cooling off: ${"★".repeat(n)}` : "Heat's off. You're just another kid again.", 2);
+  $("stars").classList.remove("bump"); void $("stars").offsetWidth; $("stars").classList.add("bump");
+}
+// extra staff that come out with your stars (and head back once your heat drops)
+const WANTED_STAFF = [[2, "hallMonitor"], [3, "securityGuard"], [4, "principal"]];
+let wantedT = 0, radioT = 0;
+function updateWanted(dt) {
+  wantedT -= dt;
+  if (wantedT <= 0) {
+    wantedT = 0.5;
+    for (const [n, key] of WANTED_STAFF) {
+      const st = staff.find((s) => s.wanted === n);
+      if (game.stars >= n) {
+        if (st) st.leaveT = 0;
+        else if (!(key === "principal" && staff.some((s) => s.key === "principal"))) {   // (the principal may already be out after strike 2)
+          const nw = spawnStaff(key, pickStaffPlace(key)); nw.wanted = n; nw.leaveT = 0;
+          if (key === "principal") setTimeout(() => game.state === "playing" && pa("principalOut"), 2500);
+        }
+      } else if (st && st.state !== "chase" && st.state !== "bust") {
+        st.leaveT += 0.5;
+        if (st.leaveT >= CFG.heat.extraLeaveSec && !onScreen(st.x, 1.2, st.z)) removeStaff(st);   // back to the office, out of sight
+      }
+    }
+  }
+  if (game.stars >= 5 && !game.survival) { radioT -= dt; if (radioT <= 0) { radioT = CFG.heat.radioEverySec; radioNearest(2); } }
+}
+function removeStaff(st) {
+  scene.remove(st.mesh); scene.remove(st.cone); st.cone.geometry.dispose(); st.alert.remove(); st.edge.remove(); st.bubble.remove();
+  staff.splice(staff.indexOf(st), 1);
+}
+function radioNearest(n) {
+  const free = staff.filter((o) => chaser(o) && o.state !== "chase" && o.state !== "bust" && o.stunT <= 0)
+    .sort((a, b) => Math.hypot(a.x - player.x, a.z - player.z) - Math.hypot(b.x - player.x, b.z - player.z)).slice(0, n);
+  for (const o of free) { o.state = "search"; o.searchT = -8; o.suspicion = 0.6; o.lastX = o.tx = player.x + rand(-3, 3); o.lastZ = o.tz = player.z + rand(-3, 3); }
+  if (free.length) playBlip([1400, 1100, 1400], 0.05, "square", 0.04);   // radio chirp
+  return free.length;
+}
+function radioAll() { radioT = CFG.heat.radioEverySec; radioNearest(99); pa(null, "All staff: we have a situation. Find that kid.", 4); }
 // ---- survival mode ----
 function startSurvival() {
   if (game.survival) return;
-  game.survival = true; game.survivalT = 0; game.heat = 100; game.heatPending = 0; game.highAlert = true;
+  game.survival = true; game.survivalT = 0; game.heat = 100; game.heatPending = 0; game.highAlert = true; setStars(5);
   game.nextArrivalT = CFG.survival.staffEverySec; game.nextRadioT = 4;
-  banner(`REBEL RUN!<small>Heat maxed. Every staff member is after you. Points ×${CFG.survival.scoreMult} until they catch you.</small>`, 3.4);
+  banner(`REBEL RUN!<small>Every staff member is after you. Points ×${CFG.survival.scoreMult} until they catch you.</small>`, 3.4);
   setTimeout(() => game.state === "playing" && pa("survival"), game.alarmT > 0 ? 6000 : 1200);
   playBlip([392, 330, 262, 196], 0.18, "sawtooth", 0.08);
   saveGame();
@@ -5825,7 +5874,7 @@ function nearestAlarm(range = CFG.interact.range) {
 // two taps to pull it (the first one arms it), so it never happens by accident
 function tryAlarm(a) {
   if (game.alarmPulled) { toast(game.alarmT > 0 ? "It's already ringing!" : "Someone already pulled it today. They're watching it now."); return; }
-  if (performance.now() > a.armT) { a.armT = performance.now() + 2500; toast("🔥 Tap the fire alarm again to PULL it. (This starts a rebel run.)", 2.5); playBlip([300], 0.06, "square", 0.05); return; }
+  if (performance.now() > a.armT) { a.armT = performance.now() + 3500; toast("🔥 Are you sure you're that crazy? You'll definitely get caught. (Pull it again: ★★★★★ and a rebel run.)", 3.4); playBlip([300], 0.06, "square", 0.05); return; }
   pullFireAlarm(a);
 }
 function pullFireAlarm(a) {
@@ -5833,7 +5882,6 @@ function pullFireAlarm(a) {
   game.alarmPulled = true; game.alarmT = F.sec;
   const seen = staff.some((st) => canSeePlayer(st, 1, !(st.state === "chase" || st.state === "search")).seen);
   havoc("fireAlarm", F.points, "FIRE ALARM!", { x: f.x, z: f.z });
-  game.security = Math.min(100, seen ? CFG.security.alarmSeen : game.security + CFG.security.alarmUnseen);
   // everyone freezes, hands over their ears
   for (const st of staff) { stunStaff(st, F.stunSec, "flinch"); st.suspicion = 0; st.bubble.textContent = pick(["MY EARS!", "Is that real?!", "Not again..."]); st.barkUntil = performance.now() + 1800; }
   // students pour out of every classroom and stay out while it rings
@@ -5883,8 +5931,6 @@ function floodRestroom() {
   exitSpot(false, "Water everywhere. You slosh back out into the hall.");
   havoc("flood", Fl.points, "Flooded the toilets!", { x: f.x, z: f.z });
   dareEvent("flood");
-  addHeat(Fl.heat);
-  addSecurity(CFG.security.flood);
   makeNoise(f.x, f.z, Fl.noiseRadius, true);
   playBlip([180, 150, 120, 100], 0.2, "sine", 0.1);
   if (!sp.puddle) {
@@ -6388,7 +6434,7 @@ function tutTick(dt) {
   game.nextPlaneT = 99;
   for (const c of crowd) if (c.friend) c.friend.cd = Math.max(c.friend.cd, 5);
   game.phaseT = Math.min(game.phaseT, 4);
-  game.heat = Math.min(game.heat, 40); game.heatPending = 0;
+  game.heat = Math.min(game.heat, CFG.heat.stars[0] - 1); game.heatPending = 0;
   if (tut.blind) for (const st of staff) if (st.state !== "patrol") { st.state = "patrol"; st.suspicion = 0; st.camping = false; }   // it really doesn't see you
   const S = TUT_STEPS[tut.i];
   if (S.tick?.(dt)) tutAdvance();
@@ -6523,8 +6569,8 @@ if (debug) {   // a small test panel for phone playtests (only with ?debug in th
   let gi = 0;
   add("Give item", () => { const k = Object.keys(ITEM_TYPES); addItem(k[gi++ % k.length]); });
   add("Heat +30", () => { addHeat(30); });
-  add("Max heat (rebel run)", () => { game.heat = 100; game.heatPending = 0; });
-  add("School alert 100%", () => { game.security = 100; });
+  add("Rebel run", () => { startSurvival(); });
+  add("+1 star", () => { const n = Math.min(5, game.stars + 1); game.heat = Math.max(game.heat, CFG.heat.stars[n - 1] + 1); });
   add("Get a strike", () => { const st = staff.find(chaser) ?? staff[0], ph = game.phase; game.phase = "skipping"; caught(st); game.phase = ph; });
   add("Principal", () => { ensurePrincipal(true); });
   // a spot a few meters ahead of the kid, in the hall
@@ -6663,8 +6709,10 @@ if (debug) {   // test-only helpers (only with ?debug in the URL)
     tutGo(i) { tutGo(i); }, tutNext() { tutAdvance(); }, tutLook(r) { if (tut) tut.looked += r; },
     barks() { return staff.map((s) => (performance.now() < s.barkUntil ? s.bubble.textContent : null)); },
     ads() { return { interstitialsToday: Ads.interstitialsToday, rewardedToday: { ...Ads.rewardedToday } }; },
-    setHeat(h, s) { if (h != null) { game.heat = h; game.heatPending = 0; } if (s != null) game.security = s; },
-    heat() { return { heat: game.heat, pending: game.heatPending, security: game.security, survival: game.survival, alarmT: game.alarmT }; },
+    setHeat(h) { if (h != null) { game.heat = h; game.heatPending = 0; } },
+    heat() { return { heat: game.heat, pending: game.heatPending, stars: game.stars, survival: game.survival, alarmT: game.alarmT }; },
+    wanted() { return staff.filter((s) => s.wanted).map((s) => [s.key, s.wanted, s.state]); },
+    cone(k) { const T = staff[k].type; return { half: Math.round(coneHalf(T) * 1800 / Math.PI) / 10, range: Math.round(T.visionRange * staffMult("vision") * 10) / 10 }; },
     objects() { return objects.filter((o) => !o.dead).map((o) => ({ key: o.key, state: o.state, x: o.x, y: o.y, z: o.z, bounces: o.bounces, life: o.life })); },
     dropItem(key, dx, dz) { const o = spawnObject(key, "pickup", player.x + dx, REST_Y[key] ?? 0.04, player.z + dz); return o.id; },
     hotbar() { return game.hotbar.map((s) => s && `${s.key}${s.uses > 1 ? "x" + s.uses : ""}`); },

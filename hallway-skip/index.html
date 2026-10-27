@@ -52,14 +52,17 @@
   #strikes b { margin-left: 6px; font-size: 11px; letter-spacing: .1em; color: #ff8f8f; }
   #meters { position: absolute; top: calc(max(12px, env(safe-area-inset-top)) + 22px); left: max(14px, env(safe-area-inset-left));
     display: flex; flex-direction: column; gap: 3px; }
-  .meter { display: flex; align-items: center; gap: 6px; font-size: 9px; font-weight: 800; letter-spacing: .1em; text-shadow: 0 1px 2px rgba(0,0,0,.7); }
-  .meter span { width: 76px; opacity: .85; }
-  .meter i { position: relative; width: 84px; height: 6px; border-radius: 3px; background: rgba(255,255,255,.18); overflow: hidden; }
-  .meter b { position: absolute; left: 0; top: 0; bottom: 0; width: 0; transition: width .3s; }
-  #secMeter b { background: #6aa8ff; } #heatMeter b { background: #ff9a4d; } #heatMeter.hot b { background: #ff4d4d; }
-  #heatMeter i { width: 130px; height: 9px; border-radius: 5px; }
-  #heatMeter span { color: #ffb37a; }
-  #heatMeter em { position: absolute; left: 50%; top: -1px; bottom: -1px; width: 2px; background: rgba(255,255,255,.7); }
+  /* step 74: heat as 0-5 stars, the next one filling up */
+  #stars { display: flex; align-items: center; gap: 2px; text-shadow: 0 1px 3px rgba(0,0,0,.8); transform-origin: left center; }
+  #stars.bump { animation: starBump .5s ease-out; }
+  @keyframes starBump { 30% { transform: scale(1.35); } }
+  #stars .lbl { font-size: 9px; font-weight: 800; letter-spacing: .1em; color: #ffb37a; margin-right: 5px; }
+  #stars .st { position: relative; font-size: clamp(15px, 5.2vh, 19px); line-height: 1; color: rgba(255,255,255,.22); }
+  #stars .st i { position: absolute; left: 0; top: 0; overflow: hidden; color: #ffcf3f; font-style: normal; width: 0; }
+  #stars .st.on i { width: 100%; }
+  #stars.rebel .st i { color: #ff4d4d; }
+  #stars .rebel { display: none; margin-left: 6px; font-size: 9.5px; font-weight: 900; letter-spacing: .1em; color: #fff; background: #d62828; padding: 2px 6px; border-radius: 6px; }
+  #stars.rebel .rebel { display: inline-block; }
   #pa { position: absolute; top: calc(max(12px, env(safe-area-inset-top)) + 58px); left: max(14px, env(safe-area-inset-left));
     max-width: min(34vw, 300px); padding: 7px 10px; border-radius: 10px; background: rgba(20,24,36,.82); border-left: 3px solid #ffd36b;
     font-size: 12.5px; line-height: 1.35; opacity: 0; transform: translateY(-6px); transition: opacity .25s, transform .25s; }
@@ -369,8 +372,7 @@
   <div id="phase"><div class="label" id="phaseLabel">DAY 1 · PERIOD 1 · PASSING</div><div class="timer" id="timer">0:25</div></div>
   <div id="strikes"></div>
   <div id="meters">
-    <div class="meter" id="secMeter" title="They know something happened"><span>SCHOOL ALERT</span><i><b id="secFill"></b></i></div>
-    <div class="meter" id="heatMeter" title="They know it's you"><span>HEAT</span><i><b id="heatFill"></b><em></em></i></div>
+    <div id="stars" title="Heat: goes up when staff see you make trouble"><span class="lbl">HEAT</span><span class="st"><i>★</i>★</span><span class="st"><i>★</i>★</span><span class="st"><i>★</i>★</span><span class="st"><i>★</i>★</span><span class="st"><i>★</i>★</span><span class="rebel">REBEL RUN</span></div>
   </div>
   <div id="pa"><span class="who">PA ANNOUNCEMENT</span><span id="paText"></span></div>
   <div id="dares"></div>
@@ -426,7 +428,7 @@
 
 <div class="overlay" id="title">
   <div>
-    <span class="tag">prototype · build step 73</span>
+    <span class="tag">prototype · build step 74</span>
     <h1>Hall Goblin</h1>
     <p>Skip class. Don't get caught.</p>
     <div class="buttons">
@@ -483,8 +485,9 @@
 
     <h3>Watch out</h3>
     <ul>
-      <li>🔥 <b>HEAT</b> means they know it's you. It drops at every bell. Max it out and you're on a rebel run: double points, but the next catch ends it.</li>
-      <li>🚨 <b>SCHOOL ALERT</b> brings more guards. It only drops overnight.</li>
+      <li>⭐ <b>HEAT</b> goes up only when staff <i>see</i> you make trouble. It cools while you hide, drops at each bell, and resets overnight.</li>
+      <li>★ staff can catch you in passing periods · ★★ an extra hall monitor · ★★★ an extra guard · ★★★★ the principal · ★★★★★ every staff member is looking for you. Staff see farther with each star.</li>
+      <li>🔥 The <b>fire alarm</b> is a last resort: five stars and a <b>rebel run</b>. Double points, but the next catch ends your run.</li>
     </ul>
 
     <h3>Your kid</h3>
