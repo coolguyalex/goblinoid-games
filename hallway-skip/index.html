@@ -274,6 +274,9 @@
   #tutCard kbd { display: inline-block; min-width: 1.2em; padding: 0 5px; margin: 0 1px; border-radius: 5px; background: #2b3247; border: 1px solid #56607d; border-bottom-width: 3px; font: 800 .85em system-ui, sans-serif; }
   #tutCard .tutTasks { list-style: none; margin: 4px 0 0; padding: 0; text-align: left; display: inline-block; }
   #tutCard .tutTasks li { margin: 3px 0; }
+  #tutCard .tutPitch { margin: 8px auto 0; padding-left: 1.3em; text-align: left; display: inline-block; max-width: 30em; }
+  #tutCard .tutPitch li { margin: 4px 0; line-height: 1.4; }
+  #statPane .buttons { margin-top: 4px; }
   #tutCard .tutTasks li::before { content: "☐ "; color: #9fb3d9; }
   #tutCard .tutTasks li.ok::before { content: "✅ "; }
   #tutCard .tutTasks li.ok { opacity: .7; }
@@ -438,7 +441,7 @@
   <div id="toast"></div>
   <div id="exitMark"></div>
   <div id="keyHint"></div>
-  <div id="kbdHelp">WASD move · Shift sprint · H hood · E interact · 1–4 items · Esc pause</div>
+  <div id="kbdHelp">WASD move · ← → look · Shift sprint · H hood · E interact · 1–4 items · Esc pause</div>
   <div id="fps" hidden></div>
 </div>
 <div id="alarmFx" hidden></div>
@@ -489,7 +492,7 @@
 </div>
 <div class="overlay" id="title">
   <div>
-    <span class="tag">prototype · build step 82</span>
+    <span class="tag">prototype · build step 83</span>
     <h1><span>Hall</span> Goblin</h1>
     <p>Skip class. Don't get caught.</p>
     <div class="buttons">
@@ -520,7 +523,7 @@
     <h3>Controls</h3>
     <table class="ctl">
       <tr><td>Move</td><td class="t">Left thumb</td><td class="k">WASD</td></tr>
-      <tr><td>Look</td><td class="t">Drag right side</td><td class="k">Drag mouse</td></tr>
+      <tr><td>Look</td><td class="t">Drag right side</td><td class="k">← →</td></tr>
       <tr><td>Sprint</td><td class="t">Hold 🏃</td><td class="k">Shift</td></tr>
       <tr><td>Hood up</td><td class="t">🧥</td><td class="k">H</td></tr>
       <tr><td>Hide, grab, use</td><td class="t">Tap it</td><td class="k">E</td></tr>
@@ -618,12 +621,13 @@
 <div class="overlay scroll" id="charScreen" hidden>
   <div class="aboutBox charBox">
     <div class="charGrid">
-      <div class="kidCol"><canvas id="kidCanvas"></canvas><div class="buttons"><button class="go alt" id="rerollBtn" type="button">🎲 Reroll</button><button class="go" id="charDone" type="button">Done</button></div></div>
+      <div class="kidCol"><canvas id="kidCanvas"></canvas><div class="buttons"><button class="go" id="charDone" type="button">Done</button></div></div>
       <div>
         <div class="charTabs"><button type="button" class="charTab on" data-tab="stats">Stats</button><button type="button" class="charTab" data-tab="looks">Looks</button></div>
         <div id="statPane">
           <div id="statRows"></div>
           <p class="keys" id="statTotal"></p>
+          <div class="buttons"><button class="go alt" id="rerollBtn" type="button">🎲 Reroll</button></div>
           <p class="keys">Reroll as many times as you like. 10 is average. Saved in this browser.</p>
         </div>
         <div id="lookPane" hidden></div>

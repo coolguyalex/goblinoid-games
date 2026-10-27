@@ -140,6 +140,7 @@ const CFG = {
   energy: { boostSec: 60, maxMult: 2, rechargeMult: 1.5 },
   keyboard: { aimTurnRate: 1.8, aimPowerRate: 0.9, startPower: 0.55 },   // arrow-key aiming: radians/s and power/s
   camera: {
+    keyTurnRate: 2.4,             // step 83: radians a second with an arrow key held
     fov: 75,                      // wide, to help with corner blindness
     height: 3.0,                  // slightly raised
     distance: 4.4,
@@ -693,7 +694,9 @@ const ITEM_TYPES = {
   // Stick it on a staff member's back (get right up behind them; if they're facing you, they catch on). During a passing
   // period the kids crowd round laughing and pen them in until the tardy bell. Stick it on during class and it waits.
   kickMe:        { label: "\"Kick me\" sign", icon: "🦵", kind: "sign", range: 1.4, points: 400, penKids: 9, penPoints: 100,
-                   kidPoints: 150, kidSec: 9, kidCrowd: 7 },   // on a kid: they're stuck in a ring of laughing kids for a while
+                   kidPoints: 150, kidSec: 9, kidCrowd: 7,
+                   // step 83: whoever wears one gets kicked. The ring of kids kicks now and then; you can kick too (E or tap them)
+                   kickRange: 1.8, kickStaffSec: 1.6, kickKidSec: 1.0, kickStaffPoints: 120, kickKidPoints: 40, crowdKickEvery: [0.9, 1.8] },   // on a kid: they're stuck in a ring of laughing kids for a while
   // Science labs: lands upright, fizzes for a moment, then a geyser. Loud (staff come to look), kids crowd round to watch
   // (cover for you), and anyone standing in the spray gets soaked. Step 68: the fizzy flask (was Mentos & soda; same save key).
   // The geyser leaves a sticky red pool: everyone slips in it once, until the custodian mops it up.
@@ -1962,7 +1965,7 @@ function playBlip(freqs, dur = 0.09, type = "square", vol = 0.08) {
 }
 
 // =====================================================================================
-// Input: left-thumb joystick, right-side look drag, WASD + mouse drag
+// Input: left-thumb joystick, right-side look drag; WASD + arrow keys to look (step 83)
 // =====================================================================================
 const input = { x: 0, y: 0, m: 0 };
 const keys = new Set();
@@ -1981,7 +1984,7 @@ canvas.addEventListener("pointerdown", (e) => {
     stickBase.style.left = stickKnob.style.left = e.clientX + "px";
     stickBase.style.top = stickKnob.style.top = e.clientY + "px";
     stickBase.style.display = stickKnob.style.display = "block";
-  } else if (look.id === null) {
+  } else if (look.id === null && e.pointerType !== "mouse") {   // step 83: mouse players turn with the arrow keys
     look.id = e.pointerId; look.lastX = e.clientX;
   }
   try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* not supported for this pointer; fine */ }
@@ -2065,6 +2068,8 @@ function interactTarget() {
     for (const c of crowd) { const F = c.friend; if (!F || F.cd > 0 || !isActive(c) || c.slipT > 0) continue; const d = Math.hypot(c.x - player.x, c.z - player.z); if (d < bd) { bd = d; best = c; } }
     if (best) return { kind: "friend", c: best, x: best.x, y: 2.3, z: best.z, label: OFFER_LABELS[best.friend.offer].toLowerCase() };
   }
+  const kw = kickTarget();   // step 83
+  if (kw) return { kind: "kick", ...kw, x: kw.who.x, y: 2.3 * (kw.isStaff ? kw.who.type.scale : 1), z: kw.who.z, label: "kick" };
   const km = game.hotbar.findIndex((s) => s?.key === "kickMe");
   if (km >= 0) { const tg = kickMeTarget(); if (tg) return { kind: "kickme", slot: km, x: tg.who.x, y: 2.3 * (tg.isStaff ? tg.who.type.scale : 1), z: tg.who.z, label: tg.isStaff ? "stick on the sign" : "stick it on the kid" }; }
   let it = null, id = CFG.items.pickupRange;
@@ -2084,6 +2089,7 @@ function doInteract() {
   else if (t.kind === "friend") friendTap(t.c);
   else if (t.kind === "item") pickUp(t.o);
   else if (t.kind === "kickme") stickKickMe(t.slot);
+  else if (t.kind === "kick") playerKick(t);
   else if (t.kind === "alarm") tryAlarm(t.a);
   else if (t.kind === "spot") enterSpot(t.sp);
 }
@@ -2101,10 +2107,19 @@ function updateKeyHint() {
 }
 
 let sprintTouch = false;
+// step 83: ← / → turn the camera (the mouse doesn't drag the view any more)
+function tickKeyLook(dt) {
+  if (game.aim) return;
+  const turn = (keys.has("arrowleft") ? 1 : 0) - (keys.has("arrowright") ? 1 : 0);
+  if (!turn) return;
+  const r = turn * CFG.camera.keyTurnRate * dt;
+  cam.yaw += r; manualCamT = CFG.camera.manualHoldSec;
+  if (tut) tut.looked += Math.abs(r);
+}
 function readInput() {
-  const arrows = !game.aim;   // while aiming, the arrow keys aim instead of moving (WASD still moves)
-  let x = (keys.has("d") || (arrows && keys.has("arrowright")) ? 1 : 0) - (keys.has("a") || (arrows && keys.has("arrowleft")) ? 1 : 0);
-  let y = (keys.has("w") || (arrows && keys.has("arrowup")) ? 1 : 0) - (keys.has("s") || (arrows && keys.has("arrowdown")) ? 1 : 0);
+  // step 83: WASD moves; the arrow keys turn the camera (see tickKeyLook), or aim while you're aiming
+  let x = (keys.has("d") ? 1 : 0) - (keys.has("a") ? 1 : 0);
+  let y = (keys.has("w") ? 1 : 0) - (keys.has("s") ? 1 : 0);
   if (stick.id !== null) { x = stick.x; y = stick.y; }
   let m = Math.hypot(x, y);
   if (m < CFG.joystick.deadZone) { x = y = m = 0; }
@@ -2942,6 +2957,8 @@ function updatePlayer(dt) {
   if (player.invisT > 0) { player.invisT -= dt; player.mesh.visible = !player.hidden && (player.invisT <= 0 || Math.sin(game.time * 22) > -0.3); }
   if (player.hidden) { updateHiding(dt); return; }
   animateKid(player.kid, player.ride || player.board || player.slipT > 0 || player.dazeT > 0 || player.stuckT > 0 ? 0 : Math.hypot(player.vx, player.vz), dt);
+  if (player.kickCD > 0) player.kickCD -= dt;
+  if (player.kickT > 0) { player.kickT -= dt; player.kid.userData.legs[1].rotation.x = -Math.sin(Math.PI * (1 - Math.max(0, player.kickT) / 0.35)) * 1.4; }   // step 83
   if (player.ride) { updateRide(dt); return; }
   if (player.board && (player.slipT > 0 || player.stuckT > 0)) dropBoard("You wipe out!");
   if (player.board) { updateBoard(dt); return; }
@@ -3197,6 +3214,7 @@ function drawCrowd() {
           !lineOfSight(cx, cz, c.x + 0.35, c.z + 0.35) && !lineOfSight(cx, cz, c.x - 0.35, c.z - 0.35)) show = false;   // peeking round a corner shows)
       }
     }
+    if (c.kickT > 0) c.kickT -= fdt;   // step 83 (counts down even off screen)
     // walking: legs swing with the distance covered, settling when they stop
     const moved = Math.hypot(c.x - (c.lx ?? c.x), c.z - (c.lz ?? c.z)); c.lx = c.x; c.lz = c.z;
     const moving = moved > 0.003 && moved < 0.8 && c.slipT <= 0;
@@ -3205,10 +3223,11 @@ function drawCrowd() {
     if (!show) { if (D) D.visible = false; continue; }
     const tilt = c.slipT <= 0 ? 0 : c.stunStyle === "flinch" ? 0.3 + Math.sin(game.time * 16) * 0.15 : c.stunStyle === "stuck" ? Math.sin(game.time * 10 + c.bob) * 0.12 : 1.35;
     const bob = Math.abs(Math.sin(c.walk)) * 0.035 * c.amp, sw = Math.sin(c.walk) * 0.6 * c.amp;
+    const kk = c.kickT > 0 ? Math.sin(Math.PI * (1 - c.kickT / 0.35)) * 1.3 : 0;   // step 83: a kick (right leg swings forward)
     if (c.detailed && !c.friend && dist < CFG.crowd.detailDist) {   // the full model, up close
       const K = D ?? (c.detail = buildKid(crowdLook())); if (!D) scene.add(K);
       K.visible = true; K.position.set(c.x, bob, c.z); K.rotation.set(tilt, c.heading, 0, "YXZ"); K.scale.setScalar(c.scale * CROWD_DETAIL_SCALE);
-      const u = K.userData; u.legs[0].rotation.x = sw; u.legs[1].rotation.x = -sw; u.arms[0].rotation.x = -sw * 0.8; u.arms[1].rotation.x = sw * 0.8;
+      const u = K.userData; u.legs[0].rotation.x = sw; u.legs[1].rotation.x = -sw - kk; u.arms[0].rotation.x = -sw * 0.8; u.arms[1].rotation.x = sw * 0.8;
       continue;
     }
     if (D) D.visible = false;
@@ -3222,7 +3241,7 @@ function drawCrowd() {
     const hm = crowdHair[c.hairStyle]; hm.setMatrixAt(nh[c.hairStyle], M); hm.setColorAt(nh[c.hairStyle]++, c.hair);
     if (c.pack) { crowdPacks.setMatrixAt(np, M); crowdPacks.setColorAt(np++, c.pack); }
     for (const sx of [-1, 1]) {
-      limbM.makeRotationX(sx * sw).setPosition(sx * CK.legX, CK.hipY, 0); limbOut.multiplyMatrices(M, limbM);
+      limbM.makeRotationX(sx * sw - (sx > 0 ? kk : 0)).setPosition(sx * CK.legX, CK.hipY, 0); limbOut.multiplyMatrices(M, limbM);
       crowdLegs.setMatrixAt(nl, limbOut); crowdLegs.setColorAt(nl, c.pants);
       limbM.makeRotationFromEuler(limbE.set(-sx * sw * 0.8, 0, sx * 0.08)).setPosition(sx * CK.armX, CK.armY, 0); limbOut.multiplyMatrices(M, limbM);
       crowdSleeves.setMatrixAt(nl, limbOut); crowdSleeves.setColorAt(nl, c.shirt);
@@ -4107,6 +4126,11 @@ function handleTap(x, y) {
   // Step 55: a door you tapped beats a dropped item next to it when your hands are full, or when the door is nearer your finger.
   const spot = tapSpotAt(x, y), item = tapItemAt(x, y);
   if (item && !(spot && !spot.far && (!game.hotbar.some((s) => !s) || spot.d < item.d))) { pickUp(item.o); return; }
+  const kw = kickTarget();   // step 83: tap someone wearing a "kick me" sign to kick them
+  if (kw) {
+    projA.set(kw.who.x, 1.1, kw.who.z).project(camera);
+    if (Math.hypot(x - ((projA.x + 1) / 2) * window.innerWidth, y - ((1 - projA.y) / 2) * window.innerHeight) < CFG.interact.tapRadiusPx * 1.6) { playerKick(kw); return; }
+  }
   for (const o of objects) {   // tap a paper airplane in flight to catch it
     if (!o.wild || o.state !== "flying" || Math.hypot(o.x - player.x, o.z - player.z) > 3) continue;
     projA.set(o.x, o.y, o.z).project(camera);
@@ -5354,6 +5378,40 @@ function kickMeTarget() {
   return c ? { who: c, isStaff: false } : null;
 }
 const kidSigns = [];   // kids wearing a kick-me sign: { c, mesh }
+// step 83: the nearest person wearing a sign, close enough to kick
+function kickTarget() {
+  if (player.hidden || (player.kickCD ?? 0) > 0) return null;
+  const R = ITEM_TYPES.kickMe.kickRange, d = (o) => Math.hypot(o.x - player.x, o.z - player.z);
+  const st = staff.filter((s) => s.kickMe && d(s) < R).sort((a, b) => d(a) - d(b))[0];
+  if (st) return { who: st, isStaff: true };
+  const k = kidSigns.map((k) => k.c).filter((c) => c.kickMeT > 0 && isActive(c) && d(c) < R).sort((a, b) => d(a) - d(b))[0];
+  return k ? { who: k, isStaff: false } : null;
+}
+function kickHit(who, isStaff, sec) {   // the one wearing the sign lurches forward
+  if (isStaff) { who.stunT = Math.max(who.stunT, sec); who.stunStyle = "flinch"; if (who.state === "chase" || who.state === "bust") { who.state = "search"; who.searchT = 0; } }
+  else { who.flinchT = Math.max(who.flinchT ?? 0, Math.min(sec, 0.5)); who.slipT = Math.max(who.slipT, sec); }
+}
+function playerKick(t) {
+  const T = ITEM_TYPES.kickMe, who = t.who;
+  player.kickT = 0.35; player.kickCD = 0.45;
+  player.heading = Math.atan2(who.x - player.x, who.z - player.z);
+  kickHit(who, t.isStaff, t.isStaff ? T.kickStaffSec * (1 + CFG.stats.strength.stun * statMod("strength")) : T.kickKidSec);
+  playBlip([150, 110], 0.06, "square", 0.06);
+  if (t.isStaff) { havoc("kickStaff", T.kickStaffPoints, `Kicked the ${who.type.name}! 🦵`, { x: who.x, z: who.z }); bark(who, "suspicious", true); }
+  else havoc("kickKid", T.kickKidPoints, "Kick! 🦵", { x: who.x, z: who.z });
+}
+// the ring of kids takes turns kicking whoever's wearing the sign
+function crowdKicks(victim, isStaff, dt) {
+  victim.nextKickT = (victim.nextKickT ?? rand(0.4, 1)) - dt;
+  if (victim.nextKickT > 0) return;
+  victim.nextKickT = rand(...ITEM_TYPES.kickMe.crowdKickEvery);
+  const near = crowd.filter((c) => c !== victim && c.mode === "gather" && !(c.kickT > 0) && Math.hypot(c.x - victim.x, c.z - victim.z) < 2);
+  if (!near.length) return;
+  const c = pick(near);
+  c.kickT = 0.35; c.heading = Math.atan2(victim.x - c.x, victim.z - c.z);
+  kickHit(victim, isStaff, isStaff ? 0.35 : 0.4);
+  if (Math.hypot(victim.x - player.x, victim.z - player.z) < 12) playBlip([130], 0.04, "square", 0.025);
+}
 function stickKickMe(slot) {
   const T = ITEM_TYPES.kickMe, tg = kickMeTarget();
   if (!tg) { toast("Sneak right up behind someone to stick it on."); return; }
@@ -5405,8 +5463,11 @@ function updateKickMe(dt) {
     c.kickMeT -= dt;
     if (c.kickMeT <= 0 || c.mode === "gone") { c.kickMeT = 0; scene.remove(k.mesh); k.mesh.material.dispose(); kidSigns.splice(i, 1); continue; }
     const a = c.heading ?? 0; k.mesh.position.set(c.x - Math.sin(a) * 0.3, 1.05, c.z - Math.cos(a) * 0.3); k.mesh.rotation.y = a + Math.PI;
+    if (c.flinchT > 0) { c.flinchT -= dt; c.stunStyle = "flinch"; } else c.stunStyle = "stuck";   // step 83: kicked
+    crowdKicks(c, false, dt);
   }
   for (const st of staff) {
+    if (st.penned) crowdKicks(st, true, dt);   // step 83
     if (st.penned) st.stuckT = Math.max(st.stuckT || 0, 0.2);   // can look and yell, can't get out
     else if (st.kickMe && game.phase === "passing" && game.phaseT > 3) penStaff(st);   // tagged during class: the next passing period
   }
@@ -6587,8 +6648,8 @@ function tutMonitor(place) {
 const TUT_STEPS = [
   { id: "pitch", // the pitch
     enter() {
-      tutCardShow(`<h2>You're never going to class again.</h2><p>You're the trouble-maker. The slacker. The delinquent.</p>
-        <p>Stay out in the halls and cause as much havoc as you can for a high score.</p>`, { center: true, next: "Let's go", dim: 0.88, freeze: true });
+      tutCardShow(`<h2>You're never going to class again!</h2><p>See how many days you can survive and how much chaos you can cause.</p>
+        <ul class="tutPitch"><li><b>Skip class:</b> don't get caught. Hide in lockers and classrooms.</li><li><b>Cause chaos:</b> steal stuff, throw things, make a mess.</li></ul>`, { center: true, next: "Let's go", dim: 0.88, freeze: true });
     },
   },
   { id: "move", // move and look around
@@ -6601,8 +6662,8 @@ const TUT_STEPS = [
       tut.lastX = player.x; tut.lastZ = player.z;
       const mv = tut.moved > 3, lk = tut.looked > 0.9, both = mv && lk;
       const html = `<p><b>Get the feel of it.</b></p><ul class="tutTasks">
-        <li class="${mv ? "ok" : ""}">${say("Move: drag your <b>left thumb</b>", `Move: ${key("W")}${key("A")}${key("S")}${key("D")} or the arrow keys`)}</li>
-        <li class="${lk ? "ok" : ""}">${say("Look around: drag the <b>right side</b>", "Look around: drag with the mouse")}</li></ul>`;
+        <li class="${mv ? "ok" : ""}">${say("Move: drag your <b>left thumb</b>", `Move: ${key("W")}${key("A")}${key("S")}${key("D")}`)}</li>
+        <li class="${lk ? "ok" : ""}">${say("Look around: drag the <b>right side</b>", `Look around: ${key("←")}${key("→")}`)}</li></ul>`;
       const k = html + both;
       if (tut.shown !== k) { tut.shown = k; tutCardShow(html, { dim: both ? 0 : touchy() ? 0.5 : 0.25, holes: touchy() ? [HOLE.stick, HOLE.look] : [] }); }
       if (both) tut.doneT += dt;
@@ -6619,14 +6680,26 @@ const TUT_STEPS = [
   },
   { id: "run", // run! (moving, sprinting or the button carries on)
     enter() {
-      tutCardShow(`<p class="big">🚨 A hall monitor spotted you!</p><p>Run away. ${say("Hold <b>🏃</b> to sprint.", `Hold ${key("Shift")} to sprint.`)}</p>`,
-        { next: "Run!", dim: 0.6, freeze: true, block: false, holes: touchy() ? [HOLE.mon, HOLE.sprint] : [HOLE.mon] });
+      tutCardShow(`<p class="big">🚨 A hall monitor spotted you!</p><p>Run away. ${say("Hold <b>🏃</b> and move to sprint.", `Hold ${key("Shift")} and move to sprint.`)}</p>`,
+        { dim: 0.6, freeze: true, block: false, holes: touchy() ? [HOLE.mon, HOLE.sprint] : [HOLE.mon] });
+      tut.running = false; tut.sprintT = 0;
     },
-    tick() { return tut.t > 0.3 && (keys.size > 0 || stick.id !== null || sprintTouch); },
+    tick(dt) {   // step 83: the world starts on your first input; the next card waits for about a second of real sprinting
+      if (!tut.running) {
+        if (tut.t > 0.3 && (keys.size > 0 || stick.id !== null || sprintTouch)) {
+          tut.running = true; tut.runT = 0;
+          tutCardShow(`<p>${say("Keep holding <b>🏃</b> and run!", `Keep holding ${key("Shift")} and run!`)}</p>`, { low: true, rings: touchy() ? [HOLE.sprint] : [] });
+        }
+        return false;
+      }
+      tut.runT += dt;
+      if (player.sprinting && Math.hypot(player.vx, player.vz) > 1) tut.sprintT += dt;
+      return tut.sprintT > 1 || tut.runT > 6;
+    },
   },
   { id: "escape", // get away
     enter() {
-      tutCardShow(`<p>${say("Hold <b>🏃</b> and run!", `Hold ${key("Shift")} and run!`)} Get out of sight and they'll lose you.</p>`, { rings: touchy() ? [HOLE.sprint] : [] });
+      tutCardShow(`<p>That's it! Get out of sight and they'll lose you.</p>`, { rings: touchy() ? [HOLE.sprint] : [] });
     },
     tick() {
       const st = tut.mon, d = Math.hypot(st.x - player.x, st.z - player.z);
@@ -7032,7 +7105,7 @@ renderer.setAnimationLoop(() => {
   if (toastTimer > 0) { toastTimer -= dt; if (toastTimer <= 0) ui.toast.classList.remove("show"); }
   drawCrowd();
   updateCamera(dt);
-  if (live) { updateKeyAim(dt); tickBoost(dt); tickBlackout(dt); tickHood(dt); tickDisguise(dt); }
+  if (live) { tickKeyLook(dt); updateKeyAim(dt); tickBoost(dt); tickBlackout(dt); tickHood(dt); tickDisguise(dt); }
   updateAimPreview();
   updateKeyHint();
   updateAutoTarget();
@@ -7251,6 +7324,8 @@ if (debug) {   // test-only helpers (only with ?debug in the URL)
     runs() { return loadRuns(); },
     seedRuns(a) { saveRuns(a); },
     kickMe() { const i = game.hotbar.findIndex((x) => x?.key === "kickMe"); if (i >= 0) stickKickMe(i); },
+    camYaw() { return cam.yaw; },
+    kicks() { return { staff: staff.filter((s) => s.kickMe).map((s) => [s.key, !!s.penned, Math.round(s.stunT * 100) / 100]), kidKicks: crowd.filter((c) => c.kickT > 0).length, target: kickTarget() ? (kickTarget().isStaff ? "staff" : "kid") : null, ring: crowd.filter((c) => c.mode === "gather").length, ringD: staff.filter((s) => s.penned).map((s) => crowd.filter((c) => c.mode === "gather").map((c) => Math.round(Math.hypot(c.x - s.x, c.z - s.z) * 10) / 10)), next: staff.filter((s) => s.penned).map((s) => s.nextKickT) }; },
     penInfo() { return staff.map((s) => ({ key: s.key, kickMe: !!s.kickMe, penned: !!s.penned, x: s.x, z: s.z, facing: s.facing })); },
     gathered() { return crowd.filter((c) => c.mode === "gather").length; },
     dares() { return { active: game.dares.map((m) => ({ id: m.id, n: m.n, need: m.need, p: m.p, got: m.got, text: DARES[m.id].text(m) })), offer: game.dareOffer?.id ?? null, done: game.daresDone }; },
