@@ -272,9 +272,11 @@
   #tutCard .tutBtns { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 8px; }
   #tutCard .tutBtns .go { margin: 0; padding: 8px 18px; font-size: 15px; border: 0; border-radius: 999px; background: #ffd36b; color: #1d2230; font-weight: 800; cursor: pointer; font-family: inherit; }
   #tutCard .tutBtns .go.ghost { background: rgba(255,255,255,.12); color: #fff; }
-  #tutSkip { position: absolute; left: max(10px, env(safe-area-inset-left)); top: max(10px, env(safe-area-inset-top)); pointer-events: auto;
+  #tutSkip { position: absolute; left: calc(max(10px, env(safe-area-inset-left)) + 48px); bottom: max(14px, env(safe-area-inset-bottom)); pointer-events: auto;
     border: 0; border-radius: 9px; padding: 6px 11px; background: rgba(20,24,36,.8); color: #c9d3e6; font: 700 12px system-ui, sans-serif; }
-  .tut #strikes, .tut #meters, .tut #dares, .tut #uses, .tut #mult, .tut #phase, .tut #friends, .tut #kbdHelp { display: none !important; }
+  .tut #uses, .tut #mult, .tut #friends, .tut #kbdHelp, .tut:not(.tutDays) #strikes, .tut:not(.tutHeat) #meters, .tut:not(.tutDares) #dares, .tut:not(.tutDays) #phase { display: none !important; }
+  #tutCard.low { top: auto; bottom: max(12px, env(safe-area-inset-bottom)); width: min(470px, 72vw); }
+  #tutCard .soon { font-size: .85em; color: #8ef0a0; }
   .overlay { z-index: 6; position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
     background: rgba(12, 14, 22, .72); padding: 16px; text-align: center; cursor: pointer; }
   .overlay[hidden] { display: none; }
@@ -428,7 +430,7 @@
 
 <div class="overlay" id="title">
   <div>
-    <span class="tag">prototype · build step 74</span>
+    <span class="tag">prototype · build step 75</span>
     <h1>Hall Goblin</h1>
     <p>Skip class. Don't get caught.</p>
     <div class="buttons">
