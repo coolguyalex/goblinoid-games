@@ -1100,18 +1100,75 @@ for (const [mh, t] of [[6, 5], [6, 19.5], [6, 34], [6 + BASE_HALLS, 9], [6 + BAS
 // =====================================================================================
 // Characters
 // =====================================================================================
-function makePerson({ body, skin = 0xf1c27d, scale = 1, hat = null, hood = null }) {
-  const g = new THREE.Group();
-  const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.27, 0.32, 1.05, 7), lambert(body));
-  torso.position.y = 0.55; g.add(torso);
-  const head = new THREE.Mesh(new THREE.IcosahedronGeometry(0.23, 0), lambert(skin));
-  head.position.y = 1.32; g.add(head);
-  const eyes = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.06, 0.05), lambert(0x222222));
-  eyes.position.set(0, 1.36, 0.2); g.add(eyes);           // shows which way they face (+z)
-  g.userData.eyes = eyes;
-  if (hood) { const hd = new THREE.Mesh(new THREE.IcosahedronGeometry(0.25, 0), lambert(hood)); hd.position.set(0, 1.36, -0.08); hd.scale.set(1, 1, 0.9); g.add(hd); }
-  if (hat) { const ht = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.1, 0.48), lambert(hat)); ht.position.set(0, 1.52, 0.05); g.add(ht); }
-  g.userData.hat = !!hat;
+// Step 63: staff are grown-ups with jointed legs and arms (they swing as they walk) and a uniform for each job, not cylinders.
+// Head center at 1.40 before their scale. userData: legs, arms (for animateKid), eyes (a group, so a squint squashes it in place), hand (right).
+const STAFF_LOOKS = {
+  hallMonitor:   { shirt: 0x4a6fa5, pants: 0xb59f74, shoes: 0x3a2a1c, vest: 0xe8c547, whistle: true },
+  securityGuard: { shirt: 0x26364f, pants: 0x1a1f2b, shoes: 0x0e0e0e, badge: true, belt: true },
+  principal:     { shirt: 0x3b3f4a, pants: 0x3b3f4a, shoes: 0x1a1a1a, suit: true, glasses: true, hair: ["bald", "short"] },
+  custodian:     { shirt: 0x4f6d7a, pants: 0x4f6d7a, shoes: 0x2b2b2b, keys: true },
+  hallTeacher:   { shirt: 0x8e5a9b, pants: 0x3a3a44, shoes: 0x2b1d14, cardigan: true, glasses: 0.5, hair: ["bun", "short", "long", "bald"] },
+};
+function makePerson({ body, skin = 0xf1c27d, scale = 1, hat = null, kind = null }) {
+  const L = STAFF_LOOKS[kind] ?? { shirt: body, pants: 0x3a3a44, shoes: 0x222222 };
+  const g = new THREE.Group(), lam = (c) => lambert(c);
+  const mesh = (geo, mat, x, y, z, parent = g) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); parent.add(m); return m; };
+  const shirtM = lam(L.shirt), pantsM = lam(L.pants), skinM = lam(skin), depth = 0.66;
+  const hipY = 0.64, shoulderY = 1.18, headY = 1.4, headR = 0.21, sh = 0.26, waist = 0.22, hip = 0.23;
+  // torso
+  const chest = mesh(new THREE.CylinderGeometry(sh, waist, shoulderY - 0.82, 9), shirtM, 0, (shoulderY + 0.82) / 2, 0); chest.scale.z = depth;
+  const belly = mesh(new THREE.CylinderGeometry(waist, hip, 0.82 - hipY + 0.02, 9), L.suit || L.cardigan ? shirtM : lam(L.shirt), 0, (0.82 + hipY) / 2, 0); belly.scale.z = depth;
+  mesh(new THREE.SphereGeometry(sh, 9, 3, 0, Math.PI * 2, 0, Math.PI / 2), shirtM, 0, shoulderY - 0.005, 0).scale.set(1, 0.3, depth);
+  mesh(new THREE.CylinderGeometry(hip, hip * 0.95, 0.12, 9), pantsM, 0, hipY - 0.03, 0).scale.z = depth;
+  mesh(new THREE.CylinderGeometry(0.07, 0.08, 0.12, 6), skinM, 0, shoulderY + 0.05, 0);   // neck
+  const front = (r, y) => r * depth + 0.006;   // the body's front surface (roughly)
+  // legs and arms, each swinging from a pivot
+  const legs = [], arms = []; let hand = null;
+  for (const sx of [-1, 1]) {
+    const lp = new THREE.Group(); lp.position.set(sx * hip * 0.5, hipY, 0); g.add(lp); legs.push(lp);
+    mesh(new THREE.CylinderGeometry(0.085, 0.075, hipY - 0.07, 7), pantsM, 0, -(hipY - 0.07) / 2, 0, lp);
+    mesh(new THREE.BoxGeometry(0.14, 0.08, 0.27), lam(L.shoes), 0, -hipY + 0.04, 0.045, lp);
+    const ap = new THREE.Group(); ap.position.set(sx * (sh + 0.04), shoulderY - 0.05, 0); ap.rotation.z = sx * 0.06; g.add(ap); arms.push(ap);
+    mesh(new THREE.CylinderGeometry(0.068, 0.06, 0.5, 7), shirtM, 0, -0.25, 0, ap);
+    mesh(new THREE.IcosahedronGeometry(0.06, 0), skinM, 0, -0.54, 0, ap);
+    if (sx === 1) { hand = new THREE.Group(); hand.position.set(0, -0.54, 0.02); ap.add(hand); }
+  }
+  // head, eyes, hair
+  mesh(new THREE.IcosahedronGeometry(headR, 1), skinM, 0, headY, 0).scale.y = 1.06;
+  const eyes = new THREE.Group(); eyes.position.set(0, headY + 0.03, headR - 0.015); g.add(eyes);
+  for (const sx of [-1, 1]) mesh(new THREE.BoxGeometry(0.05, 0.045, 0.03), lam(0x1d1d1d), sx * 0.075, 0, 0, eyes);
+  const hairStyle = pick(L.hair ?? ["short", "short", "bald", "bun"]), hairM = lam(pick([0x2a1d15, 0x4a3426, 0x8a8f96, 0xc9c3b8, 0x15110f, 0x6b4423]));
+  if (!hat && hairStyle !== "bald") {
+    mesh(new THREE.SphereGeometry(headR * 1.07, 12, 5, 0, Math.PI * 2, 0, Math.PI * 0.42), hairM, 0, headY + 0.02, -0.015).scale.y = 1.1;
+    if (hairStyle === "bun") mesh(new THREE.IcosahedronGeometry(0.075, 1), hairM, 0, headY + 0.17, -0.13);
+    if (hairStyle === "long") mesh(new THREE.BoxGeometry(0.36, 0.3, 0.07), hairM, 0, headY - 0.1, -0.17);
+  } else if (hairStyle === "bald" && !hat) for (const sx of [-1, 1]) mesh(new THREE.BoxGeometry(0.04, 0.08, 0.12), hairM, sx * headR * 0.95, headY - 0.01, -0.04);   // a fringe over the ears
+  if (hat) {   // a cap with a brim
+    const hm = lam(hat);
+    mesh(new THREE.SphereGeometry(headR * 1.09, 12, 5, 0, Math.PI * 2, 0, Math.PI * 0.45), hm, 0, headY + 0.02, -0.01).scale.y = 1.05;
+    mesh(new THREE.BoxGeometry(0.3, 0.025, 0.17), hm, 0, headY + 0.08, headR * 0.95);
+  }
+  const glasses = L.glasses === true || (L.glasses && Math.random() < L.glasses);
+  if (glasses) { const gm = lam(0x222222); for (const sx of [-1, 1]) mesh(new THREE.TorusGeometry(0.05, 0.011, 4, 10), gm, sx * 0.075, 0, 0.012, eyes); mesh(new THREE.BoxGeometry(0.05, 0.012, 0.012), gm, 0, 0.01, 0.012, eyes); }
+  // the job
+  const fz = front(sh * 0.95);
+  if (L.vest) {   // hi-vis vest with reflective stripes
+    const v = mesh(new THREE.CylinderGeometry(sh * 1.06, hip * 1.07, shoulderY - hipY - 0.02, 12, 1, true, 0.35, Math.PI * 2 - 0.7), new THREE.MeshLambertMaterial({ color: L.vest, flatShading: true, side: THREE.DoubleSide }), 0, (shoulderY + hipY) / 2 + 0.01, 0); v.scale.z = depth;
+    for (const y of [0.98, 0.8]) { const st = mesh(new THREE.CylinderGeometry(sh * 1.08 - (1.18 - y) * 0.06, sh * 1.08 - (1.18 - y) * 0.06 - 0.005, 0.035, 12, 1, true, 0.35, Math.PI * 2 - 0.7), new THREE.MeshLambertMaterial({ color: 0xd8dde3, side: THREE.DoubleSide }), 0, y, 0); st.scale.z = depth; }
+  }
+  if (L.whistle) { mesh(new THREE.BoxGeometry(0.012, 0.22, 0.008), lam(0xc0392b), 0, shoulderY - 0.1, fz + 0.01); mesh(new THREE.BoxGeometry(0.05, 0.03, 0.03), lam(0xd8dce2), 0, shoulderY - 0.22, fz + 0.025); }
+  if (L.badge) mesh(new THREE.BoxGeometry(0.06, 0.07, 0.015), lam(0xd4af37), -0.11, 1.02, front(sh * 0.9) + 0.01);
+  if (L.belt || L.keys) {
+    const b = mesh(new THREE.TorusGeometry(hip * 1.01, 0.025, 4, 16), lam(L.belt ? 0x111111 : 0x3a2a1c), 0, hipY + 0.05, 0); b.rotation.x = Math.PI / 2; b.scale.y = depth;
+    if (L.belt) { mesh(new THREE.BoxGeometry(0.07, 0.12, 0.05), lam(0x222222), hip * 0.9, hipY + 0.0, 0.02); mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.2, 6), lam(0x333333), -hip * 0.95, hipY - 0.02, 0.02); }   // radio, flashlight
+    if (L.keys) { const k = mesh(new THREE.TorusGeometry(0.04, 0.008, 4, 10), lam(0xd8dce2), hip * 0.85, hipY - 0.01, front(hip * 0.85) * 0.5); k.rotation.y = Math.PI / 2; }
+  }
+  if (L.suit || L.cardigan) {   // a white shirt showing at the front, and for the principal a red tie
+    mesh(new THREE.BoxGeometry(0.11, 0.3, 0.02), lam(0xf2f2f2), 0, shoulderY - 0.17, fz);
+    if (L.suit) mesh(new THREE.BoxGeometry(0.05, 0.3, 0.02), lam(0xc0392b), 0, shoulderY - 0.2, fz + 0.012);
+    if (L.cardigan) for (let i = 0; i < 4; i++) mesh(new THREE.BoxGeometry(0.02, 0.02, 0.01), lam(0xe8e2d0), 0.065, 1.08 - i * 0.1, front(sh * 0.85) + 0.012);
+  }
+  g.userData = { eyes, legs, arms, hand, walk: Math.random() * 6 };
   g.scale.setScalar(scale);
   scene.add(g);
   return g;
@@ -1579,10 +1636,9 @@ const staff = [];
 const markersEl = document.getElementById("markers");
 function spawnStaff(typeKey, place) {
   const T = STAFF_TYPES[typeKey];
-  const mesh = makePerson({ body: T.vestColor, skin: pick(SKIN_COLORS), scale: T.scale, hat: T.hatColor });
+  const mesh = makePerson({ body: T.vestColor, skin: pick(SKIN_COLORS), scale: T.scale, hat: T.hatColor, kind: typeKey });
   if (typeKey === "principal") {   // a red tie
-    const tie = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.4, 0.04), lambert(0xc0392b));
-    tie.position.set(0, 0.85, 0.3); mesh.add(tie);
+    // (step 63: the suit and tie are part of the model now)
   }
   if (typeKey === "custodian") {   // a mop over the shoulder
     const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 1.6, 5), lambert(0xc8a46a));
@@ -1590,8 +1646,8 @@ function spawnStaff(typeKey, place) {
     const head = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.14, 0.22), lambert(0xe8e2d0)); head.position.set(0.6, 0.18, 0); mesh.add(head);
   }
   if (T.stationary) {   // a coffee mug, so teachers read differently from a distance
-    const mug = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.14, 6), lambert(0xffffff));
-    mug.position.set(0.3, 0.85, 0.2); mesh.add(mug);
+    const mug = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.055, 0.13, 8), lambert(0xffffff));
+    mug.position.set(0, 0.0, 0.06); mesh.userData.hand.add(mug); mesh.userData.arms[1].rotation.x = -1.0;   // held up, mid-sip
   }
   const RAYS = CFG.render.coneRays;
   const geo = new THREE.BufferGeometry();
@@ -3091,6 +3147,7 @@ function updateStaff(dt, cover) {
     if (st.state !== "chase" && st.state !== "bust" && st.state !== "search") st.chaseT = Math.max(0, st.chaseT - dt);
     st.mesh.position.set(st.x, speed > 0.2 ? Math.abs(Math.sin(game.time * (st.state === "chase" ? 12 : 7))) * 0.06 : 0, st.z);
     st.mesh.rotation.y = st.facing;
+    animateKid(st.mesh, speed, dt);   // step 63: legs and arms swing
     // the squint: suspicious staff narrow their eyes and lean in
     const squint = st.suspicion > 0.05 && !isAlarmed(st);
     st.mesh.userData.eyes.scale.y = squint ? 0.3 : 1; st.mesh.rotation.x = squint ? 0.12 : 0;
@@ -4780,7 +4837,7 @@ function stickKickMe(slot) {
   }
   st.kickMe = true;
   st.sign = new THREE.Mesh(new THREE.PlaneGeometry(0.46, 0.3), new THREE.MeshBasicMaterial({ map: kickMeTex, side: THREE.DoubleSide }));
-  st.sign.position.set(0, 0.8, -0.34); st.sign.rotation.y = Math.PI; st.mesh.add(st.sign);
+  st.sign.position.set(0, 0.92, -0.19); st.sign.rotation.y = Math.PI; st.mesh.add(st.sign);
   playBlip([700, 900], 0.05, "square", 0.04);
   havoc("kickMe", T.points, `"KICK ME" on the ${st.type.name}!`, { x: st.x, z: st.z });
   dareEvent("kickMe", { staff: st.key });
@@ -5152,7 +5209,7 @@ function finishSignJob(st, j) {
   return true;
 }
 let snapHold = 0;
-const PLUNGER_HEAD_Y = 1.45;   // where the cup sits on a staff member's head (head center 1.32, before their scale)
+const PLUNGER_HEAD_Y = 1.55;   // where the cup sits on a staff member's head (head center 1.40, before their scale)
 // the plunger: stuck to whoever it hits (they stumble around blind) or to the wall
 function plungerHit(o, who, isStaff) {
   const T = o.T;
