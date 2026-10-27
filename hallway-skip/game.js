@@ -226,7 +226,7 @@ const CFG = {
     // Step 79: a rummage picks the kind of thing first, then the item, so new items in one kind don't crowd out the pranks.
     // (Bananas and whoopee cushions: about 1 in 10 rummages each, up from about 1 in 16.)
     kinds: {
-      prank:  [0.45, [["spitball", 4], ["whoopee", 3], ["bananaPeel", 3], ["paperAirplane", 3], ["kickMe", 1]]],
+      prank:  [0.47, [["spitball", 4], ["whoopee", 3], ["bananaPeel", 3], ["paperAirplane", 3], ["rubberChicken", 1.5], ["kickMe", 1]]],
       sports: [0.2,  [["basketball", 1.5], ["football", 1], ["frisbee", 1.5], ["skateboard", 1.5]]],
       snack:  [0.15, [["gum", 2], ["energyDrink", 1]]],
       junk:   [0.2,  [["oldSock", 1], ["sandwich", 1], ["homework", 1]]],
@@ -632,7 +632,7 @@ const ROOM_TYPES = {
   science:   { label: "Science lab", plaque: 0x2ecc71, loot: [["stinkBomb", 4], ["slime", 4], ["mentos", 3], ["skeleton", 1.5]], count: [1, 2] },
   art:       { label: "Art room", plaque: 0xe67e22, always: ["sprayPaint"], count: [1, 1],
                loot: [["kickMe", 3], ["paperAirplane", 3], ["glitterBomb", 2.5], ["gum", 3], ["spitball", 2], ["wheelieChair", 1]] },   // step 79: glitter bombs
-  music:     { label: "Band room", plaque: 0x9b59b6, loot: [["trumpet", 3], ["bassDrum", 3]], count: [1, 2] },
+  music:     { label: "Band room", plaque: 0x9b59b6, loot: [["trumpet", 3], ["bassDrum", 3], ["disguise", 1]], count: [1, 2] },   // (the drama club keeps its costumes in here)
   gym:       { label: "Gym", plaque: 0xe74c3c, loot: [["basketball", 4], ["football", 3], ["frisbee", 3], ["energyDrink", 2]], count: [1, 2] },
   // The office always has a hall pass and the staff key (restocked whenever the door's open again), but the secretary
   // is jumpy: if she catches you, she calls every staff member to the office and your heat jumps.
@@ -677,6 +677,10 @@ const ITEM_TYPES = {
                    noiseRadius: 10, bouncePoints: 6,
                    hit: { student: 35, staff: 140, studentSec: 1.2, staffSec: 2.2, style: "fall", minSpeed: 2 } },
   // Step 68: the three science-lab items are flasks (yellow, green, red). The flask breaks: only the mess is left.
+  rubberChicken: { label: "Rubber chicken", icon: "🐔", kind: "throw", recoverable: true, speed: [4, 10], pitchDeg: 28, gravity: 9.8,   // step 80: lockers
+                   points: 20, lureRadius: 13 },   // squawks where it lands: staff nearby go and check it out. Pick it up and throw it again.
+  disguise:      { label: "Disguise kit", icon: "🥸", kind: "disguise", sec: 20, noticeMult: 0.5 },   // step 80: the theater kid's trick. Heat drops a star,
+                                                                                                // chasers lose you, and for a while you're harder to notice
   glitterBomb:   { label: "Glitter bomb", icon: "✨", kind: "throw", speed: [4, 9], pitchDeg: 30, gravity: 9.8,   // step 79: art rooms (and the fabulous kid)
                    points: 30, fogRadius: 2.6, fogSec: 9, noiseRadius: 6 },   // a big sparkly cloud nobody can see into or through
   stinkBomb:     { label: "Stink bomb", icon: "🟡", flask: "stink", kind: "throw", speed: [4, 9], pitchDeg: 30, gravity: 9.8,   // science labs only
@@ -1470,7 +1474,7 @@ const kmat = (c) => (typeof c === "string" ? new THREE.MeshLambertMaterial({ map
 const OUTFIT_PERKS = {
   jock: ["football"], nerd: ["slime", "stinkBomb", "mentos"], punk: ["sprayPaint"], skater: ["kickMe"], band: ["trumpet", "bassDrum"],
   goth: ["skeleton"], cheer: ["loveNote"], fabulous: ["glitterBomb"], pajama: ["oldSock"], goblin: ["slime"], burnout: ["stinkBomb"],
-  prep: ["hallPass"],   // theater kid: to be decided
+  prep: ["hallPass"], theater: ["disguise"],
 };
 const perkText = (outfit) => (OUTFIT_PERKS[outfit] ?? []).map((k) => `${ITEM_TYPES[k].icon} ${ITEM_TYPES[k].label.toLowerCase()}`).join(" or ");
 const OUTFITS = {
@@ -2325,6 +2329,7 @@ function morningSetup(arrive = true) {   // (arrive = false: the halls are alrea
   if (player.ride) { scene.remove(player.ride.chair); player.ride = null; $("jumpBtn").hidden = true; }
   player.slipT = player.dazeT = player.stuckT = 0; player.mesh.rotation.z = 0; player.stamina = 1; player.staminaMax = 1; player.boostT = 0; player.winded = false;
   if (player.hoodT > 0) hoodDown(); player.hoodCD = 0;
+  if (player.disguiseT > 0) { player.disguiseT = 0; disguiseMesh(false); }
   hopOff(true);
   game.hotbar = Array(slotCount()).fill(null);
   game.perk = null;
@@ -2765,6 +2770,7 @@ function applyLook() {
   if (player.kid) { player.mesh.remove(player.kid); disposeTree(player.kid); }
   player.kid = buildKid(character.look); player.mesh.add(player.kid);
   showHood(player.hoodT > 0);
+  if (player.disguiseT > 0) disguiseMesh(true);
 }
 function disposeTree(o) { o.traverse((m) => { if (m.geometry) m.geometry.dispose(); if (m.material && !m.material.map) m.material.dispose(); }); }
 applyLook();
@@ -3269,6 +3275,7 @@ function noticeRate(st, d, cover) {
   if (player.sprinting) rate *= CFG.sprint.noticeMult;   // a running kid stands out
   if (game.phase === "passing") rate /= D.passingBeatMult;
   if (player.hoodT > 0) rate *= CFG.hoodie.noticeMult;   // hood up: just another kid in a hoodie
+  if (player.disguiseT > 0) rate *= ITEM_TYPES.disguise.noticeMult;   // step 80: who's that?
   if (player.board) rate *= ITEM_TYPES.skateboard.noticeMult;   // a kid on a skateboard stands out
   return rate;
 }
@@ -4218,6 +4225,14 @@ function makeItemMesh(key) {
     case "frisbee": m(new THREE.CylinderGeometry(0.2, 0.17, 0.04, 14), 0xff5a36); break;
     case "kickMe": m(new THREE.BoxGeometry(0.3, 0.02, 0.2), 0xffffff); break;
     case "mentos": case "slime": case "stinkBomb": flaskMesh(g, key); break;   // step 68
+    case "rubberChicken": {   // floppy yellow body, red comb, orange beak, dangling neck
+      const b = m(new THREE.CapsuleGeometry(0.06, 0.3, 3, 8), 0xf7d13b); b.rotation.x = Math.PI / 2;
+      const h = m(new THREE.IcosahedronGeometry(0.06, 1), 0xf7d13b); h.position.set(0, 0.04, 0.22);
+      const c = m(new THREE.BoxGeometry(0.015, 0.05, 0.07), 0xd62828); c.position.set(0, 0.11, 0.22);
+      const k = m(new THREE.ConeGeometry(0.02, 0.06, 6), 0xff8a2b); k.rotation.x = Math.PI / 2; k.position.set(0, 0.04, 0.29);
+      for (const sx of [-1, 1]) { const f = m(new THREE.BoxGeometry(0.02, 0.02, 0.1), 0xff8a2b); f.position.set(sx * 0.04, -0.03, -0.2); }
+      break;
+    }
     case "glitterBomb": {   // a little pink jar of glitter with a gold lid
       m(new THREE.CylinderGeometry(0.08, 0.08, 0.2, 10), 0xff7ad1);
       const n = m(new THREE.CylinderGeometry(0.085, 0.085, 0.05, 10), 0xffcf3f); n.position.y = 0.12; break;
@@ -4429,6 +4444,7 @@ function selectSlot(i, fromKey = false) {
   if (T.kind === "instant") { consumeSlot(i); toast(T.line); havoc(it.key, T.points, T.label, { x: player.x, z: player.z }); return; }
   if (T.kind === "board") { if (player.board) hopOff(); else hopOn(); return; }
   if (T.kind === "drink") { consumeSlot(i); drinkEnergy(); return; }
+  if (T.kind === "disguise") { consumeSlot(i); putOnDisguise(); return; }
   if (T.kind === "instrument") { consumeSlot(i); playTrumpet(); return; }
   if (T.kind === "mop") { if (jamDoor()) consumeSlot(i); return; }
   if (T.kind === "place") { consumeSlot(i); placeSign(it.key); return; }
@@ -4925,6 +4941,7 @@ function landObject(o) {
     case "basketball": case "football": o.state = "rolling"; break;
     case "stinkBomb": popStinkBomb(o); break;
     case "glitterBomb": popFog(o); break;
+    case "rubberChicken": o.state = "resting"; squawk(o); break;
     default: o.state = "resting";
   }
   capLying();
@@ -5964,7 +5981,7 @@ function setStars(n) {
     playBlip([520, 660, 880].slice(0, 1 + Math.min(2, n - 1)), 0.09, "square", 0.06);
     if (n >= 1 && was < 1) pa("heatHigh");
     if (n >= 5 && was < 5) radioAll();
-  } else toast(n ? `Heat cooling off: ${"★".repeat(n)}` : "Heat's off. You're just another kid again.", 2);
+  } else if (!(player.disguiseT > ITEM_TYPES.disguise.sec - 1)) toast(n ? `Heat cooling off: ${"★".repeat(n)}` : "Heat's off. You're just another kid again.", 2);
   $("stars").classList.remove("bump"); void $("stars").offsetWidth; $("stars").classList.add("bump");
 }
 // extra staff that come out with your stars (and head back once your heat drops)
@@ -6196,6 +6213,47 @@ function popup(text, cls = "") {
 // =====================================================================================
 // Step 8: the principal, friends and passing-period mini-games, risk scoring
 // =====================================================================================
+// Step 80: the rubber chicken. BAWK. Staff nearby go and see what that was (a lure), kids laugh.
+function squawk(o) {
+  playBlip([880, 1320, 700, 1100, 520], 0.07, "sawtooth", 0.09);
+  makeNoise(o.x, o.z, o.T.lureRadius, true);
+  havoc("rubberChicken", o.T.points, "BAWK!", { x: o.x, z: o.z });
+  for (const c of crowd) if (isActive(c) && Math.hypot(c.x - o.x, c.z - o.z) < 5 && Math.random() < 0.4) kidSay(c, ["LMAO", "Was that a CHICKEN?", "*cackling*", "Bawk bawk!"], 2);
+  dareEvent("chicken");
+}
+// Step 80: the disguise kit. Fake mustache, big glasses, and a nose. Nobody recognizes you.
+function putOnDisguise() {
+  const T = ITEM_TYPES.disguise, S = CFG.heat.stars;
+  if (game.stars > 0 && !game.survival) { game.heat = Math.min(game.heat, game.stars >= 2 ? S[game.stars - 2] + 1 : S[0] - 4); game.heatPending = 0; }   // down a star
+  let lost = 0;
+  for (const st of staff) {
+    if (st.state === "chase" || st.state === "search" || st.state === "bust") { st.state = "return"; st.camping = false; setReturnPoint(st); lost++; bark(st, "giveUp", true); }
+    st.suspicion = 0;
+  }
+  game.chaseOn = false;
+  player.disguiseT = T.sec; disguiseMesh(true);
+  playBlip([523, 659, 784, 1047], 0.08, "triangle", 0.06);
+  toast(lost ? "🥸 Disguise on. \"Where'd that kid go?\"" : "🥸 Disguise on. Nobody recognizes you.", 2.4);
+  tally("disguise");
+}
+function disguiseMesh(on) {
+  const kid = player.kid; if (!kid) return;
+  if (kid.userData.disguise) { kid.remove(kid.userData.disguise); kid.userData.disguise = null; }
+  if (!on) return;
+  const g = new THREE.Group(), y = kid.userData.headY, r = 0.19, blk = lambert(0x1a1a1a);
+  const fur = lambert(0x2a1a10);
+  const stache = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.05, 0.035), fur); stache.position.set(0, y - 0.058, r + 0.008); g.add(stache);
+  for (const sx of [-1, 1]) { const brow = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.025, 0.02), fur); brow.position.set(sx * 0.075, y + 0.09, r + 0.0); brow.rotation.z = -sx * 0.15; g.add(brow); }
+  const nose = new THREE.Mesh(new THREE.IcosahedronGeometry(0.04, 1), lambert(0xf0a28a)); nose.position.set(0, y - 0.015, r + 0.02); g.add(nose);
+  for (const sx of [-1, 1]) { const ring = new THREE.Mesh(new THREE.TorusGeometry(0.05, 0.014, 4, 12), blk); ring.position.set(sx * 0.075, y + 0.025, r + 0.012); g.add(ring); }
+  const bridge = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.014, 0.014), blk); bridge.position.set(0, y + 0.03, r + 0.012); g.add(bridge);
+  kid.add(g); kid.userData.disguise = g;
+}
+function tickDisguise(dt) {
+  if (!(player.disguiseT > 0)) return;
+  player.disguiseT -= dt;
+  if (player.disguiseT <= 0) { disguiseMesh(false); toast("The mustache falls off.", 1.6); }
+}
 // the cheerleader's love note comes with its own dare: get it to the gym during a later period
 function perkNoteDare() {
   if (game.dares.some((m) => m.id === "loveNote") || game.dares.length >= CFG.dares.max) return;
@@ -6779,7 +6837,7 @@ renderer.setAnimationLoop(() => {
   if (toastTimer > 0) { toastTimer -= dt; if (toastTimer <= 0) ui.toast.classList.remove("show"); }
   drawCrowd();
   updateCamera(dt);
-  if (live) { updateKeyAim(dt); tickBoost(dt); tickBlackout(dt); tickHood(dt); }
+  if (live) { updateKeyAim(dt); tickBoost(dt); tickBlackout(dt); tickHood(dt); tickDisguise(dt); }
   updateAimPreview();
   updateKeyHint();
   updateAutoTarget();
@@ -7020,6 +7078,9 @@ if (debug) {   // test-only helpers (only with ?debug in the URL)
     perk() { return { perk: game.perk ?? null, hotbar: game.hotbar.map((it) => it?.key ?? null), dares: game.dares.map((m) => DARES[m.id].text(m)) }; },
     lockerOdds(n) { const c = {}; for (let i = 0; i < n; i++) { const k = pickWeighted(pickWeighted(Object.values(CFG.lockers.kinds).map(([sh, it]) => [it, sh]))); c[k] = (c[k] ?? 0) + 1; } return c; },
     forcePeel() { game.peelT = 0; },
+    squawks() { return staff.map((st) => st.state); },
+    disguise() { return { t: player.disguiseT ?? 0, mesh: !!player.kid?.userData.disguise }; },
+    chase(k) { startChase(staff[k]); },
     sees(k) { return canSeePlayer(staff[k], 1, true).seen; },
     staffKeys() { const m = {}; for (const s of staff) m[s.key] = (m[s.key] ?? 0) + 1; return m; },
     crowdModes() { const m = {}; for (const c of crowd) m[c.mode] = (m[c.mode] ?? 0) + 1; return m; },
