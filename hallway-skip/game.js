@@ -549,7 +549,7 @@ const ROOM_TYPES = {
                loot: [["paperAirplane", 7], ["spitball", 4], ["gum", 4], ["wheelieChair", 1.2], ["energyDrink", 1], ["hallPass", 0.35], ["masterKey", 0.12]] },
   history:   { label: "History", plaque: 0xa0522d, count: [1, 2],
                loot: [["globe", 4], ["spitball", 4], ["paperAirplane", 4], ["gum", 3], ["wheelieChair", 1.2], ["energyDrink", 1], ["hallPass", 0.35], ["masterKey", 0.12]] },
-  science:   { label: "Science lab", plaque: 0x2ecc71, loot: [["stinkBomb", 4], ["slime", 4], ["mentos", 3]], count: [1, 2] },
+  science:   { label: "Science lab", plaque: 0x2ecc71, loot: [["stinkBomb", 4], ["slime", 4], ["mentos", 3], ["skeleton", 1.5]], count: [1, 2] },
   art:       { label: "Art room", plaque: 0xe67e22, always: ["sprayPaint"], count: [1, 1],
                loot: [["kickMe", 3], ["paperAirplane", 3], ["gum", 3], ["spitball", 2], ["wheelieChair", 1]] },
   music:     { label: "Band room", plaque: 0x9b59b6, loot: [["trumpet", 3], ["bassDrum", 3]], count: [1, 2] },
@@ -615,6 +615,11 @@ const ITEM_TYPES = {
                    trapRadius: 1.5, slipStaffSec: 2.4, slipStudentSec: 1.2, slipPlayerSec: 0.8, staffPoints: 110, studentPoints: 20,
                    fuseSec: 1.2, geyserSec: 4, points: 150, noiseRadius: 18, watchRadius: 14, watchKids: 10, watchSec: 9, perWatcher: 6, sprayRadius: 2.2,
                    hit: { student: 20, staff: 80, studentSec: 0.8, staffSec: 1.5, style: "flinch" } },
+  // Step 69: science labs (rare). Roll it out (aim like the bass drum): when it gets near someone, or stops, everyone
+  // close by (staff and kids) runs away screaming for a few seconds. One scare per day: after that the whole school's
+  // wise to it and it's just a prop (the custodian wheels it away), and the labs don't put another one out.
+  skeleton:      { label: "Skeleton on wheels", icon: "💀", kind: "throw", roll: true, upright: true, speed: [2.5, 6], friction: 0.45, radius: 0.5, ballR: 0.35,
+                   triggerRange: 2.6, scareRadius: 7, scareSec: 3.5, staffPoints: 150, studentPoints: 10, points: 100, noiseRadius: 6, rumbleSec: 0.5 },
   loveNote:      { label: "Love note", icon: "💌", kind: "note" },   // for the love-note dare: can't be thrown, just delivered
   sprayPaint:    { label: "Spray paint", icon: "🎨", kind: "spray", uses: 3, points: 100, wallRange: 1.7 },   // art rooms only
   masterKey:     { label: "Staff key", icon: "🔑", kind: "key", uses: 3 },
@@ -660,7 +665,7 @@ const ITEM_TYPES = {
   // Junk from lockers: takes up a slot until you toss it (select it to drop it). Staff tidy it up like anything else.
   homework:      { label: "Crumpled homework", icon: "📄", kind: "junk", line: "You toss someone's homework. It's a D-minus anyway." },
 };
-const REST_Y = { skateboard: 0.06, wetFloor: 0, mopBucket: 0, globe: 0.3, bassDrum: 0.45, trumpet: 0.06, basketball: 0.2, football: 0.14, wheelieChair: 0, whoopee: 0.08, frisbee: 0.03, slime: 0.02, mentos: 0 };   // how high items sit on the floor (default 0.04)
+const REST_Y = { skeleton: 0, skateboard: 0.06, wetFloor: 0, mopBucket: 0, globe: 0.3, bassDrum: 0.45, trumpet: 0.06, basketball: 0.2, football: 0.14, wheelieChair: 0, whoopee: 0.08, frisbee: 0.03, slime: 0.02, mentos: 0 };   // how high items sit on the floor (default 0.04)
 
 // Floor plan: a squared figure 8. An outer loop plus a main hall across the middle, around two classroom blocks.
 // Halls run node to node. "side" on a hall: +1 / -1 = which wall (+1 is the classroom side on the outer loop).
@@ -2126,7 +2131,8 @@ const RUN_STATS = [
   { id: "mopJam", icon: "🔒", get: (t) => hv(t, "mopJam"), prior: [0.02, 0.05], min: 1, text: (n) => `Mopped ${plural(n, "teacher")} into their classroom` },
   { id: "breaker", icon: "💡", get: (t) => hv(t, "breaker"), prior: [0.02, 0.05], min: 1, text: () => "Killed the lights" },
   { id: "trumpet", icon: "🎺", get: (t) => hv(t, "trumpet"), prior: [0.02, 0.05], min: 1, text: (n) => `Blasted the trumpet ${n === 1 ? "once" : n + " times"}` },
-  { id: "mentos", icon: "🥤", get: (t) => hv(t, "mentos"), prior: [0.05, 0.1], min: 1, text: (n) => `Set off ${plural(n, "fizzy geyser")}` },
+  { id: "mentos", icon: "🔴", get: (t) => hv(t, "mentos"), prior: [0.05, 0.1], min: 1, text: (n) => `Set off ${plural(n, "fizzy geyser")}` },
+  { id: "skeleton", icon: "💀", get: (t) => t.skeletonScared ?? 0, prior: [0.05, 0.1], min: 3, text: (n) => `Scared ${plural(n, "person", "people")} with a skeleton` },
   { id: "prize", icon: "💰", get: (t) => hv(t, "rarePrize"), prior: [0.02, 0.05], min: 1, text: () => "Found a confiscated stash" },
   { id: "rebel", icon: "🔥", get: (t) => t.rebel ?? 0, perRun: true, prior: [0.15, 0.35], min: 1, text: () => "Went full rebel run" },
 ];
@@ -2186,6 +2192,7 @@ function clearSave() { try { localStorage.removeItem(SAVE_KEY); } catch (e) { /*
 
 // Kid walks in from the entrance; the hall is full of students already out and about.
 function morningSetup() {
+  game.skeletonWise = false;   // step 69: a new day, and they've forgotten about the skeleton
   const { h, t } = LAYOUT.entrance, side = HALLS[h].outerSide;
   const p = hallPos(h, t, wallLat(h, side) - side * 0.8);
   player.x = p.x; player.z = p.z; player.vx = player.vz = 0;
@@ -2249,7 +2256,7 @@ function resetSpotsForPeriod() {
       if (sp.raided) { if (game.period + CFG.rooms.raidLockPeriods - 1 > sp.lockedUntil) sp.lockWhy = "raided"; sp.lockedUntil = Math.max(sp.lockedUntil, game.period + CFG.rooms.raidLockPeriods - 1); sp.raided = false; }
       if (!roomLocked(sp)) {   // restock the desks
         const [lo, hi] = sp.R.count, n = lo + Math.floor(Math.random() * (hi - lo + 1)) + (sp.teacher === "sub" && sp.R.loot.length ? 1 : 0);
-        sp.loot = [...(sp.R.always ?? []), ...Array.from({ length: n }, () => pickWeighted(sp.R.loot))];
+        sp.loot = [...(sp.R.always ?? []), ...Array.from({ length: n }, () => pickWeighted(roomLoot(sp)))];
         for (const [id, X] of Object.entries(sp.R.specials ?? {})) if (!X.daily) sp.taken.delete(id);
       }
       sp.lootVer = (sp.lootVer ?? 0) + 1;
@@ -2914,7 +2921,7 @@ function updateCrowd(dt) {
       const G = c.gather;
       if (G.done()) { c.mode = "wander"; c.gather = null; c.retargetT = 0; }
       else {
-        const there = walkTo(c, G.h, G.t, c.speed * 1.4 * dt);
+        const there = walkTo(c, G.h, G.t, c.speed * (G.speed ?? 1.4) * dt);
         c.lat += ((c.h === G.h ? G.lat : 0) - c.lat) * damp(there ? 4 : 1.5, dt);
       }
     } else if (c.mode === "toClass") {
@@ -3103,6 +3110,7 @@ function updateStaff(dt, cover) {
       continue;
     }
     if (st.plungerT > 0) { blindStumble(st, dt); continue; }   // a plunger on their head
+    if (st.fleeT > 0) { fleeStep(st, dt); continue; }   // step 69: running from the skeleton
     if (st.pauseT > 0) {   // "I saw you go in there." — a beat before chasing
       st.pauseT -= dt;
       st.facing = lerpAngle(st.facing, Math.atan2(player.x - st.x, player.z - st.z), damp(8, dt));
@@ -4007,6 +4015,36 @@ function makeItemMesh(key) {
       break;
     }
     case "gum": m(new THREE.BoxGeometry(0.16, 0.05, 0.09), 0xff8fc8); break;
+    case "skeleton": {   // step 69: a classroom skeleton hanging on a wheeled stand
+      const bone = 0xece4cc, B = (geo, x, y, z) => { const mm = m(geo, bone); mm.position.set(x, y, z); return mm; };
+      for (const a of [0.785, 2.356, 3.927, 5.498]) {   // the base: four legs with casters
+        const l = m(new THREE.BoxGeometry(0.05, 0.04, 0.36), 0x5a5f6a); l.rotation.y = a; l.position.set(Math.sin(a) * 0.17, 0.07, Math.cos(a) * 0.17);
+        const w = m(new THREE.CylinderGeometry(0.04, 0.04, 0.03, 8), 0x222222); w.rotation.z = Math.PI / 2; w.position.set(Math.sin(a) * 0.33, 0.04, Math.cos(a) * 0.33);
+      }
+      m(new THREE.CylinderGeometry(0.018, 0.018, 1.75, 6), 0x8a8f9a).position.set(0, 0.95, -0.1);   // the pole behind it
+      const hook = m(new THREE.BoxGeometry(0.03, 0.03, 0.12), 0x8a8f9a); hook.position.set(0, 1.82, -0.05);
+      const skull = B(new THREE.SphereGeometry(0.11, 12, 9), 0, 1.66, 0); skull.scale.set(0.9, 1, 1);
+      B(new THREE.BoxGeometry(0.13, 0.06, 0.1), 0, 1.55, 0.02);   // jaw
+      for (const x of [-0.04, 0.04]) { const e = m(new THREE.SphereGeometry(0.03, 8, 6), 0x111111); e.position.set(x, 1.67, 0.085); }
+      const nose = m(new THREE.ConeGeometry(0.015, 0.03, 3), 0x111111); nose.position.set(0, 1.62, 0.1); nose.rotation.x = Math.PI;
+      B(new THREE.CylinderGeometry(0.02, 0.02, 0.62, 6), 0, 1.15, -0.03);   // spine
+      for (let i = 0; i < 5; i++) {   // ribs: hoops, smaller toward the bottom
+        const r = B(new THREE.TorusGeometry(0.12 - i * 0.008, 0.012, 4, 14), 0, 1.4 - i * 0.055, 0); r.rotation.x = Math.PI / 2; r.scale.set(1, 0.75, 1);
+      }
+      B(new THREE.BoxGeometry(0.32, 0.025, 0.03), 0, 1.45, 0);   // collarbones
+      const pelvis = B(new THREE.TorusGeometry(0.1, 0.03, 5, 10), 0, 0.86, 0); pelvis.rotation.x = Math.PI / 2; pelvis.scale.set(1.2, 0.8, 1);
+      for (const sx of [-1, 1]) {
+        const arm = new THREE.Group(); arm.position.set(sx * 0.17, 1.44, 0); g.add(arm); arm.rotation.z = sx * 0.12;
+        const ua = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.016, 0.3, 5), lambert(bone)); ua.position.y = -0.15; arm.add(ua);
+        const fa = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.014, 0.27, 5), lambert(bone)); fa.position.y = -0.44; arm.add(fa);
+        const hd = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.08, 0.025), lambert(bone)); hd.position.y = -0.61; arm.add(hd);
+        (g.userData.arms ??= []).push(arm);
+        B(new THREE.CylinderGeometry(0.022, 0.018, 0.4, 5), sx * 0.08, 0.6, 0);   // thigh
+        B(new THREE.CylinderGeometry(0.018, 0.015, 0.36, 5), sx * 0.08, 0.27, 0.01);   // shin (it hangs: feet just off the base)
+        B(new THREE.BoxGeometry(0.06, 0.025, 0.12), sx * 0.08, 0.11, 0.04);
+      }
+      break;
+    }
     case "bassDrum": {   // a pivot that spins (rolling) inside the group that turns to face the way it's going
       const pivot = new THREE.Group(); g.add(pivot); g.userData.pivot = pivot;
       const add = (geo, color, y) => { const mesh = new THREE.Mesh(geo, lambert(color)); mesh.rotation.z = Math.PI / 2; mesh.position.x = y; pivot.add(mesh); return mesh; };
@@ -4087,6 +4125,10 @@ function iconHTML(key) {
   return `<svg class="ico" viewBox="0 0 32 32" aria-hidden="true"><path d="M12.5 3h7v2h-0.8v7.5l7.6 12.6A2.6 2.6 0 0 1 24 29H8a2.6 2.6 0 0 1-2.3-3.9l7.6-12.6V5h-.8z" fill="rgba(220,240,255,.25)" stroke="#eaf6ff" stroke-width="1.5" stroke-linejoin="round"/><path d="M10.2 19h11.6l3.4 5.9A1.5 1.5 0 0 1 24 27H8a1.5 1.5 0 0 1-1.2-2.1z" fill="${F[0]}"/>${F[1]}</svg>`;
 }
 
+// Step 69: only one skeleton in the school at a time, and none once it's scared everyone today.
+const skeletonOut = () => game.skeletonWise || objects.some((o) => !o.dead && o.key === "skeleton") || game.hotbar.some((it) => it?.key === "skeleton") ||
+  SPOTS.some((sp) => sp.loot?.includes("skeleton"));
+const roomLoot = (sp) => (sp.R.loot.some(([k]) => k === "skeleton") && skeletonOut() ? sp.R.loot.filter(([k]) => k !== "skeleton") : sp.R.loot);
 function pickWeighted(pairs) {
   let r = Math.random() * pairs.reduce((a, [, w]) => a + w, 0);
   for (const [k, w] of pairs) if ((r -= w) <= 0) return k;
@@ -4679,10 +4721,11 @@ function drumRoll(o, dt) {
   o.x += o.vx * dt; o.z += o.vz * dt; o.y = REST_Y[o.key];
   const sp = Math.hypot(o.vx, o.vz);
   if (sp > 0.05) o.mesh.rotation.y = Math.atan2(o.vx, o.vz);
-  o.mesh.userData.pivot.rotation.x += (sp * dt) / (T.ballR ?? 0.45);
+  if (T.upright) { for (const a of o.mesh.userData.arms) a.rotation.x = Math.sin(o.age * 9) * Math.min(0.5, sp * 0.12); skeletonCheck(o); }   // arms rattle as it rolls
+  else o.mesh.userData.pivot.rotation.x += (sp * dt) / (T.ballR ?? 0.45);
   o.rumbleT = (o.rumbleT ?? 0) - dt;
   if (o.rumbleT <= 0 && sp > 1) { o.rumbleT = T.rumbleSec; playBlip([48], 0.12, "sine", 0.05); makeNoise(o.x, o.z, T.noiseRadius, false); }
-  if (sp > T.hit.minSpeed) {
+  if (T.hit && sp > T.hit.minSpeed) {
     let p;
     while ((p = personHit(o, T.radius - 0.1, 2))) {
       if (!hitPerson(o, p.who, p.isStaff)) continue;
@@ -4690,7 +4733,62 @@ function drumRoll(o, dt) {
       o.vx *= 0.88; o.vz *= 0.88;   // the drum barely slows down
     }
   }
-  if (sp < 0.3) { o.vx = o.vz = 0; o.state = "resting"; capLying(); }
+  if (sp < 0.3) { o.vx = o.vz = 0; o.state = "resting"; if (T.upright) { for (const a of o.mesh.userData.arms) a.rotation.x = 0; skeletonScare(o); } capLying(); }
+}
+// ---- step 69: the skeleton on wheels ----
+const SCARE_LINES = ["AAAAHH!", "SKELETON!", "NOPE NOPE NOPE", "IT'S ALIVE!", "*screams*"];
+function skeletonCheck(o) {
+  if (o.scared) return;
+  const R = o.T.triggerRange, near = (w) => Math.hypot(w.x - o.x, w.z - o.z) < R;
+  if (staff.some((st) => !st.type.custodian && near(st)) || crowd.some((c) => isActive(c) && near(c))) skeletonScare(o);
+}
+function skeletonScare(o) {
+  if (o.scared) return;
+  o.scared = true; o.popped = true;   // from now on it's just a prop (the custodian wheels it away)
+  const T = o.T, inR = (w) => Math.hypot(w.x - o.x, w.z - o.z) < T.scareRadius;
+  if (game.skeletonWise) {   // they've seen it already
+    const st = staff.filter((s) => inR(s) && s.stunT <= 0)[0];
+    if (st) { st.bubble.textContent = pick(["Nice try.", "Not falling for that twice.", "Hi, Mr. Bones."]); st.barkUntil = performance.now() + 2000; st.barkAt = game.time; }
+    popup("💀 Nobody falls for it twice.", "meh"); return;
+  }
+  game.skeletonWise = true;
+  playBlip([880, 1320, 660, 1480], 0.09, "sawtooth", 0.08);
+  let nStaff = 0, nKids = 0;
+  for (const st of staff) {
+    if (!inR(st) || st.penned || st.plungerT > 0) continue;
+    if (!chaser(st)) {   // teachers at their doors and the custodian just jump out of their skin
+      stunStaff(st, T.scareSec * 0.5, "flinch"); st.bubble.textContent = pick(SCARE_LINES); st.barkUntil = performance.now() + 2200; st.barkAt = game.time; nStaff++; continue;
+    }
+    const d = Math.hypot(st.x - o.x, st.z - o.z) || 1;
+    st.fleeT = T.scareSec; st.fleeDX = (st.x - o.x) / d; st.fleeDZ = (st.z - o.z) / d; st.stunT = 0; st.stuckT = 0;
+    if (st.state === "chase" || st.state === "bust" || st.state === "search") st.state = "search";
+    st.suspicion = 0; st.bubble.textContent = pick(SCARE_LINES); st.barkUntil = performance.now() + 2200; st.barkAt = game.time;
+    nStaff++;
+  }
+  const until = game.time + T.scareSec;
+  for (const c of crowd) {
+    if (!isActive(c) || !inR(c) || c.mode === "toClass" || c.mode === "gone") continue;
+    const d = Math.hypot(c.x - o.x, c.z - o.z) || 1, pr = hallProject(c.x + ((c.x - o.x) / d) * 9, c.z + ((c.z - o.z) / d) * 9), [lo, hi] = latLimits(pr.h, pr.t);
+    c.mode = "gather"; c.gather = { h: pr.h, t: pr.t, lat: clamp(pr.lat, lo, hi), done: () => game.time > until, speed: 2.4 };
+    nKids++;
+  }
+  makeNoise(o.x, o.z, T.noiseRadius, false);
+  havoc("skeleton", T.points + nStaff * T.staffPoints + nKids * T.studentPoints,
+        nStaff || nKids ? `💀 SKELETON! ${[nStaff && plural(nStaff, "staff member"), nKids && plural(nKids, "kid")].filter(Boolean).join(" and ")} run for it` : "💀 The skeleton rolls to a stop. Nobody's around to see it.",
+        { x: o.x, z: o.z, loud: true });
+  tally("skeletonScared", nStaff + nKids);
+  dareEvent("skeleton", { staff: nStaff, kids: nKids });
+}
+// a scared staff member runs away from it, then goes back to what they were doing
+function fleeStep(st, dt) {
+  st.fleeT -= dt;
+  const ox = st.x, oz = st.z, sp = (st.type.chaseSpeed ?? 3.5) * 1.1;
+  moveToward(st, st.x + st.fleeDX * 3, st.z + st.fleeDZ * 3, sp, dt);
+  if (Math.hypot(st.x - ox, st.z - oz) < sp * dt * 0.3) { const a = Math.atan2(st.fleeDX, st.fleeDZ) + (Math.random() < 0.5 ? 1.6 : -1.6); st.fleeDX = Math.sin(a); st.fleeDZ = Math.cos(a); }   // a wall: turn down the hall
+  st.mesh.position.set(st.x, Math.abs(Math.sin(game.time * 14)) * 0.07, st.z); st.mesh.rotation.y = st.facing; st.mesh.rotation.z = 0;
+  animateKid(st.mesh, sp, dt); st.mesh.userData.eyes.scale.y = 1.4;
+  updateCone(st);
+  if (st.fleeT <= 0) { st.fleeT = 0; st.mesh.userData.eyes.scale.y = 1; if (chaser(st)) { st.state = "return"; setReturnPoint(st); } }
 }
 // one big blast: points, a little heat, and every free staff member heads for where you're standing
 function playTrumpet() {
@@ -6147,7 +6245,7 @@ if (debug) {   // test-only helpers (only with ?debug in the URL)
     playerState() { return { slipT: player.slipT, stuckT: player.stuckT, dazeT: player.dazeT, riding: !!player.ride, x: player.x, z: player.z, rideSpeed: player.ride?.speed ?? 0, heading: player.heading }; },
     jumpOff() { jumpOff(); },
     board() { return player.board ? { vx: player.board.vx, vz: player.board.vz } : null; },
-    staffFull(k) { const s = staff[k]; return { camping: !!s.camping, state: s.state, stunT: s.stunT, distractT: s.distractT, x: s.x, z: s.z, key: s.key }; },
+    staffFull(k) { const s = staff[k]; return { camping: !!s.camping, state: s.state, stunT: s.stunT, distractT: s.distractT, x: s.x, z: s.z, key: s.key, fleeT: s.fleeT ?? 0 }; },
     searchTo(k, x, z) { const st = staff[k]; st.state = "search"; st.searchT = -30; st.lastX = st.tx = x; st.lastZ = st.tz = z; },
     nodes() { return NODES.map((n) => ({ id: n.id, x: n.x, z: n.z })); },
     tidyInfo() { return staff.map((s) => ({ key: s.key, state: s.state, obj: s.tidyObj && !s.tidyObj.dead && s.state === "tidy" ? s.tidyObj.id : null, stunT: s.stunT, tidyT: s.tidyT, x: s.x, z: s.z, pauseT: s.pauseT })); },
