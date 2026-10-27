@@ -68,6 +68,7 @@ Built from `Hallway_Skip_Game_Spec` v0.2. Done so far:
 - **Step 59:** stats roll on a wider bell curve: centered on 10 with a standard deviation of 4, so about 1 stat in 5 is 6 or lower, 1 in 5 is 14 or higher, stats run 1–20 and 1s and 20s turn up (the old roll gave 18+ under 1% of the time).
 - **Step 60:** the goth gets a long black coat with a blood-red lining and silver buttons, a wallet chain that actually drapes (a loop of links hanging across the hip; it used to be two stiff half circles), and a black choker with a silver cross. The jock's jersey is now Goblins green: GOBLINS across the chest and a big squared-off 0 on the back, outlined in gold.
 - **Step 61:** the Baja looks like a real one: dense black, red, yellow and green stripes with a woven chevron look, up and down on the body and across on the chest panel (with a V-neck), the kangaroo pocket, the sleeves and the hood, so you get those squared-off blocks. The hood, when down, folds flat on the back.
+- **Step 62:** the crowd are little people instead of cylinders: a torso, hips, legs with shoes and arms with short sleeves that swing as they walk, a head with eyes, four hairstyles, pants in denim, khaki, black or gray, and backpacks on about half of them. Still one batch per body part, so phones draw it as fast as before. About one kid in ten (`CFG.crowd.detailEvery`) gets a full character model with a random outfit and hairdo when they're within 22 m of the camera (`detailDist`).
 
 ## Before turning on real ads
 

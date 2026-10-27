@@ -153,6 +153,8 @@ const CFG = {
   crowd: {
     count: 150,                   // across both floors; try other sizes with ?crowd=N in the URL (20-250)
     cullDistance: 46,             // kids farther than this (in the fog) or out of view aren't drawn at all
+    detailEvery: 10,              // step 62: one kid in this many gets the full character model (outfit, hair, the works) up close
+    detailDist: 22,               //   ...within this distance of the camera; farther away they're drawn like everyone else
     speedMin: 1.0, speedMax: 1.8, radius: 0.3,
     leaveStartFrac: 0.12,         // during passing, students head into class between these
     leaveEndFrac: 0.92,           //   fractions of the passing period
@@ -1510,20 +1512,64 @@ const showHood = (up) => { if (player.kid) setHood(player.kid, up); };
 
 // ---------- crowd (instanced: one mesh for bodies, one for heads) ----------
 const crowd = [];
-const crowdBodies = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.26, 0.3, 1.0, 6).translate(0, 0.5, 0), lambert(0xffffff), CFG.crowd.count);
-const crowdHeads = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(0.21, 0).translate(0, 1.24, 0), lambert(0xffffff), CFG.crowd.count);
-crowdBodies.setColorAt(0, new THREE.Color(0xffffff)); crowdHeads.setColorAt(0, new THREE.Color(0xffffff));   // per-kid colors, filled in each frame
-crowdBodies.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-crowdHeads.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-// drawCrowd() does its own per-kid culling; three.js would otherwise cull the whole crowd using a bounding sphere
-// computed once from the first frame, so every kid vanished at some camera angles.
-crowdBodies.frustumCulled = crowdHeads.frustumCulled = false;
-scene.add(crowdBodies, crowdHeads);
+// Step 62: crowd kids are little people (torso, hips, swinging legs and arms, a head with eyes, hair, sometimes a backpack), not cylinders.
+// Each part is one instanced mesh for the whole crowd, so it's still a handful of draw calls. Vertex colors darken bits of a part
+// (shoes, eyes, straps); the per-kid instance color does the rest.
+function mergeGeo(parts) {   // [[geometry, shade]] -> one geometry with a gray vertex color per part
+  const pos = [], nor = [], col = [];
+  for (const [geo, shade = 1] of parts) {
+    const g = geo.index ? geo.toNonIndexed() : geo; g.computeVertexNormals();
+    pos.push(...g.attributes.position.array); nor.push(...g.attributes.normal.array);
+    for (let i = 0; i < g.attributes.position.count; i++) col.push(shade, shade, shade);
+  }
+  const out = new THREE.BufferGeometry();
+  out.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3)); out.setAttribute("normal", new THREE.Float32BufferAttribute(nor, 3)); out.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+  return out;
+}
+const CK = { hipY: 0.56, shoulderY: 1.03, headY: 1.27, headR: 0.17, legX: 0.085, armX: 0.235, armY: 0.99, depth: 0.62 };   // crowd kid proportions
+const PANTS_COLORS = [0x3d5a80, 0x34507a, 0x2b3a55, 0x5b6f8c, 0xc8b07a, 0x2b2b2b, 0x6d6d6d, 0x4a4036];
+const crowdParts = (() => {
+  const C = CK, cyl = (rt, rb, h, seg = 8) => new THREE.CylinderGeometry(rt, rb, h, seg);
+  const squash = (g) => g.scale(1, 1, C.depth);
+  const torso = mergeGeo([[squash(cyl(0.2, 0.17, 0.3).translate(0, 0.88, 0))], [squash(cyl(0.17, 0.175, 0.2).translate(0, 0.65, 0))],
+    [squash(new THREE.SphereGeometry(0.2, 8, 3, 0, Math.PI * 2, 0, Math.PI / 2).scale(1, 0.3, 1).translate(0, C.shoulderY - 0.005, 0))]]);
+  const hips = mergeGeo([[squash(cyl(0.175, 0.165, 0.12).translate(0, C.hipY - 0.02, 0))]]);
+  const leg = mergeGeo([[cyl(0.07, 0.06, 0.48, 7).translate(0, -0.24, 0)], [new THREE.BoxGeometry(0.12, 0.07, 0.22).translate(0, -0.5, 0.04), 0.3]]);
+  const sleeve = mergeGeo([[cyl(0.058, 0.054, 0.17, 7).translate(0, -0.085, 0)]]);
+  const forearm = mergeGeo([[cyl(0.046, 0.04, 0.26, 7).translate(0, -0.29, 0)], [new THREE.IcosahedronGeometry(0.05, 0).translate(0, -0.44, 0)]]);
+  const head = mergeGeo([[new THREE.IcosahedronGeometry(C.headR, 1).scale(1, 1.08, 1).translate(0, C.headY, 0)], [cyl(0.055, 0.06, 0.12, 6).translate(0, C.shoulderY + 0.04, 0)],
+    [new THREE.BoxGeometry(0.04, 0.035, 0.02).translate(-0.062, C.headY + 0.02, C.headR - 0.01), 0.12], [new THREE.BoxGeometry(0.04, 0.035, 0.02).translate(0.062, C.headY + 0.02, C.headR - 0.01), 0.12]]);
+  const cap = () => new THREE.SphereGeometry(C.headR * 1.08, 12, 5, 0, Math.PI * 2, 0, Math.PI * 0.45).scale(1, 1.12, 1).translate(0, C.headY + 0.01, -0.012);
+  const hair = [
+    mergeGeo([[cap()]]),                                                                                                   // short
+    mergeGeo([[cap()], [new THREE.BoxGeometry(0.3, 0.3, 0.07).translate(0, C.headY - 0.12, -0.14)]]),                  // long
+    mergeGeo([[cap()], [cyl(0.045, 0.03, 0.2, 6).rotateX(0.5).translate(0, C.headY - 0.05, -0.2)]]),                     // ponytail
+    mergeGeo([[new THREE.IcosahedronGeometry(0.22, 1).scale(1, 0.85, 1).translate(0, C.headY + 0.07, -0.05)]]),           // big and round
+  ];
+  const pack = mergeGeo([[new THREE.BoxGeometry(0.26, 0.3, 0.12).translate(0, 0.84, -0.17)], [new THREE.BoxGeometry(0.2, 0.1, 0.05).translate(0, 0.74, -0.24), 0.8],
+    [new THREE.BoxGeometry(0.035, 0.3, 0.02).translate(-0.09, 0.88, 0.125), 0.55], [new THREE.BoxGeometry(0.035, 0.3, 0.02).translate(0.09, 0.88, 0.125), 0.55]]);
+  return { torso, hips, leg, sleeve, forearm, head, hair, pack };
+})();
+const crowdMat = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true, flatShading: true });
+function crowdInst(geo, max) {
+  const m = new THREE.InstancedMesh(geo, crowdMat, max);
+  m.setColorAt(0, new THREE.Color(0xffffff)); m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  m.frustumCulled = false;   // drawCrowd() culls kid by kid; three.js would cull the whole batch with a stale bounding sphere
+  m.count = 0; scene.add(m); return m;
+}
+const N_KIDS = CFG.crowd.count;
+const crowdBodies = crowdInst(crowdParts.torso, N_KIDS), crowdHips = crowdInst(crowdParts.hips, N_KIDS), crowdHeads = crowdInst(crowdParts.head, N_KIDS);
+const crowdLegs = crowdInst(crowdParts.leg, N_KIDS * 2), crowdSleeves = crowdInst(crowdParts.sleeve, N_KIDS * 2), crowdArms = crowdInst(crowdParts.forearm, N_KIDS * 2);
+const crowdHair = crowdParts.hair.map((g) => crowdInst(g, N_KIDS)), crowdPacks = crowdInst(crowdParts.pack, N_KIDS);
+const CROWD_DETAIL_SCALE = 0.93;   // the full character model is a little taller than a crowd kid
+function crowdLook() { const L = randomLook(); L.outfit = pick(Object.keys(OUTFITS).filter((k) => k !== "goblin")); L.skin = Math.floor(Math.random() * 8); return L; }   // (goblins are special)
 const DOOR_SPOTS = () => SPOTS.filter((sp) => sp.kind === "classroom");
 const floorDoors = (f) => SPOTS.filter((sp) => sp.kind === "classroom" && HALLS[sp.h].floor === f && !sp.jammed);
 {
   for (let i = 0; i < CFG.crowd.count; i++) {
-    crowd.push({ shirt: new THREE.Color(pick(SHIRT_COLORS)), skin: new THREE.Color(pick(SKIN_COLORS)), h: 0, t: 0, to: 0, lat: 0, x: 0, z: 0, targetLat: 0, speed: 1, mode: "gone", leaveAt: 0, door: null,
+    crowd.push({ shirt: new THREE.Color(pick(SHIRT_COLORS)), skin: new THREE.Color(pick(SKIN_COLORS)), pants: new THREE.Color(pick(PANTS_COLORS)),
+      hair: new THREE.Color(pick(HAIR_COLORS.slice(0, 8))), hairStyle: pickWeighted([[0, 5], [1, 3], [2, 2], [3, 1]]), pack: Math.random() < 0.5 ? new THREE.Color(pick(SHIRT_COLORS)).multiplyScalar(0.7) : null,
+      detailed: i % CFG.crowd.detailEvery === CFG.crowd.detailEvery - 1, detail: null, walk: Math.random() * 6, amp: 0, h: 0, t: 0, to: 0, lat: 0, x: 0, z: 0, targetLat: 0, speed: 1, mode: "gone", leaveAt: 0, door: null,
       spawnAt: 0, retargetT: 0, bob: Math.random() * 10, heading: 0, scale: rand(0.88, 1.08), slipT: 0 });
   }
 }
@@ -2752,31 +2798,63 @@ function updateCrowd(dt) {
 // into the first slots of the two instanced meshes, and the meshes draw only that many.
 const crowdMatrix = new THREE.Object3D(), frustum = new THREE.Frustum(), projScreen = new THREE.Matrix4(), cullSphere = new THREE.Sphere(new THREE.Vector3(), 0.9);
 let crowdDrawn = 0, crowdCull = true;
+const limbM = new THREE.Matrix4(), limbOut = new THREE.Matrix4(), limbE = new THREE.Euler();
+let crowdLastDraw = 0;
 function drawCrowd() {
   projScreen.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse); frustum.setFromProjectionMatrix(projScreen);
   const cx = camera.position.x, cz = camera.position.z, far = CFG.crowd.cullDistance;
-  let n = 0;
+  const now = performance.now(), fdt = Math.min(0.1, crowdLastDraw ? (now - crowdLastDraw) / 1000 : 0); crowdLastDraw = now;
+  let n = 0, nl = 0, np = 0; const nh = [0, 0, 0, 0];
   for (const c of crowd) {
-    if (c.mode === "gone" || c.mode === "spawning") continue;
-    if (crowdCull) {
-      if (Math.hypot(c.x - cx, c.z - cz) > far) continue;
-      cullSphere.center.set(c.x, 0.7, c.z);
-      if (!frustum.intersectsSphere(cullSphere)) continue;
-      if (!lineOfSight(cx, cz, c.x, c.z) && !lineOfSight(player.x, player.z, c.x, c.z) &&   // (also their shoulders, so a kid
-          !lineOfSight(cx, cz, c.x + 0.35, c.z + 0.35) && !lineOfSight(cx, cz, c.x - 0.35, c.z - 0.35)) continue;   // peeking round a corner shows)
+    const D = c.detail;
+    let show = c.mode !== "gone" && c.mode !== "spawning";
+    const dist = Math.hypot(c.x - cx, c.z - cz);
+    if (show && crowdCull) {
+      if (dist > far) show = false;
+      else {
+        cullSphere.center.set(c.x, 0.7, c.z);
+        if (!frustum.intersectsSphere(cullSphere)) show = false;
+        else if (!lineOfSight(cx, cz, c.x, c.z) && !lineOfSight(player.x, player.z, c.x, c.z) &&   // (also their shoulders, so a kid
+          !lineOfSight(cx, cz, c.x + 0.35, c.z + 0.35) && !lineOfSight(cx, cz, c.x - 0.35, c.z - 0.35)) show = false;   // peeking round a corner shows)
+      }
     }
-    crowdMatrix.position.set(c.x, Math.abs(Math.sin(game.time * 8 + c.bob)) * 0.05, c.z);
-    crowdMatrix.rotation.set(c.slipT <= 0 ? 0 : c.stunStyle === "flinch" ? 0.3 + Math.sin(game.time * 16) * 0.15 : c.stunStyle === "stuck" ? Math.sin(game.time * 10 + c.bob) * 0.12 : 1.35, c.heading, 0, "YXZ");
+    // walking: legs swing with the distance covered, settling when they stop
+    const moved = Math.hypot(c.x - (c.lx ?? c.x), c.z - (c.lz ?? c.z)); c.lx = c.x; c.lz = c.z;
+    const moving = moved > 0.003 && moved < 0.8 && c.slipT <= 0;
+    c.amp += ((moving ? 1 : 0) - c.amp) * Math.min(1, fdt * 8);
+    if (moving) c.walk += moved * 5.5;
+    if (!show) { if (D) D.visible = false; continue; }
+    const tilt = c.slipT <= 0 ? 0 : c.stunStyle === "flinch" ? 0.3 + Math.sin(game.time * 16) * 0.15 : c.stunStyle === "stuck" ? Math.sin(game.time * 10 + c.bob) * 0.12 : 1.35;
+    const bob = Math.abs(Math.sin(c.walk)) * 0.035 * c.amp, sw = Math.sin(c.walk) * 0.6 * c.amp;
+    if (c.detailed && !c.friend && dist < CFG.crowd.detailDist) {   // the full model, up close
+      const K = D ?? (c.detail = buildKid(crowdLook())); if (!D) scene.add(K);
+      K.visible = true; K.position.set(c.x, bob, c.z); K.rotation.set(tilt, c.heading, 0, "YXZ"); K.scale.setScalar(c.scale * CROWD_DETAIL_SCALE);
+      const u = K.userData; u.legs[0].rotation.x = sw; u.legs[1].rotation.x = -sw; u.arms[0].rotation.x = -sw * 0.8; u.arms[1].rotation.x = sw * 0.8;
+      continue;
+    }
+    if (D) D.visible = false;
+    crowdMatrix.position.set(c.x, bob, c.z);
+    crowdMatrix.rotation.set(tilt, c.heading, 0, "YXZ");
     crowdMatrix.scale.setScalar(c.scale);
-    crowdMatrix.updateMatrix();
-    crowdBodies.setMatrixAt(n, crowdMatrix.matrix); crowdHeads.setMatrixAt(n, crowdMatrix.matrix);
-    crowdBodies.setColorAt(n, c.shirt); crowdHeads.setColorAt(n, c.skin);
+    crowdMatrix.updateMatrix(); const M = crowdMatrix.matrix;
+    crowdBodies.setMatrixAt(n, M); crowdBodies.setColorAt(n, c.shirt);
+    crowdHips.setMatrixAt(n, M); crowdHips.setColorAt(n, c.pants);
+    crowdHeads.setMatrixAt(n, M); crowdHeads.setColorAt(n, c.skin);
+    const hm = crowdHair[c.hairStyle]; hm.setMatrixAt(nh[c.hairStyle], M); hm.setColorAt(nh[c.hairStyle]++, c.hair);
+    if (c.pack) { crowdPacks.setMatrixAt(np, M); crowdPacks.setColorAt(np++, c.pack); }
+    for (const sx of [-1, 1]) {
+      limbM.makeRotationX(sx * sw).setPosition(sx * CK.legX, CK.hipY, 0); limbOut.multiplyMatrices(M, limbM);
+      crowdLegs.setMatrixAt(nl, limbOut); crowdLegs.setColorAt(nl, c.pants);
+      limbM.makeRotationFromEuler(limbE.set(-sx * sw * 0.8, 0, sx * 0.08)).setPosition(sx * CK.armX, CK.armY, 0); limbOut.multiplyMatrices(M, limbM);
+      crowdSleeves.setMatrixAt(nl, limbOut); crowdSleeves.setColorAt(nl, c.shirt);
+      crowdArms.setMatrixAt(nl, limbOut); crowdArms.setColorAt(nl, c.skin);
+      nl++;
+    }
     n++;
   }
   crowdDrawn = n;
-  crowdBodies.count = crowdHeads.count = n;
-  crowdBodies.instanceMatrix.needsUpdate = crowdHeads.instanceMatrix.needsUpdate = true;
-  if (n) crowdBodies.instanceColor.needsUpdate = crowdHeads.instanceColor.needsUpdate = true;
+  const counts = [[crowdBodies, n], [crowdHips, n], [crowdHeads, n], [crowdLegs, nl], [crowdSleeves, nl], [crowdArms, nl], [crowdPacks, np], ...crowdHair.map((m, i) => [m, nh[i]])];
+  for (const [m, k] of counts) { m.count = k; m.instanceMatrix.needsUpdate = true; if (k) m.instanceColor.needsUpdate = true; }
 }
 
 function crowdCoverCount() {
@@ -5707,6 +5785,7 @@ if (debug) {   // test-only helpers (only with ?debug in the URL)
     faceSpot(i) { const sp = SPOTS[i], H = HALLS[sp.h]; cam.yaw = player.heading = Math.atan2(sp.side * H.nx, sp.side * H.nz); manualCamT = 99; },
     faceHall(h, dir) { cam.yaw = player.heading = hallHeading(h, dir); manualCamT = 99; },
     plungerT(k) { return staff[k].plungerT ?? 0; },
+    snapCam(x, y, z, tx, ty, tz) { camera.position.set(x, y, z); camera.lookAt(tx, ty, tz); renderer.render(scene, camera); snapHold = performance.now() + 600; },
     snapStaff(k, dist, yaw, h = 1.6) { const st = staff[k], sc = st.type.scale ?? 1; camera.position.set(st.x + Math.sin(yaw) * dist, h * sc, st.z + Math.cos(yaw) * dist); camera.lookAt(st.x, 1.35 * sc, st.z); renderer.render(scene, camera); snapHold = performance.now() + 600; },   // a close-up for screenshots (call right before one)
     staffTo(k, x, z, state) { const st = staff[k]; st.x = x; st.z = z; if (state) { st.state = state; st.suspicion = 1; } },
     setTime(t) { game.phaseT = t; },
