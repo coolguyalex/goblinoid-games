@@ -2607,7 +2607,20 @@ $("pauseOptionsBtn").addEventListener("click", openOptions);
 $("optAutoAim").addEventListener("change", (e) => { opts.autoAim = e.target.checked; saveOpts(); renderOptSummary(); });
 $("optStick").addEventListener("change", (e) => { opts.stickGuide = e.target.checked; saveOpts(); renderOptSummary(); });
 $("options").addEventListener("click", (e) => e.stopPropagation());
-$("optionsClose").addEventListener("click", () => { $("options").hidden = true; });
+$("optionsClose").addEventListener("click", () => { $("options").hidden = true; disarmReset(); });
+// step 73: reset everything (two taps, so it can't happen by accident)
+let resetArmT = 0;
+function disarmReset() { resetArmT = 0; $("resetBtn").classList.remove("armed"); $("resetBtn").textContent = "🗑 Reset game"; }
+$("resetBtn").addEventListener("click", () => {
+  if (performance.now() > resetArmT) {
+    resetArmT = performance.now() + 4000;
+    $("resetBtn").classList.add("armed"); $("resetBtn").textContent = "Tap again to erase everything";
+    setTimeout(() => performance.now() > resetArmT && disarmReset(), 4100);
+    return;
+  }
+  try { for (const k of Object.keys(localStorage)) if (k.startsWith("hallwaySkip.")) localStorage.removeItem(k); } catch (e) { /* storage blocked: nothing saved anyway */ }
+  location.replace(location.pathname + location.search);
+});
 $("pauseBtn").addEventListener("pointerdown", (e) => e.stopPropagation());
 $("hoodBtn").addEventListener("pointerdown", (e) => { e.preventDefault(); e.stopPropagation(); hoodUp(); });
 $("jumpBtn").addEventListener("pointerdown", (e) => { e.preventDefault(); e.stopPropagation(); if (player.board) hopOff(); else jumpOff(); });

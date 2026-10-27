@@ -193,6 +193,9 @@
   @media (pointer: coarse) { #hoodBtn { display: block; } }
   .state-off #hoodBtn { display: none !important; }
   /* options */
+  .resetBox { margin-top: 22px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,.12); text-align: center; }   /* step 73 */
+  .overlay .go.danger { color: #ff8f8f; box-shadow: inset 0 0 0 2px rgba(255,120,120,.6); font-size: 15px; padding: 9px 20px; margin-top: 4px; }
+  .overlay .go.danger.armed { background: #e04848; color: #fff; box-shadow: none; }
   #options { z-index: 7; background: rgba(18, 21, 31, .97); cursor: default; }
   .opt { display: flex; gap: 12px; align-items: flex-start; text-align: left; margin: 12px auto; max-width: 30em; padding: 10px 14px;
     border-radius: 12px; background: rgba(255,255,255,.07); cursor: pointer; }
@@ -423,7 +426,7 @@
 
 <div class="overlay" id="title">
   <div>
-    <span class="tag">prototype · build step 72</span>
+    <span class="tag">prototype · build step 73</span>
     <h1>Hall Goblin</h1>
     <p>Skip class. Don't get caught.</p>
     <div class="buttons">
@@ -540,6 +543,10 @@
     <label class="opt"><input type="checkbox" id="optStick"><span><b>🕹 Joystick guide</b><small>On phones, show a faint joystick where your left thumb goes and a hint for the look area.</small></span></label>
     <p class="keys">Saved in this browser.</p>
     <button class="go" id="optionsClose" type="button">Done</button>
+    <div class="resetBox">
+      <button class="go ghost danger" id="resetBtn" type="button">🗑 Reset game</button>
+      <p class="keys" id="resetNote">Erases everything saved in this browser: your run, best runs, your kid, options, and the tutorial. Like playing for the first time.</p>
+    </div>
   </div>
 </div>
 <div class="overlay scroll" id="charScreen" hidden>
