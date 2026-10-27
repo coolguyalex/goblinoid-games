@@ -509,7 +509,7 @@ const DARES = {
                  on: { bell: (m, d) => d.clean && m.p.armed } },
   tpTrail:     { need: 1, points: 250, text: () => "TP the halls: leave a 15 m toilet-paper trail", on: { trail: (m, d) => d.len >= 15 } },
   kickGuard:   { need: 1, points: 400, text: () => "Stick a \"kick me\" sign on a security guard", on: { kickMe: (m, d) => d.staff === "securityGuard" } },
-  geyserCrowd: { need: 1, points: 300, text: () => "Get 8 kids watching a soda geyser", on: { geyser: (m, d) => d.n >= 8 } },
+  geyserCrowd: { need: 1, points: 300, text: () => "Get 8 kids watching a fizzy-flask geyser", on: { geyser: (m, d) => d.n >= 8 } },
   officeRaid:  { need: 1, points: 250, text: () => "Steal something from the main office", on: { raid: (m, d) => d.type === "office" } },
 };
 const DARE_KID_LINES = ["Psst. Bet you can't", "Hey. You look bored. I dare you to", "Five bucks says you won't", "Legend says nobody's ever managed to"];
@@ -596,20 +596,23 @@ const ITEM_TYPES = {
                    bounces: [4, 7], restitution: [0.45, 0.85], erratic: 1.3,   // each bounce turns it up to ±1.3 rad, at a random bounciness
                    noiseRadius: 10, bouncePoints: 6,
                    hit: { student: 35, staff: 140, studentSec: 1.2, staffSec: 2.2, style: "fall", minSpeed: 2 } },
-  stinkBomb:     { label: "Stink bomb", icon: "🧪", kind: "throw", speed: [4, 9], pitchDeg: 30, gravity: 9.8,   // science labs only
+  // Step 68: the three science-lab items are flasks (yellow, green, red). The flask breaks: only the mess is left.
+  stinkBomb:     { label: "Stink bomb", icon: "🟡", flask: "stink", kind: "throw", speed: [4, 9], pitchDeg: 30, gravity: 9.8,   // science labs only
                    points: 60, cloudRadius: 3.2, cloudSec: 10, noiseRadius: 12,
-                   perStudent: 15, perStaff: 60, studentGagSec: 1, staffGagSec: 1.8 },   // extra points for everyone who walks through it
+                   perStudent: 15, perStaff: 60, studentGagSec: 1.4, staffGagSec: 2.2, playerGagSec: 0.7 },   // walk into it: you stop and gag (and pay out)
   // Science labs: lands as a puddle (or on whoever it hits). The first few people to step in it are stuck for a few
   // seconds: staff can still look around and yell, they just can't move.
-  slime:         { label: "Slime", icon: "🟢", kind: "throw", trap: true, speed: [4, 9], pitchDeg: 25, gravity: 9.8,
-                   radius: 1.0, maxSticks: Infinity, stickStaffSec: 6, stickStudentSec: 3.5, stickPlayerSec: 2, staffPoints: 120, studentPoints: 30 },
+  slime:         { label: "Slime", icon: "🟢", flask: "slime", kind: "throw", trap: true, speed: [4, 9], pitchDeg: 25, gravity: 9.8,
+                   radius: 1.4, maxSticks: Infinity, stickStaffSec: 6, stickStudentSec: 3.5, stickPlayerSec: 2, staffPoints: 120, studentPoints: 30 },
   // Stick it on a staff member's back (get right up behind them; if they're facing you, they catch on). During a passing
   // period the kids crowd round laughing and pen them in until the tardy bell. Stick it on during class and it waits.
   kickMe:        { label: "\"Kick me\" sign", icon: "🦵", kind: "sign", range: 1.4, points: 400, penKids: 9, penPoints: 100,
                    kidPoints: 150, kidSec: 9, kidCrowd: 7 },   // on a kid: they're stuck in a ring of laughing kids for a while
   // Science labs: lands upright, fizzes for a moment, then a geyser. Loud (staff come to look), kids crowd round to watch
-  // (cover for you), and anyone standing in the spray gets soaked.
-  mentos:        { label: "Mentos & soda", icon: "🥤", kind: "throw", speed: [3, 6.5], pitchDeg: 30, gravity: 9.8,
+  // (cover for you), and anyone standing in the spray gets soaked. Step 68: the fizzy flask (was Mentos & soda; same save key).
+  // The geyser leaves a sticky red pool: everyone slips in it once, until the custodian mops it up.
+  mentos:        { label: "Fizzy flask", icon: "🔴", flask: "fizzy", kind: "throw", speed: [3, 6.5], pitchDeg: 30, gravity: 9.8, mess: true,
+                   trapRadius: 1.5, slipStaffSec: 2.4, slipStudentSec: 1.2, slipPlayerSec: 0.8, staffPoints: 110, studentPoints: 20,
                    fuseSec: 1.2, geyserSec: 4, points: 150, noiseRadius: 18, watchRadius: 14, watchKids: 10, watchSec: 9, perWatcher: 6, sprayRadius: 2.2,
                    hit: { student: 20, staff: 80, studentSec: 0.8, staffSec: 1.5, style: "flinch" } },
   loveNote:      { label: "Love note", icon: "💌", kind: "note" },   // for the love-note dare: can't be thrown, just delivered
@@ -2123,7 +2126,7 @@ const RUN_STATS = [
   { id: "mopJam", icon: "🔒", get: (t) => hv(t, "mopJam"), prior: [0.02, 0.05], min: 1, text: (n) => `Mopped ${plural(n, "teacher")} into their classroom` },
   { id: "breaker", icon: "💡", get: (t) => hv(t, "breaker"), prior: [0.02, 0.05], min: 1, text: () => "Killed the lights" },
   { id: "trumpet", icon: "🎺", get: (t) => hv(t, "trumpet"), prior: [0.02, 0.05], min: 1, text: (n) => `Blasted the trumpet ${n === 1 ? "once" : n + " times"}` },
-  { id: "mentos", icon: "🥤", get: (t) => hv(t, "mentos"), prior: [0.05, 0.1], min: 1, text: (n) => `Set off ${plural(n, "soda geyser")}` },
+  { id: "mentos", icon: "🥤", get: (t) => hv(t, "mentos"), prior: [0.05, 0.1], min: 1, text: (n) => `Set off ${plural(n, "fizzy geyser")}` },
   { id: "prize", icon: "💰", get: (t) => hv(t, "rarePrize"), prior: [0.02, 0.05], min: 1, text: () => "Found a confiscated stash" },
   { id: "rebel", icon: "🔥", get: (t) => t.rebel ?? 0, perRun: true, prior: [0.15, 0.35], min: 1, text: () => "Went full rebel run" },
 ];
@@ -3652,7 +3655,7 @@ function renderLoot(sp) {
   }
   sp.loot.forEach((k, i) => {
     const b = document.createElement("button"); b.type = "button";
-    b.innerHTML = `${ITEM_TYPES[k].icon} ${ITEM_TYPES[k].label}<small>-${grab}s · ${risk}</small>`;
+    b.innerHTML = `${iconHTML(k)} ${ITEM_TYPES[k].label}<small>-${grab}s · ${risk}</small>`;
     b.addEventListener("click", () => grabLoot(i));
     lootEl.appendChild(b);
   });
@@ -3916,6 +3919,55 @@ function updateSpotsUI() {
 const objects = [];
 const isActive = (c) => c.mode !== "gone" && c.mode !== "spawning";
 const ringGeo = new THREE.RingGeometry(0.34, 0.46, 20);
+// Step 68: an Erlenmeyer flask with colored liquid (science-lab items). It sits upright (base at y = 0).
+// userData.flask is the glass and liquid (hidden when it breaks); userData.puddle is what it leaves on the floor.
+const FLASK = { slime: { liquid: 0x6fe03a, glow: 0x1d4a0c, puddle: 0x6fe03a, puddleOpacity: 0.85 },
+                stink: { liquid: 0xf2d33b, glow: 0x4a3a08 },
+                fizzy: { liquid: 0xe0302a, glow: 0x4a0a08, puddle: 0xc8262a, puddleOpacity: 0.6, bubbles: true } };
+const flaskGeo = {
+  glass: new THREE.LatheGeometry([[0.001, 0], [0.12, 0], [0.128, 0.012], [0.04, 0.2], [0.036, 0.21], [0.036, 0.29], [0.046, 0.3], [0.046, 0.315], [0.03, 0.315]].map(([x, y]) => new THREE.Vector2(x, y)), 14),
+  liquid: new THREE.LatheGeometry([[0.001, 0.008], [0.112, 0.008], [0.118, 0.016], [0.074, 0.12], [0.001, 0.12]].map(([x, y]) => new THREE.Vector2(x, y)), 14),
+  bubble: new THREE.IcosahedronGeometry(0.018, 0),
+};
+function flaskMesh(g, key) {
+  const F = FLASK[ITEM_TYPES[key].flask], f = new THREE.Group();
+  f.add(new THREE.Mesh(flaskGeo.glass, new THREE.MeshLambertMaterial({ color: 0xdff2ff, emissive: 0x23303a, transparent: true, opacity: 0.38, depthWrite: false, side: THREE.DoubleSide })));
+  const liq = new THREE.Mesh(flaskGeo.liquid, new THREE.MeshLambertMaterial({ color: F.liquid, emissive: F.glow })); liq.renderOrder = -1; f.add(liq);
+  const cork = new THREE.Mesh(new THREE.CylinderGeometry(0.034, 0.03, 0.05, 8), lambert(0xb08050)); cork.position.y = 0.31; f.add(cork);
+  if (F.bubbles) {   // fizzing: bubbles bob in the liquid (and up the neck)
+    f.userData.bubbles = [];
+    for (let i = 0; i < 6; i++) { const b = new THREE.Mesh(flaskGeo.bubble, new THREE.MeshBasicMaterial({ color: 0xffd0c8 })); b.userData.ph = i / 6; f.add(b); f.userData.bubbles.push(b); }
+    bubbleFlask(f, 0);
+  }
+  g.add(f); g.userData.flask = f;
+  if (F.puddle) {
+    const pud = new THREE.Mesh(splatGeo(), new THREE.MeshBasicMaterial({ color: F.puddle, transparent: true, opacity: F.puddleOpacity, depthWrite: false }));
+    pud.rotation.x = -Math.PI / 2; pud.position.y = 0.02; pud.visible = false; g.add(pud); g.userData.puddle = pud;
+  }
+}
+// A splat: a rough circle of radius about 1 with a few lobes, a little different every time.
+function splatGeo() {
+  const sh = new THREE.Shape(), n = 28, ph = [rand(0, 6), rand(0, 6), rand(0, 6)];
+  for (let i = 0; i <= n; i++) {
+    const a = (i / n) * Math.PI * 2, r = 0.92 + 0.07 * Math.sin(a * 3 + ph[0]) + 0.05 * Math.sin(a * 5 + ph[1]) + 0.04 * Math.sin(a * 8 + ph[2]);
+    i ? sh.lineTo(Math.cos(a) * r, Math.sin(a) * r) : sh.moveTo(Math.cos(a) * r, Math.sin(a) * r);
+  }
+  return new THREE.ShapeGeometry(sh);
+}
+function bubbleFlask(f, t) {
+  for (const b of f.userData.bubbles ?? []) {
+    const k = (b.userData.ph + t * 0.9) % 1, a = b.userData.ph * 11;
+    b.position.set(Math.cos(a) * 0.05 * (1 - k), 0.03 + k * 0.22, Math.sin(a) * 0.05 * (1 - k));
+  }
+}
+// The flask breaks: hide it, and (if it leaves one) show the puddle at radius r.
+function breakFlask(o, r) {
+  const u = o.mesh.userData; if (u.flask) u.flask.visible = false;
+  o.mesh.rotation.set(0, o.mesh.rotation.y, 0); o.y = 0.0; o.mesh.position.y = 0;
+  if (u.puddle && r) { u.puddle.visible = true; u.puddle.scale.setScalar(r); }
+  playBlip([1800, 1300, 2200], 0.04, "square", 0.04);   // tink-crash
+}
+
 function makeItemMesh(key) {
   const g = new THREE.Group();
   const m = (geo, color) => { const mesh = new THREE.Mesh(geo, lambert(color)); g.add(mesh); return mesh; };
@@ -3925,13 +3977,7 @@ function makeItemMesh(key) {
     case "toiletPaper": { const r = m(new THREE.CylinderGeometry(0.1, 0.1, 0.18, 10), 0xf6f6f0); r.rotation.z = Math.PI / 2; break; }
     case "frisbee": m(new THREE.CylinderGeometry(0.2, 0.17, 0.04, 14), 0xff5a36); break;
     case "kickMe": m(new THREE.BoxGeometry(0.3, 0.02, 0.2), 0xffffff); break;
-    case "mentos": {
-      m(new THREE.CylinderGeometry(0.07, 0.075, 0.32, 9), 0x4a1f0c).position.y = 0.16;
-      m(new THREE.CylinderGeometry(0.076, 0.076, 0.09, 9), 0xd62828).position.y = 0.17;
-      m(new THREE.CylinderGeometry(0.03, 0.05, 0.08, 8), 0x4a1f0c).position.y = 0.36;
-      break;
-    }
-    case "slime": { const b = m(new THREE.IcosahedronGeometry(0.13, 1), 0x7ee84a); b.material.emissive.setHex(0x1d4a0c); g.userData.blob = b; break; }
+    case "mentos": case "slime": case "stinkBomb": flaskMesh(g, key); break;   // step 68
     case "bananaPeel": {
       m(new THREE.BoxGeometry(0.16, 0.05, 0.16), 0xf2d43b);
       for (const a of [0, 2.1, 4.2]) { const p = m(new THREE.BoxGeometry(0.07, 0.03, 0.26), 0xe8c22a); p.rotation.y = a; p.position.set(Math.sin(a) * 0.12, 0, Math.cos(a) * 0.12); }
@@ -3946,11 +3992,6 @@ function makeItemMesh(key) {
     case "football": {
       const f = m(new THREE.IcosahedronGeometry(0.15, 1), 0x7b4a24); f.scale.set(0.75, 0.75, 1.5);
       const lace = m(new THREE.BoxGeometry(0.03, 0.02, 0.16), 0xffffff); lace.position.y = 0.11;
-      break;
-    }
-    case "stinkBomb": {
-      m(new THREE.CylinderGeometry(0.07, 0.09, 0.22, 7), 0x8fd14f);
-      const cap = m(new THREE.CylinderGeometry(0.05, 0.05, 0.06, 7), 0x5b3a8c); cap.position.y = 0.14;
       break;
     }
     case "sprayPaint": {
@@ -4035,6 +4076,17 @@ function spawnObject(key, state, x, y, z, extra = {}) {
 function removeObject(o) { if (o.foam) { scene.remove(o.foam); o.foam.material.dispose(); o.foam = null; } if (o.trail) { o.trail.o = null; o.trail = null; } scene.remove(o.mesh); scene.remove(o.ring); if (o.cloud) { scene.remove(o.cloud); o.cloud.material.dispose(); } o.dead = true; }
 function clearObjects() { for (const o of objects) removeObject(o); objects.length = 0; }
 
+// Step 68: drawn flask icons for the science items (in buttons and item slots; text uses the emoji). Each has its own
+// mark as well as its color (drips, stink lines, bubbles), since red and green look alike to colorblind players.
+const FLASK_ICON = { slime: ["#6fe03a", '<path d="M8.5 27c0 2 1.6 2.6 1.6 4M23 27.5c0 1.6 1.4 2 1.4 3.2" stroke="#6fe03a" stroke-width="2.2" stroke-linecap="round" fill="none"/>'],
+                     stink: ["#f2d33b", '<path d="M21 2c2 1.4-1 2.8 1 4.2M25 3c2 1.4-1 2.8 1 4.2" stroke="#f2d33b" stroke-width="1.8" stroke-linecap="round" fill="none"/>'],
+                     fizzy: ["#e0302a", '<circle cx="14" cy="22" r="1.4" fill="#ffd0c8"/><circle cx="18" cy="24.5" r="1.1" fill="#ffd0c8"/><circle cx="16" cy="15" r="1.2" fill="#ffd0c8"/><circle cx="17" cy="9" r="1" fill="#ffd0c8"/>'] };
+function iconHTML(key) {
+  const T = ITEM_TYPES[key], F = T?.flask && FLASK_ICON[T.flask];
+  if (!F) return T?.icon ?? "";
+  return `<svg class="ico" viewBox="0 0 32 32" aria-hidden="true"><path d="M12.5 3h7v2h-0.8v7.5l7.6 12.6A2.6 2.6 0 0 1 24 29H8a2.6 2.6 0 0 1-2.3-3.9l7.6-12.6V5h-.8z" fill="rgba(220,240,255,.25)" stroke="#eaf6ff" stroke-width="1.5" stroke-linejoin="round"/><path d="M10.2 19h11.6l3.4 5.9A1.5 1.5 0 0 1 24 27H8a1.5 1.5 0 0 1-1.2-2.1z" fill="${F[0]}"/>${F[1]}</svg>`;
+}
+
 function pickWeighted(pairs) {
   let r = Math.random() * pairs.reduce((a, [, w]) => a + w, 0);
   for (const [k, w] of pairs) if ((r -= w) <= 0) return k;
@@ -4061,7 +4113,7 @@ function renderHotbar() {
   hotbarEl.classList.toggle("five", game.hotbar.length > 4);
   [...hotbarEl.children].forEach((b, i) => {
     const it = game.hotbar[i]; b.hidden = i >= game.hotbar.length;
-    b.innerHTML = it ? `${ITEM_TYPES[it.key].icon}${it.uses > 1 ? `<small>${it.uses}</small>` : ""}` : "";
+    b.innerHTML = it ? `${iconHTML(it.key)}${it.uses > 1 ? `<small>${it.uses}</small>` : ""}` : "";
     b.classList.toggle("empty", !it); b.classList.toggle("active", game.aim?.slot === i || (it?.key === "skateboard" && !!player.board));
     b.title = it ? ITEM_TYPES[it.key].label : "Empty slot";
   });
@@ -4293,7 +4345,7 @@ function updateObjects(dt) {
     else if (o.state === "trap") (o.key === "slime" ? slimeCheck : trapCheck)(o);
     else if (o.state === "resting" && o.key === "whoopee") stepOnCushion(o);
     else if (o.state === "cloud") stinkCloud(o, dt);
-    else if (o.state === "fuse") { o.fuseT -= dt; o.mesh.rotation.z = Math.sin(o.age * 40) * 0.08; if (o.fuseT <= 0) { o.mesh.rotation.z = 0; startGeyser(o); } }
+    else if (o.state === "fuse") { o.fuseT -= dt; o.mesh.rotation.z = Math.sin(o.age * 40) * 0.08; if (o.mesh.userData.flask) bubbleFlask(o.mesh.userData.flask, o.age * 4); if (o.fuseT <= 0) { o.mesh.rotation.z = 0; startGeyser(o); } }
     else if (o.state === "geyser") geyserStep(o, dt);
     if (o.dead) continue;
     if (o.life !== Infinity) { o.life -= dt; if (o.life <= 0) removeObject(o); }
@@ -4579,7 +4631,7 @@ function landObject(o) {
       o.state = "spent"; o.life = o.trail ? 0.6 : 1.5; break;
     }
     case "mentos": o.state = "fuse"; o.fuseT = o.T.fuseSec; o.vx = o.vz = 0; o.mesh.rotation.set(0, 0, 0); playBlip([900, 1100], 0.05, "sine", 0.03); break;
-    case "slime": o.state = "trap"; o.mesh.userData.blob.scale.set(7.5, 0.22, 7.5); break;   // a puddle (as wide as T.radius)
+    case "slime": o.state = "trap"; breakFlask(o, o.T.radius); break;   // the flask smashes: a puddle (as wide as T.radius)
     case "spitball": o.state = "spent"; o.life = 0.4; break;
     case "bananaPeel": o.state = "trap"; o.mesh.rotation.y = Math.random() * 6; break;
     case "mopBucket": {   // tipped over: a puddle
@@ -4723,7 +4775,7 @@ function trapCheck(o) {
     if (slipped(c)) return;
   }
   if (o.age > 1.2 && !player.hidden && !player.ride && player.slipT <= 0 && !o.hitSet.has(player) && Math.hypot(player.x - o.x, player.z - o.z) < (T.trapRadius ?? 0.45)) {
-    player.slipT = T.slipPlayerSec; toast(o.key === "mopBucket" ? "You slip in your own puddle!" : "You slipped on your own banana peel!");
+    player.slipT = T.slipPlayerSec; toast(o.key === "mopBucket" ? "You slip in your own puddle!" : o.key === "mentos" ? "You slip in the fizzy puddle!" : "You slipped on your own banana peel!");
     slipped(player);
   }
 }
@@ -4968,7 +5020,7 @@ function updateKickMe(dt) {
 const foamGeo = new THREE.CylinderGeometry(0.3, 0.1, 1, 10, 1, false).translate(0, 0.5, 0);
 function startGeyser(o) {
   const T = o.T;
-  o.state = "geyser"; o.gT = T.geyserSec;
+  o.state = "geyser"; o.gT = T.geyserSec; breakFlask(o);   // the flask's gone: just the geyser
   o.foam = new THREE.Mesh(foamGeo, new THREE.MeshLambertMaterial({ color: 0xfff6e0, emissive: 0x8a7550 }));
   o.foam.position.set(o.x, 0.38, o.z); scene.add(o.foam);
   playBlip([180, 260, 340, 420], 0.12, "sawtooth", 0.06);
@@ -4987,14 +5039,19 @@ function geyserStep(o, dt) {
   o.foam.scale.set(wide * (1 + Math.sin(o.age * 30) * 0.12), Math.max(0.01, h), wide * (1 + Math.cos(o.age * 27) * 0.12));
   const p = personHit(o, T.sprayRadius, 9);
   if (p) hitPerson(o, p.who, p.isStaff);
-  if (o.gT <= 0) { scene.remove(o.foam); o.foam.material.dispose(); o.foam = null; o.state = "resting"; o.popped = true; capLying(); }   // an empty bottle: litter
+  if (o.gT <= 0) {   // step 68: no bottle left, just a sticky pool everyone slips in (once each) until the custodian mops it
+    scene.remove(o.foam); o.foam.material.dispose(); o.foam = null;
+    o.state = "trap"; o.hitSet = new Set(); o.slips = 0; o.y = 0;
+    const u = o.mesh.userData; u.puddle.visible = true; u.puddle.scale.setScalar(T.trapRadius);
+    capLying();
+  }
 }
 
 // ---- the stink bomb: pops on landing (noise pulls staff over), then a cloud that pays for everyone who walks through ----
 const cloudGeo = new THREE.IcosahedronGeometry(1, 1);
 function popStinkBomb(o) {
   const T = o.T;
-  o.state = "cloud"; o.life = T.cloudSec; o.mesh.visible = false;
+  o.state = "cloud"; o.life = T.cloudSec; breakFlask(o); o.mesh.visible = false;
   o.cloud = new THREE.Mesh(cloudGeo, new THREE.MeshBasicMaterial({ color: 0x9bd44a, transparent: true, opacity: 0.32, depthWrite: false }));
   o.cloud.position.set(o.x, 0.7, o.z); o.cloud.scale.set(T.cloudRadius, 0.9, T.cloudRadius); scene.add(o.cloud);
   playBlip([140, 90, 60], 0.14, "sawtooth", 0.09);
@@ -5020,6 +5077,10 @@ function stinkCloud(o, dt) {
     if (!isActive(c) || o.hitSet.has(c) || !inside(c.x, c.z)) continue;
     o.hitSet.add(c); c.slipT = Math.max(c.slipT, T.studentGagSec); c.stunStyle = "flinch";
     addScore(T.perStudent, "Ew!", "small"); tally("stinkGag");
+  }
+  // step 68: you're not immune either (after it's had a moment to spread)
+  if (o.age > 0.8 && !o.hitSet.has(player) && !player.hidden && !player.ride && inside(player.x, player.z)) {
+    o.hitSet.add(player); player.stuckT = Math.max(player.stuckT, T.playerGagSec); toast("*gag* You walked into the stink!");
   }
 }
 
@@ -6083,7 +6144,7 @@ if (debug) {   // test-only helpers (only with ?debug in the URL)
     objects() { return objects.filter((o) => !o.dead).map((o) => ({ key: o.key, state: o.state, x: o.x, y: o.y, z: o.z, bounces: o.bounces, life: o.life })); },
     dropItem(key, dx, dz) { const o = spawnObject(key, "pickup", player.x + dx, REST_Y[key] ?? 0.04, player.z + dz); return o.id; },
     hotbar() { return game.hotbar.map((s) => s && `${s.key}${s.uses > 1 ? "x" + s.uses : ""}`); },
-    playerState() { return { slipT: player.slipT, dazeT: player.dazeT, riding: !!player.ride, x: player.x, z: player.z, rideSpeed: player.ride?.speed ?? 0, heading: player.heading }; },
+    playerState() { return { slipT: player.slipT, stuckT: player.stuckT, dazeT: player.dazeT, riding: !!player.ride, x: player.x, z: player.z, rideSpeed: player.ride?.speed ?? 0, heading: player.heading }; },
     jumpOff() { jumpOff(); },
     board() { return player.board ? { vx: player.board.vx, vz: player.board.vz } : null; },
     staffFull(k) { const s = staff[k]; return { camping: !!s.camping, state: s.state, stunT: s.stunT, distractT: s.distractT, x: s.x, z: s.z, key: s.key }; },

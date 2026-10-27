@@ -138,6 +138,8 @@
     font-size: calc(var(--slot) * .5); position: relative; color: #fff; padding: 0; touch-action: none; cursor: pointer; }
   #hotbar.five { --slot: clamp(36px, 11.5vh, 54px); --gap: clamp(4px, 1.5vh, 8px); }   /* a strong kid's fifth slot: a little smaller to fit */
   #hotbar .slot.empty { opacity: .4; }
+  svg.ico { width: 1.15em; height: 1.15em; vertical-align: -0.2em; }   /* step 68: drawn flask icons */
+  #hotbar .slot svg.ico { width: 1.25em; height: 1.25em; display: block; margin: auto; }
   #hotbar .slot.active { border-color: #ffd36b; box-shadow: 0 0 0 3px rgba(255,211,107,.5); }
   #hotbar .slot small { position: absolute; right: 4px; bottom: 1px; font-size: 12px; font-weight: 800; }
   /* keyboard players: faint key hints */
@@ -387,7 +389,7 @@
 
 <div class="overlay" id="title">
   <div>
-    <span class="tag">prototype · build step 67</span>
+    <span class="tag">prototype · build step 68</span>
     <h1>Hall Goblin</h1>
     <p>Skip class. Don't get caught.</p>
     <div class="buttons">
