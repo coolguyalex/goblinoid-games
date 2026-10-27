@@ -1950,6 +1950,7 @@ canvas.addEventListener("pointermove", (e) => {
     const dx = e.clientX - look.lastX; look.lastX = e.clientX;
     cam.yaw -= dx * CFG.camera.dragSensitivity;
     manualCamT = CFG.camera.manualHoldSec;
+    if (tut) tut.looked += Math.abs(dx) * CFG.camera.dragSensitivity;   // step 72
   }
 });
 function endPointer(e) {
@@ -1988,6 +1989,7 @@ window.addEventListener("keydown", (e) => {
   if (/^(w|a|s|d|e|h|shift|arrow\w+|[1-9]| )$/.test(k)) setUsingKeys(true);
   if ((e.key === " " || e.key === "Enter") && game.state !== "playing") { e.preventDefault(); onOverlayTap(); return; }
   if (game.state !== "playing") return;
+  if (tut?.waitNext && (e.key === "Enter" || e.key === " ") && !e.repeat) { e.preventDefault(); tutAdvance(); return; }   // step 72
   if (e.key === "Escape") { if (game.aim) cancelAim(); else pause(); return; }
   if (k.startsWith("arrow") || k === " ") e.preventDefault();   // no page scrolling
   if (game.aim && k.startsWith("arrow") && !game.aim.kb) startKeyAim(game.aim);   // arrows take over a mouse aim
@@ -2057,6 +2059,7 @@ function readInput() {
   let m = Math.hypot(x, y);
   if (m < CFG.joystick.deadZone) { x = y = m = 0; }
   else if (m > 1) { x /= m; y /= m; m = 1; }
+  if (tut?.lockMove) x = y = m = 0;   // step 72: some tutorial scenes hold you in place
   input.x = x; input.y = y; input.m = m;
 }
 
@@ -2067,6 +2070,7 @@ const game = { state: "title", day: 1, period: 1, phase: "passing", phaseT: 0, s
   strikes: 0, highAlert: false, periodScore: 0, periodsSkipped: 0, dayPeriodsSkipped: 0, sceneT: 0, sceneEnd: null,
   lockerUses: 0, pendingOffice: false, hotbar: [], aim: null, havocCount: {}, heat: 0, heatPending: 0, security: 0, survival: false, survivalT: 0, nextArrivalT: 0, nextRadioT: 0, alarmT: 0, alarmPulled: false,
   unseenT: 0, nearMissT: 0, passShield: false, nextPlaneT: 0, nerveAcc: 0, dares: [], dareOffer: null, daresDone: [], chasedThisSkip: false, blackoutT: 0, breakerUsed: false };
+let tut = null;   // step 72: the tutorial, while it's running
 const cam = { yaw: 0 };
 const $ = (id) => document.getElementById(id);
 const ui = { phase: $("phase"), label: $("phaseLabel"), timer: $("timer"), score: $("score"), uses: $("uses"), banner: $("banner"), fps: $("fps"),
@@ -2099,6 +2103,7 @@ function phaseLen(phase = game.phase) {
 // ---- save at the bell, so a returning player lands at "Day 1, Period 4" ----
 const SAVE_KEY = "hallwaySkip.save.v1";
 function saveGame() {
+  if (tut) return;   // step 72: the tutorial isn't a run
   try { localStorage.setItem(SAVE_KEY, JSON.stringify({ day: game.day, period: game.period, score: Math.floor(game.score),
     strikes: game.strikes, highAlert: game.highAlert, periodsSkipped: game.periodsSkipped, security: Math.round(game.security), survival: game.survival, dares: game.dares, tally: game.tally })); } catch (e) { /* storage blocked: fine */ }
 }
@@ -2408,6 +2413,7 @@ function releaseControls() { stick.id = look.id = null; keys.clear(); sprintTouc
 
 const RELEASE_LINES = ["Now get to class!!!", "Get out of my sight!!!", "Go. GO. Before I change my mind.", "I don't want to see you again today.", "Class. Now. MOVE."];
 function caught(st) {
+  if (tut) { tutCaught(st); return; }   // step 72: practice catches don't count
   game.chaseOn = false;   // a catch isn't an escape
   cancelAim();
   game.catcher = st;
@@ -2513,6 +2519,7 @@ function strikeDotsHtml() {
 // ---- PA announcer: chime + text box. Rate-limited per kind so it doesn't nag.
 let paLast = {}, paTimer = 0;
 function pa(kind, text = null, sec = null, vars = {}) {
+  if (tut) return;   // step 72: no announcements in the tutorial
   if (kind) {
     if (game.time - (paLast[kind] ?? -99) < CFG.pa.sameKindCooldownSec) return;
     paLast[kind] = game.time;
@@ -2546,9 +2553,11 @@ function onOverlayTap(e) {
   initAudio();
   if (game.state === "title") {   // only the buttons do anything on the title screen
     const id = e?.target?.id ?? "startBtn";
-    if (id === "aboutBtn") { $("about").hidden = false; return; }
-    if (id === "startBtn" && !character.made) { openCharacter(null, () => { initAudio(); startRun(null); clock.getDelta(); }); return; }   // first time: make your kid
-    if (id === "startBtn" || id === "continueBtn") startRun(id === "continueBtn" ? loadSave() : null);
+    if (id === "aboutBtn") { startTutorial(false); return; }   // step 72: How to play is the tutorial now
+    const firstRun = () => { if (tutSeen()) startRun(null); else startTutorial(true); };   // step 72: your first run starts with the tutorial
+    if (id === "startBtn" && !character.made) { openCharacter(null, () => { initAudio(); firstRun(); clock.getDelta(); }); return; }   // first time: make your kid
+    if (id === "startBtn") firstRun();
+    if (id === "continueBtn") startRun(loadSave());
   }
   else if (game.state === "caught") startRun(null);
   else if (game.state === "paused") { $("paused").hidden = true; game.state = "playing"; }
@@ -2727,7 +2736,7 @@ const isTouch = matchMedia("(pointer: coarse)").matches || URLQ.has("touch");
 let guideKey = "";
 function updateGuides() {
   const playing = game.state === "playing";
-  const show = playing && isTouch && opts.stickGuide && !player.hidden && !game.aim;
+  const show = playing && isTouch && (opts.stickGuide || !!tut) && !player.hidden && !game.aim;
   const k = `${playing}:${show && stick.id === null}:${show && look.id === null}`;
   if (k === guideKey) return;
   guideKey = k;
@@ -3110,7 +3119,7 @@ function setReturnPoint(st) {
 }
 
 function canSeePlayer(st, rangeMult, needCone) {
-  if (player.hidden || st.stunT > 0) return { seen: false, d: Infinity };
+  if (player.hidden || st.stunT > 0 || tut?.blind) return { seen: false, d: Infinity };
   const T = st.type, dx = player.x - st.x, dz = player.z - st.z, d = Math.hypot(dx, dz);
   if (player.invisT > 0) return { seen: false, d };   // just served a strike: a moment to get away
   if (st.ignoreT > 0) return { seen: false, d };      // the one who just caught you is letting it go
@@ -4279,7 +4288,7 @@ function selectSlot(i, fromKey = false) {
   if (T.kind === "instrument") { consumeSlot(i); playTrumpet(); return; }
   if (T.kind === "mop") { if (jamDoor()) consumeSlot(i); return; }
   if (T.kind === "place") { consumeSlot(i); placeSign(it.key); return; }
-  if (opts.autoAim) { autoThrow(i); return; }
+  if (opts.autoAim || tut) { autoThrow(i); return; }
   game.aim = { slot: i, key: it.key, id: null, sx: 0, sy: 0, cx: 0, cy: 0 };
   $("aim").hidden = false;
   $("aimText").textContent = T.kind === "ride" ? "Flick to launch the wheelie chair" : `Flick to throw the ${T.label.toLowerCase()}`;
@@ -6113,6 +6122,311 @@ const Ads = {
 };
 
 // =====================================================================================
+// Step 72: the tutorial. Three short scenes (run from staff, throw something, hide), then you're on your own.
+// It runs inside the real game: a card can freeze the world, dim the screen, and leave holes over the controls it's
+// talking about. Runs before your first run, and from "How to play" on the title screen.
+// =====================================================================================
+const TUT_KEY = "hallwaySkip.tutorial.v1";
+function tutSeen() { try { return !!localStorage.getItem(TUT_KEY) || loadRuns().length > 0 || !!loadSave(); } catch (e) { return true; } }
+function markTutSeen() { try { localStorage.setItem(TUT_KEY, "1"); } catch (e) { /* fine */ } }
+const tutEl = $("tut"), tutCard = $("tutCard"), tutDim = $("tutDim"), tutHoles = $("tutHoles"), tutRings = $("tutRings");
+const touchy = () => isTouch && !usingKeys;
+const say = (touch, kbd) => (touchy() ? touch : kbd);
+const key = (k) => `<kbd>${k}</kbd>`;
+
+// what a hole goes around: a page element, or a spot in the world (a radius in px)
+const elHole = (sel, pad = 8) => () => {
+  const el = document.querySelector(sel); if (!el || el.closest("[hidden]")) return null;
+  const r = el.getBoundingClientRect(); if (!r.width) return null;
+  return { x: r.left - pad, y: r.top - pad, w: r.width + pad * 2, h: r.height + pad * 2 };
+};
+const worldHole = (getP, rad) => () => {
+  const p = getP(); if (!p) return null;
+  projA.set(p.x, p.y, p.z).applyMatrix4(camera.matrixWorldInverse); if (projA.z > -0.2) return null;
+  projA.set(p.x, p.y, p.z).project(camera);
+  const x = ((projA.x + 1) / 2) * window.innerWidth, y = ((1 - projA.y) / 2) * window.innerHeight;
+  return { x: x - rad, y: y - rad, w: rad * 2, h: rad * 2 };
+};
+const HOLE = {
+  stick: elHole("#stickGuide .gBase", 14), look: elHole("#lookGuide", 16), sprint: elHole("#sprintBtn", 10), slot0: elHole("#hotbar .slot", 8),
+  locker: worldHole(() => tut?.locker && { ...hallPos(tut.locker.h, tut.locker.t, tut.locker.wallLat - tut.locker.side * 0.15, {}), y: 1.05 }, 58),
+  mon: worldHole(() => tut?.mon && { x: tut.mon.x, y: 1.2, z: tut.mon.z }, 46),
+};
+
+function tutCardShow(html, { center = false, next = null, dim = 0, holes = [], rings = holes, freeze = false, block = !!next, extra = "" } = {}) {
+  tut.frozen = freeze; tut.holes = holes; tut.rings = rings; tut.waitNext = !!next;
+  tutDim.style.opacity = dim;
+  tutDim.style.pointerEvents = block ? "auto" : "none";
+  tutCard.className = center ? "center" : "";
+  tutCard.hidden = !html;
+  tutCard.innerHTML = html + (next || extra ? `<div class="tutBtns">${next ? `<button class="go" id="tutNext" type="button">${next}</button>` : ""}${extra}</div>` : "");
+  if (next) $("tutNext").onclick = (e) => { e.stopPropagation(); tutAdvance(); };
+  if (freeze) { releaseControls(); cancelAim(); }
+}
+const tutHide = () => tutCardShow("", {});
+
+// where to put someone `dist` m from you along your hall: ahead of the camera if we can (so you see them), with a clear view.
+// (or, with `yaw`, ahead of / behind that direction)
+function tutAlongHall(dist, preferAhead = true, yaw = cam.yaw) {
+  const P = hallProject(player.x, player.z), H = HALLS[P.h];
+  const fwd = Math.sin(yaw) * H.dx + Math.cos(yaw) * H.dz;
+  const dirs = (fwd >= 0) === preferAhead ? [1, -1] : [-1, 1];
+  for (const s of dirs) {
+    const t = clamp(P.t + s * dist, 0.5, H.len - 0.5);
+    if (Math.abs(t - P.t) < dist * 0.6) continue;
+    const p = hallPos(P.h, t, 0);
+    if (lineOfSight(p.x, p.z, player.x, player.z)) return { h: P.h, t, to: s > 0 ? H.a : H.b };
+  }
+  const t = P.t + (P.t < H.len / 2 ? 1 : -1) * Math.min(dist, H.len / 2);
+  return { h: P.h, t, to: t > P.t ? H.a : H.b };
+}
+function tutMonitor(place) {
+  const st = spawnStaff("hallMonitor", place);
+  st.route = null; st.roamT = 999;   // keep walking the way it's headed
+  return st;
+}
+
+// The steps. enter() sets up; tick() returns true when it's time to move on.
+const TUT_STEPS = [
+  { // 0: the pitch
+    enter() {
+      tutCardShow(`<h2>You're never going to class again.</h2><p>You're the trouble-maker. The slacker. The delinquent.</p>
+        <p>Stay out in the halls and cause as much havoc as you can for a high score.</p>`, { center: true, next: "Let's go", dim: 0.88, freeze: true });
+    },
+  },
+  { // 1: move and look around
+    enter() {
+      tut.moved = 0; tut.looked = 0; tut.lastX = player.x; tut.lastZ = player.z; tut.doneT = 0; tut.shown = "";
+      tut.lockMove = false;
+    },
+    tick(dt) {
+      if (!player.hidden) tut.moved += Math.hypot(player.x - tut.lastX, player.z - tut.lastZ);
+      tut.lastX = player.x; tut.lastZ = player.z;
+      const mv = tut.moved > 3, lk = tut.looked > 0.9, both = mv && lk;
+      const html = `<p><b>Get the feel of it.</b></p><ul class="tutTasks">
+        <li class="${mv ? "ok" : ""}">${say("Move: drag your <b>left thumb</b>", `Move: ${key("W")}${key("A")}${key("S")}${key("D")} or the arrow keys`)}</li>
+        <li class="${lk ? "ok" : ""}">${say("Look around: drag the <b>right side</b>", "Look around: drag with the mouse")}</li></ul>`;
+      const k = html + both;
+      if (tut.shown !== k) { tut.shown = k; tutCardShow(html, { dim: both ? 0 : touchy() ? 0.5 : 0.25, holes: touchy() ? [HOLE.stick, HOLE.look] : [] }); }
+      if (both) tut.doneT += dt;
+      return tut.doneT > 0.8 || tut.t > 40;
+    },
+  },
+  { // 2: a hall monitor spots you and heads your way
+    enter() {
+      tutHide();
+      tut.mon = tutMonitor(tutAlongHall(12));
+      startChase(tut.mon);
+    },
+    tick() { return (tut.t > 1.1 && Math.hypot(tut.mon.x - player.x, tut.mon.z - player.z) < 9.5) || tut.t > 2.5; },
+  },
+  { // 3: run! (moving, sprinting or the button carries on)
+    enter() {
+      tutCardShow(`<p class="big">🚨 A hall monitor spotted you!</p><p>Run away. ${say("Hold <b>🏃</b> to sprint.", `Hold ${key("Shift")} to sprint.`)}</p>`,
+        { next: "Run!", dim: 0.6, freeze: true, block: false, holes: touchy() ? [HOLE.mon, HOLE.sprint] : [HOLE.mon] });
+    },
+    tick() { return tut.t > 0.3 && (keys.size > 0 || stick.id !== null || sprintTouch); },
+  },
+  { // 4: get away
+    enter() {
+      tutCardShow(`<p>${say("Hold <b>🏃</b> and run!", `Hold ${key("Shift")} and run!`)} Get out of sight and they'll lose you.</p>`, { rings: touchy() ? [HOLE.sprint] : [] });
+    },
+    tick() {
+      const st = tut.mon, d = Math.hypot(st.x - player.x, st.z - player.z);
+      return player.hidden || (st.state !== "chase" && st.state !== "bust") || d > 18;
+    },
+  },
+  { // 5: the lesson
+    enter() {
+      tutCardShow(`<p class="big">😅 You lost them!</p><p>Avoid <b>hall monitors</b>, <b>security guards</b> and other <b>staff</b>, or you'll get caught skipping.</p>`,
+        { center: true, next: "Next", dim: 0.7, freeze: true });
+    },
+  },
+  { // 6: scene 1. A normal passing period; a kid throws you a paper airplane.
+    enter() {
+      tutHide();
+      tutScene(); tut.lockMove = true; tut.plane = null;
+      banner("PASSING PERIOD<small>Kids heading to class</small>", 1.8);
+    },
+    tick() {
+      if (tut.t > 1.4 && !tut.plane) tutThrowPlane();
+      if (game.hotbar.some((s) => s?.key === "paperAirplane")) return true;
+      if (tut.t > 5.5) { addItem("paperAirplane"); if (tut.plane && !tut.plane.dead) removeObject(tut.plane); return true; }   // missed it somehow
+      return false;
+    },
+  },
+  { // 7: throw it
+    enter() {
+      tutCardShow(`<p class="big">✈️ You caught a paper airplane!</p><p>${say("Tap it in your items to throw it.", `Press ${key("1")} or click it to throw it.`)}</p>`,
+        { dim: 0.62, freeze: true, holes: [HOLE.slot0] });
+    },
+    tick() { return !game.hotbar.some((s) => s?.key === "paperAirplane"); },
+  },
+  { // 8: watch it fly
+    enter() { tutHide(); tut.thrown = objects.filter((o) => o.key === "paperAirplane" && !o.wild).pop() ?? null; tut.landT = 0; },
+    tick(dt) {
+      const o = tut.thrown;
+      if (!o || o.dead || o.state !== "flying") tut.landT += dt;
+      return tut.landT > 0.6 || tut.t > 4;
+    },
+  },
+  { // 9: the lesson
+    enter() {
+      tutCardShow(`<p class="big">🎯 Nice throw.</p><p>Lots of things can be thrown. You'll find them all over the school, but don't get caught!</p>`,
+        { center: true, next: "Next", dim: 0.7, freeze: true });
+    },
+  },
+  { // 10: scene 2. Tardy: the hall empties out and a hall monitor is coming.
+    enter() {
+      tutHide();
+      tutScene(); tut.lockMove = true; tut.blind = true;
+      const lk = SPOTS.filter((sp) => sp.kind === "locker" && !sp.busted && floorOf(spotFront(sp, {}).x) === floorOf(player.x));
+      lk.sort((a, b) => spotDist(a) - spotDist(b));
+      const sp = tut.locker = lk.find((s) => HALLS[s.h].len > 14) ?? lk[0], H = HALLS[sp.h];
+      const s = sp.t + 18 < H.len ? 1 : -1;   // look down the hall the long way
+      const p = hallPos(sp.h, sp.t - s * 3.4, -sp.side * 0.9);   // across the hall, so the locker's in plain view
+      player.x = p.x; player.z = p.z; player.heading = cam.yaw = hallHeading(sp.h, s); manualCamT = 0;
+      startSkipping();
+      tut.mon = tutMonitor({ h: sp.h, t: clamp(sp.t + s * 17, 0.5, H.len - 0.5), to: s > 0 ? H.a : H.b });
+    },
+    tick() { return tut.t > 3.8; },
+  },
+  { // 11: hide!
+    enter() {
+      tutCardShow(`<p class="big">🔔 Tardy!</p><p>The crowd's gone and a hall monitor is coming. Hide in the glowing locker: ${say("walk into it or tap it.", `walk into it or press ${key("E")}.`)}</p>`,
+        { next: "Got it", dim: 0.6, freeze: true, block: false, holes: [HOLE.locker] });
+    },
+    tick() { return player.hidden || (tut.t > 0.3 && (keys.size > 0 || stick.id !== null)); },
+  },
+  { // 12: get in there
+    enter() { tut.lockMove = false; tutCardShow(player.hidden ? "" : `<p>Into the locker!</p>`, { rings: [HOLE.locker] }); },
+    tick() {
+      if (tut.t > 12 && !tut.nudged) { tut.nudged = true; toast("Walk right into the glowing locker.", 2.4); }
+      return !!player.hidden;
+    },
+  },
+  { // 13: it walks right past
+    enter() { tutHide(); tut.minD = Infinity; },
+    tick() {
+      if (!player.hidden) { tutGo(12); return false; }
+      const f = spotFront(player.hidden, {}), d = Math.hypot(tut.mon.x - f.x, tut.mon.z - f.z);
+      tut.minD = Math.min(tut.minD, d);
+      return (tut.minD < 4 && d > tut.minD + 3) || tut.t > 9;
+    },
+  },
+  { // 14: the lesson
+    enter() {
+      tutCardShow(`<p class="big">🤫 It walked right past.</p><p>Staff can't see you while you hide, but you can't stay forever. Stay out of class until the next bell to score.</p>`,
+        { center: true, next: "Next", dim: 0.7, freeze: true });
+    },
+  },
+  { // 15: the end
+    enter() {
+      $("tutSkip").hidden = true;
+      tutCardShow(`<h2>That's the basics.</h2><p>Rooms to raid, friends, dares, the fire alarm... the rest is yours to find.</p>`,
+        { center: true, dim: 0.85, freeze: true,
+          extra: `<button class="go" id="tutPlay" type="button">Play</button><button class="go ghost" id="tutRules" type="button">📖 Rules &amp; controls</button>` +
+            (tut.thenPlay ? "" : `<button class="go ghost" id="tutTitle" type="button">Back to title</button>`) });
+      $("tutPlay").onclick = (e) => { e.stopPropagation(); endTutorial(true); };
+      $("tutRules").onclick = (e) => { e.stopPropagation(); $("about").hidden = false; };
+      if ($("tutTitle")) $("tutTitle").onclick = (e) => { e.stopPropagation(); endTutorial(false); };
+    },
+  },
+];
+
+// a fresh passing period with nobody on staff
+function tutScene() {
+  const keep = game.hotbar.slice();
+  morningSetup(); clearStaff(); clearObjects();
+  game.hotbar = keep.map(() => null); renderHotbar();
+  tut.blind = false; tut.mon = null;
+}
+// a kid in front of you tosses you a paper airplane
+function tutThrowPlane() {
+  const fx = Math.sin(cam.yaw), fz = Math.cos(cam.yaw);
+  const ok = (c) => { const dx = c.x - player.x, dz = c.z - player.z, d = Math.hypot(dx, dz); return d > 4 && d < 9 && (dx * fx + dz * fz) / d > 0.55 && lineOfSight(c.x, c.z, player.x, player.z); };
+  let c = crowd.find((k) => isActive(k) && !k.friend && k.slipT <= 0 && ok(k));
+  if (!c) {   // nobody handy: one wanders over
+    c = crowd.find((k) => isActive(k) && !k.friend);
+    const pl = tutAlongHall(6.5); c.h = pl.h; c.t = pl.t; c.lat = c.targetLat = 0.4; hallPos(c.h, c.t, c.lat, c);
+  }
+  c.mode = "wander"; c.retargetT = 3;
+  const tx = player.x, tz = player.z, d = Math.hypot(tx - c.x, tz - c.z), sp = 5;
+  tut.plane = spawnObject("paperAirplane", "flying", c.x, 1.6, c.z, { vx: (tx - c.x) / d * sp, vz: (tz - c.z) / d * sp, vy: 0.1, wild: true });
+  kidSay(c, ["Heads up!", "Catch!", "Yo, catch!"]);
+}
+function tutCaught(st) {   // practice: no strike. Put them back a bit and keep going.
+  const pl = tutAlongHall(10, false, player.heading), p = hallPos(pl.h, pl.t, 0);   // behind you, the way you're running
+  tut.caughtN = (tut.caughtN ?? 0) + 1;
+  st.x = p.x; st.z = p.z; st.h = pl.h; st.t = pl.t;
+  startChase(st);
+  player.invisT = 1.2;
+  toast("Caught! In a real game, that's a strike. Try again: sprint away!", 2.6);
+}
+
+function tutGo(i) {
+  tut.i = i; tut.t = 0;
+  TUT_STEPS[i].enter?.();
+}
+function tutAdvance() { if (tut && tut.i < TUT_STEPS.length - 1) tutGo(tut.i + 1); }
+function tutTick(dt) {
+  tut.t += dt;
+  // keep the world quiet: no surprise planes, friend offers, or bells
+  game.nextPlaneT = 99;
+  for (const c of crowd) if (c.friend) c.friend.cd = Math.max(c.friend.cd, 5);
+  game.phaseT = Math.min(game.phaseT, 4);
+  game.heat = Math.min(game.heat, 40); game.heatPending = 0;
+  if (tut.blind) for (const st of staff) if (st.state !== "patrol") { st.state = "patrol"; st.suspicion = 0; st.camping = false; }   // it really doesn't see you
+  const S = TUT_STEPS[tut.i];
+  if (S.tick?.(dt)) tutAdvance();
+}
+// the dim layer and its holes, and the flashing rings
+const tutPool = [], ringPool = [];
+function tutDraw() {
+  const holes = (tut.holes ?? []).map((f) => f()).filter(Boolean), rings = (tut.rings ?? []).map((f) => f()).filter(Boolean);
+  while (tutPool.length < holes.length) { const r = document.createElementNS("http://www.w3.org/2000/svg", "rect"); r.setAttribute("fill", "black"); tutHoles.appendChild(r); tutPool.push(r); }
+  tutPool.forEach((r, i) => {
+    const h = holes[i];
+    if (!h) { r.setAttribute("width", 0); return; }
+    r.setAttribute("x", h.x); r.setAttribute("y", h.y); r.setAttribute("width", h.w); r.setAttribute("height", h.h);
+    r.setAttribute("rx", Math.min(h.w, h.h) / 2);
+  });
+  while (ringPool.length < rings.length) { const d = document.createElement("div"); d.className = "tutRing"; tutRings.appendChild(d); ringPool.push(d); }
+  ringPool.forEach((d, i) => {
+    const h = rings[i];
+    d.style.display = h ? "block" : "none";
+    if (h) { d.style.left = h.x + "px"; d.style.top = h.y + "px"; d.style.width = h.w + "px"; d.style.height = h.h + "px"; d.style.borderRadius = Math.min(h.w, h.h) / 2 + "px"; }
+  });
+}
+function startTutorial(thenPlay) {
+  initAudio();
+  resetGame();
+  $("title").hidden = true; $("caught").hidden = true;
+  tut = { i: 0, t: 0, thenPlay, frozen: false, lockMove: false, blind: false, looked: 0, holes: [], rings: [] };
+  document.body.classList.add("tut");
+  tutEl.hidden = false; $("tutSkip").hidden = false;
+  game.state = "playing";
+  renderDares();
+  tutGo(0);
+  tryFullscreenLandscape();
+  clock.getDelta();
+}
+function endTutorial(play) {
+  markTutSeen();
+  tut = null;
+  document.body.classList.remove("tut");
+  tutEl.hidden = true; tutCard.hidden = true;
+  releaseControls(); cancelAim();
+  if (play) { startRun(null); clock.getDelta(); return; }
+  resetGame();
+  game.state = "title"; $("title").hidden = false;
+  updateCrowd(0.016); drawCrowd();
+}
+$("tutSkip").addEventListener("click", (e) => { e.stopPropagation(); if (tut) tutGo(TUT_STEPS.length - 1); });
+tutDim.addEventListener("click", (e) => { e.stopPropagation(); if (tut?.waitNext) tutAdvance(); });   // tap anywhere on a card's dim to carry on
+tutCard.addEventListener("click", (e) => e.stopPropagation());
+
+// =====================================================================================
 // Main loop
 // =====================================================================================
 function resize() {
@@ -6139,14 +6453,16 @@ renderer.setAnimationLoop(() => {
   timeScale += (tsGoal - timeScale) * Math.min(1, dt / CFG.items.aimEaseSec);
   if (Math.abs(timeScale - tsGoal) < 0.01) timeScale = tsGoal;
   slowFx.style.opacity = ((1 - timeScale) / (1 - CFG.items.aimTimeScale)).toFixed(2);
-  if (game.state === "playing") update(dt * timeScale);
+  const live = game.state === "playing" && !tut?.frozen;   // step 72: a tutorial card can freeze the world
+  if (live) update(dt * timeScale);
+  if (tut && game.state === "playing") tutTick(dt);
   if (game.state === "scene") { game.sceneT += dt; if (game.sceneT >= game.sceneEnd) endScene(); }
   if (paTimer > 0) { paTimer -= dt; if (paTimer <= 0) $("pa").classList.remove("show"); }
   if (bannerTimer > 0) { bannerTimer -= dt; if (bannerTimer <= 0) ui.banner.classList.remove("show"); }
   if (toastTimer > 0) { toastTimer -= dt; if (toastTimer <= 0) ui.toast.classList.remove("show"); }
   drawCrowd();
   updateCamera(dt);
-  if (game.state === "playing") { updateKeyAim(dt); tickBoost(dt); tickBlackout(dt); tickHood(dt); }
+  if (live) { updateKeyAim(dt); tickBoost(dt); tickBlackout(dt); tickHood(dt); }
   updateAimPreview();
   updateKeyHint();
   updateAutoTarget();
@@ -6158,11 +6474,12 @@ renderer.setAnimationLoop(() => {
   drawStamina();
   drawObjects();
   updateMarkers();
-  if (game.state === "playing") updateChatter(dt);
+  if (live) updateChatter(dt);
   drawChatter();
   updateSpotsUI();
   drawFriends();
   updateHud();
+  if (tut) tutDraw();
   if (performance.now() > snapHold) renderer.render(scene, camera);   // (a test close-up holds the frame briefly)
   if (debug) { fpsAcc += dt; fpsN++; if (fpsAcc > 0.5) { ui.fps.textContent = `${Math.round(fpsN / fpsAcc)} fps · ${crowdDrawn}/${crowd.length} kids drawn`; fpsAcc = fpsN = 0; } }
 });
@@ -6327,6 +6644,10 @@ if (debug) {   // test-only helpers (only with ?debug in the URL)
     setUnseen(t) { game.unseenT = t; },
     spawnPrincipal() { ensurePrincipal(true); return staff.findIndex((s) => s.key === "principal"); },
     forcePlane() { game.nextPlaneT = 0; },
+    tut() { return tut && { i: tut.i, t: tut.t, frozen: tut.frozen, lockMove: tut.lockMove, blind: tut.blind, waitNext: tut.waitNext, looked: tut.looked, moved: tut.moved,
+      mon: tut.mon && { state: tut.mon.state, d: Math.hypot(tut.mon.x - player.x, tut.mon.z - player.z) }, card: tutCard.hidden ? "" : tutCard.textContent.trim(), dim: +tutDim.style.opacity,
+      lk: tut.locker && { d: spotDist(tut.locker), why: spotBlocked(tut.locker), it: interactTarget()?.kind, hidden: !!player.hidden }, caughtN: tut.caughtN ?? 0 }; },
+    tutGo(i) { tutGo(i); }, tutNext() { tutAdvance(); }, tutLook(r) { if (tut) tut.looked += r; },
     barks() { return staff.map((s) => (performance.now() < s.barkUntil ? s.bubble.textContent : null)); },
     ads() { return { interstitialsToday: Ads.interstitialsToday, rewardedToday: { ...Ads.rewardedToday } }; },
     setHeat(h, s) { if (h != null) { game.heat = h; game.heatPending = 0; } if (s != null) game.security = s; },
