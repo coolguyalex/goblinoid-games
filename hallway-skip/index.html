@@ -35,6 +35,8 @@
   #passIcon[hidden] { display: none; }
   .bark { position: absolute; transform: translate(-50%, -100%); padding: 4px 9px; border-radius: 12px; background: #fff; color: #1d2230;
     font: 800 13px system-ui, sans-serif; white-space: nowrap; display: none; box-shadow: 0 2px 6px rgba(0,0,0,.35); }
+  .bark.kid { font: 700 11.5px system-ui, sans-serif; background: #fff7d1; white-space: normal; width: max-content; max-width: min(190px, 40vw); text-align: center; padding: 3px 8px; z-index: 0; }   /* step 71: kids talking */
+  .bark.kid::after { border-top-color: #fff7d1; }
   .bark::after { content: ""; position: absolute; left: 50%; bottom: -6px; margin-left: -6px; border: 6px solid transparent; border-bottom: 0; border-top-color: #fff; }
   #ad { z-index: 7; background: rgba(8, 10, 16, .96); }
   #ad h1 { color: #9fe0ff; }
@@ -389,7 +391,7 @@
 
 <div class="overlay" id="title">
   <div>
-    <span class="tag">prototype · build step 70</span>
+    <span class="tag">prototype · build step 71</span>
     <h1>Hall Goblin</h1>
     <p>Skip class. Don't get caught.</p>
     <div class="buttons">

@@ -329,6 +329,8 @@ const CFG = {
   },
   restroomRolls: 2,               // step 66: rolls of toilet paper in each restroom, each period
   barkSec: 1.8, barkCooldownSec: 3,   // staff speech bubbles
+  // Step 71: kids in the crowd say things now and then (KID_LINES), and react when something happens to them.
+  chatter: { everySec: [1.2, 2.6], max: 3, range: 13, sec: 2.8, quietSec: 10, nearPlayer: 3 },
 
   footsteps: { hearRange: 20, patrolInterval: 0.55, chaseInterval: 0.3, volume: 0.55 },
 
@@ -442,6 +444,36 @@ const BARKS = {   // speech bubbles over staff heads
   hallTeacher:   { suspicious: ["Excuse me?"], alarm: ["HALL PASS!", "Excuse me?!", "SECURITY!"] },
   principal:     { suspicious: ["Mm-hm."], chase: ["YOUNG PERSON!", "MY OFFICE!"], search: ["Hiding won't help."],
                    giveUp: ["This isn't over."], slip: ["Who put this here?!"], bust: ["Out. Now."], tidy: ["In MY school?", "Disgraceful."], check: ["Hey, do you kids have a pass?", "I know someone's in here."] },
+};
+// Step 71: what kids in the crowd say. idle: just talking (silly, or school lore); the rest are reactions.
+const KID_LINES = {
+  idle: [
+    "The Goblins lost 63 to nothing. SIXTY-THREE.", "Our quarterback threw a touchdown. For the other team.",
+    "The Goblins mascot quit. The MASCOT.", "Homecoming's Friday. We're gonna get destroyed.", "Go Goblins! ...said nobody, ever.",
+    "Coach says we're 'rebuilding.' We've been rebuilding since 2009.",
+    "Officer Dale eats lunch in his car. Alone. Every day.", "Officer Dale named his Segway. It's 'Justice.'",
+    "Saw Officer Dale at the mall food court. Eating a pretzel. Sadly.", "Officer Dale's ringtone is a police siren. Unironically.",
+    "Principal Hargrove irons his socks.", "Hargrove's idea of a party is dusting the trophy case.",
+    "Hargrove said 'yeet' at the assembly. I'm still not okay.", "Hargrove has a framed photo of his parking spot.",
+    "Mr. Kowalski's had the same tie since 1998.", "Spirit Week? I have zero spirit.",
+    "They say the hoodie kid has never been to a single class.", "Somebody slimed a hall monitor. Legend.",
+    "Who keeps leaving whoopee cushions everywhere?", "The cafeteria pizza was blue today. BLUE.",
+    "The vending machine ate my dollar. Again.", "I have a test. I didn't study. Vibes only.",
+    "No cap, this hallway smells like feet.", "That's so mid.", "It's giving... detention.", "Lowkey starving rn.",
+    "Bro wore Crocs to gym.", "Can I copy your homework? I'll change it a little.", "I forgot my locker combo. Again.",
+    "My backpack weighs more than me.", "The skeleton in the bio lab is haunted. For real.",
+    "Mr. Bones from bio has better attendance than me.", "The custodian knows everything. EVERYTHING.",
+    "Tom Riddle was framed, honestly.", "Somebody painted a goblin Mona Lisa. Iconic.",
+    "My mom says no phone till I'm 30.", "The group chat is on FIRE right now.",
+  ],
+  gather: ["Somebody film this!", "OH MY GOSH", "This is going on my story!", "LOL", "No WAY!", "Best. Day. Ever.", "Get it on video!"],
+  near: ["Aren't you supposed to be in class?", "You're gonna get caught, dude.", "Legend.", "Don't let Dale see you!", "Is that the hoodie kid?!"],
+  hit: ["HEY!", "Not cool!", "Ow! What the—", "Who threw that?!", "My hair!", "Rude!"],
+  gross: ["EW!", "Is that a SOCK?!", "I'm gonna hurl.", "That's so nasty!"],
+  slip: ["WHOA—", "My phone!", "Ow ow ow...", "Who put that there?!"],
+  stuck: ["My shoes!", "Is this SLIME?!", "I'm stuck! Help!"],
+  stink: ["What is that SMELL?", "*gag*", "Who died?!", "My eyes are watering!"],
+  scared: ["AAAH!", "RUN!", "SKELETON!", "NOPE NOPE NOPE"],
 };
 const CAUGHT_LINES = {   // strike 1, by who caught you
   hallMonitor:   ["\"You better get to class.\"", "\"Pass? No? Didn't think so.\"", "\"I'm writing this down. In pen.\""],
@@ -3342,6 +3374,41 @@ function updateCamera(dt) {
 
 // "?" / "!" above staff heads when on screen; arrows at the screen edge when not.
 const proj = new THREE.Vector3();
+// ---- step 71: kids talk. A few bubbles at a time, over kids near you on screen. ----
+const kidBubbles = [];   // { el, c, until }
+let idleBag = [];
+function kidSay(c, lines, sec = CFG.chatter.sec) {
+  if (!c || c.friend || !isActive(c)) return;   // (friends have their own bubble)
+  const now = performance.now();
+  let b = kidBubbles.find((x) => x.c === c && now < x.until) ?? kidBubbles.find((x) => now >= x.until);
+  if (!b) { if (kidBubbles.length >= CFG.chatter.max + 3) return; b = { el: document.createElement("div") }; b.el.className = "bark kid"; markersEl.appendChild(b.el); kidBubbles.push(b); }
+  b.c = c; b.until = now + sec * 1000; c.saidAt = game.time;
+  if (lines === KID_LINES.idle) { if (!idleBag.length) idleBag = [...KID_LINES.idle].sort(() => Math.random() - 0.5); b.el.textContent = idleBag.pop(); }
+  else b.el.textContent = Array.isArray(lines) ? pick(lines) : lines;
+}
+function onScreen(x, y, z) {
+  proj.set(x, y, z).applyMatrix4(camera.matrixWorldInverse); if (proj.z > -0.2) return null;
+  proj.set(x, y, z).project(camera); return Math.abs(proj.x) < 0.9 && Math.abs(proj.y) < 0.9 ? proj : null;
+}
+function updateChatter(dt) {
+  const C = CFG.chatter, now = performance.now();
+  game.chatT = (game.chatT ?? 1) - dt;
+  if (game.chatT > 0) return;
+  game.chatT = rand(C.everySec[0], C.everySec[1]);
+  if (player.hidden || kidBubbles.filter((b) => now < b.until).length >= C.max) return;
+  const pf = floorOf(player.x), d = (c) => Math.hypot(c.x - player.x, c.z - player.z);
+  const cands = crowd.filter((c) => isActive(c) && !c.friend && c.slipT <= 0 && floorOf(c.x) === pf && d(c) < C.range && game.time - (c.saidAt ?? -99) > C.quietSec && onScreen(c.x, 1.8, c.z));
+  const c = pick(cands); if (!c) return;
+  kidSay(c, c.mode === "gather" ? KID_LINES.gather : game.phase === "skipping" && d(c) < C.nearPlayer + 2 ? KID_LINES.near : d(c) < C.nearPlayer && Math.random() < 0.3 ? KID_LINES.near : KID_LINES.idle);
+}
+function drawChatter() {
+  const w = window.innerWidth, h = window.innerHeight, now = performance.now(), pf = floorOf(player.x);
+  for (const b of kidBubbles) {
+    const p = now < b.until && b.c && isActive(b.c) && floorOf(b.c.x) === pf && !player.hidden ? onScreen(b.c.x, 1.85 * (b.c.scale ?? 1), b.c.z) : null;
+    b.el.style.display = p ? "block" : "none";
+    if (p) { b.el.style.left = ((p.x + 1) / 2) * w + "px"; b.el.style.top = ((1 - p.y) / 2) * h - 6 + "px"; }
+  }
+}
 function updateMarkers() {
   const w = window.innerWidth, h = window.innerHeight;
   const pf = floorOf(player.x);
@@ -4595,6 +4662,7 @@ function hitPerson(o, who, isStaff) {
     havoc(o.key + "Staff", Hh.staff, `${o.T.label} hits the ${who.type.name}!${o.T.hitLine ? " Ew!" : ""}`, { x: o.x, z: o.z, loud: Hh.style === "fall" });
   } else {
     who.slipT = Math.max(who.slipT, Hh.studentSec); who.stunStyle = Hh.style;
+    kidSay(who, o.T.junk ? KID_LINES.gross : KID_LINES.hit, 2);
     havoc(o.key + "Student", Hh.student, o.T.hitLine ? o.T.hitLine : o.key === "spitball" ? "Spitball! Ew!" : o.key === "mentos" ? "Soaked!" : `${o.T.label} hits a kid!`, { x: o.x, z: o.z });
   }
   return true;
@@ -4788,7 +4856,7 @@ function skeletonScare(o) {
     if (!isActive(c) || !inR(c) || c.mode === "toClass" || c.mode === "gone") continue;
     const d = Math.hypot(c.x - o.x, c.z - o.z) || 1, pr = hallProject(c.x + ((c.x - o.x) / d) * 9, c.z + ((c.z - o.z) / d) * 9), [lo, hi] = latLimits(pr.h, pr.t);
     c.mode = "gather"; c.gather = { h: pr.h, t: pr.t, lat: clamp(pr.lat, lo, hi), done: () => game.time > until, speed: 2.4 };
-    nKids++;
+    if (nKids++ < 3) kidSay(c, KID_LINES.scared, 2.2);
   }
   makeNoise(o.x, o.z, T.noiseRadius, false);
   havoc("skeleton", T.points + nStaff * T.staffPoints + nKids * T.studentPoints,
@@ -4886,7 +4954,7 @@ function trapCheck(o) {
   }
   for (const c of crowd) {
     if (!isActive(c) || c.slipT > 0 || o.hitSet.has(c) || Math.hypot(c.x - o.x, c.z - o.z) > (T.trapRadius ?? 0.45)) continue;
-    c.slipT = T.slipStudentSec; c.stunStyle = "fall";
+    c.slipT = T.slipStudentSec; c.stunStyle = "fall"; kidSay(c, KID_LINES.slip, 2);
     havoc(o.key + "Student", T.studentPoints, "A kid slips!", { x: o.x, z: o.z });
     if (slipped(c)) return;
   }
@@ -4915,7 +4983,7 @@ function slimeCheck(o) {
   }
   for (const c of crowd) {
     if (!isActive(c) || o.hitSet.has(c) || !near(c.x, c.z)) continue;
-    c.slipT = T.stickStudentSec; c.stunStyle = "stuck";
+    c.slipT = T.stickStudentSec; c.stunStyle = "stuck"; kidSay(c, KID_LINES.stuck, 2.4);
     havoc("slimeStudent", T.studentPoints, "A kid's stuck in the slime!", { x: o.x, z: o.z });
     stuck(c);
     if (o.slips >= T.maxSticks) return;
@@ -5191,7 +5259,7 @@ function stinkCloud(o, dt) {
   }
   for (const c of crowd) {
     if (!isActive(c) || o.hitSet.has(c) || !inside(c.x, c.z)) continue;
-    o.hitSet.add(c); c.slipT = Math.max(c.slipT, T.studentGagSec); c.stunStyle = "flinch";
+    o.hitSet.add(c); c.slipT = Math.max(c.slipT, T.studentGagSec); c.stunStyle = "flinch"; if (Math.random() < 0.5) kidSay(c, KID_LINES.stink, 2);
     addScore(T.perStudent, "Ew!", "small"); tally("stinkGag"); dareEvent("stink", { n: [...o.hitSet].filter((w) => w !== player).length });
   }
   // step 68: you're not immune either (after it's had a moment to spread)
@@ -6090,6 +6158,8 @@ renderer.setAnimationLoop(() => {
   drawStamina();
   drawObjects();
   updateMarkers();
+  if (game.state === "playing") updateChatter(dt);
+  drawChatter();
   updateSpotsUI();
   drawFriends();
   updateHud();
