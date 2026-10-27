@@ -324,7 +324,11 @@ const CFG = {
   restroomRolls: 2,               // step 66: rolls of toilet paper in each restroom, each period
   barkSec: 1.8, barkCooldownSec: 3,   // staff speech bubbles
   // Step 71: kids in the crowd say things now and then (KID_LINES), and react when something happens to them.
-  chatter: { everySec: [1.2, 2.6], max: 3, range: 13, sec: 2.8, quietSec: 10, nearPlayer: 3 },
+  chatter: { everySec: [3.5, 6.5], max: 2, range: 13, sec: 3.6, quietSec: 10, nearPlayer: 3 },   // step 76: fewer, and up longer (was every 1.2-2.6 s, 3 at once, 2.8 s)
+  // Step 76: the school day has a start and an end. Kids stream in the front doors (or up the stairs) in the morning;
+  // after the last bell everyone heads for the exit, and so do you.
+  morning: { streamSec: 12, extraPassingSec: 8 },   // arrivals spread over this long; the first passing period is this much longer
+  dismissal: { sec: 40, exitRadius: 2.2, leaveFrac: [0.1, 0.55] },   // get out before the doors close (or it's a strike)
 
   footsteps: { hearRange: 20, patrolInterval: 0.55, chaseInterval: 0.3, volume: 0.55 },
 
@@ -1759,6 +1763,9 @@ const crowdHair = crowdParts.hair.map((g, i) => { const m = crowdInst(g, N_KIDS)
 const CROWD_DETAIL_SCALE = 0.93;   // the full character model is a little taller than a crowd kid
 function crowdLook() { const L = randomLook(); L.outfit = pick(Object.keys(OUTFITS).filter((k) => k !== "goblin")); L.skin = Math.floor(Math.random() * 8); return L; }   // (goblins are special)
 const DOOR_SPOTS = () => SPOTS.filter((sp) => sp.kind === "classroom");
+// step 76: the way out. The front doors on the 1st floor; upstairs, kids leave down the stairs.
+const ENTRANCE_DOOR = (() => { const { h, t } = LAYOUT.entrance, side = HALLS[h].outerSide; return { h, t, side, wallLat: wallLat(h, side), entrance: true }; })();
+const exitDoor = (f) => (f === 0 ? ENTRANCE_DOOR : pick(SPOTS.filter((sp) => sp.kind === "stairs" && sp.floor === f)));
 const floorDoors = (f) => SPOTS.filter((sp) => sp.kind === "classroom" && HALLS[sp.h].floor === f && !sp.jammed);
 {
   for (let i = 0; i < CFG.crowd.count; i++) {
@@ -2090,6 +2097,8 @@ function staffMult(k) {
 const periodsToday = () => CFG.periodsPerDay;
 function phaseLen(phase = game.phase) {
   const D = CFG.days, n = game.day - 1;
+  if (phase === "passing" && game.dismissal) return CFG.dismissal.sec;
+  if (phase === "passing" && game.period === 1) return Math.max(D.minPassingSec, CFG.passingSec + D.passingSecPerDay * n) + CFG.morning.extraPassingSec;
   return phase === "passing" ? Math.max(D.minPassingSec, CFG.passingSec + D.passingSecPerDay * n)
                              : Math.min(D.maxSkippingSec, CFG.skippingSec + D.skippingSecPerDay * n);
 }
@@ -2238,7 +2247,7 @@ function renderBestRuns() {
 function clearSave() { try { localStorage.removeItem(SAVE_KEY); } catch (e) { /* fine */ } }
 
 // Kid walks in from the entrance; the hall is full of students already out and about.
-function morningSetup() {
+function morningSetup(arrive = true) {   // (arrive = false: the halls are already full, for the tutorial)
   game.skeletonWise = false;   // step 69: a new day, and they've forgotten about the skeleton
   const { h, t } = LAYOUT.entrance, side = HALLS[h].outerSide;
   const p = hallPos(h, t, wallLat(h, side) - side * 0.8);
@@ -2247,7 +2256,9 @@ function morningSetup() {
   cam.yaw = player.heading; manualCamT = 0;
   player.hidden = null; player.mesh.visible = true; player.graceT = 0; player.invisT = 0; player.pushT = 0; player.pushSpot = null;
   ui.hide.hidden = true;
-  for (const c of crowd) {
+  game.dismissal = false;
+  if (!arrive) for (const c of crowd) {
+    c.spawnDoor = null; c.spawnAt = 0;
     c.h = Math.floor(Math.random() * HALLS.length); c.t = rand(0, HALLS[c.h].len);
     if (c.h === h && Math.abs(c.t - t) < 2.5) c.t = (c.t + 5) % HALLS[h].len;
     const [lo, hi] = latLimits(c.h, c.t);
@@ -2256,6 +2267,13 @@ function morningSetup() {
     hallPos(c.h, c.t, c.lat, c);
     c.speed = rand(CFG.crowd.speedMin, CFG.crowd.speedMax);
     c.mode = "wander"; c.retargetT = rand(1, 4);
+  }
+  else for (const c of crowd) {   // step 76: nobody's here yet. They stream in the front doors (or come up the stairs) over the first few seconds.
+    const f = Math.random() < 0.55 ? 0 : 1;
+    c.spawnDoor = exitDoor(f);
+    c.spawnAt = f === 0 ? rand(0, CFG.morning.streamSec) : rand(1.5, CFG.morning.streamSec + 2);
+    c.mode = "spawning"; c.speed = rand(CFG.crowd.speedMin, CFG.crowd.speedMax); c.retargetT = rand(1, 4);
+    c.h = c.spawnDoor.h; c.t = c.spawnDoor.t; c.lat = c.spawnDoor.wallLat; hallPos(c.h, c.t, c.lat, c);
   }
   clearStaff();
   clearObjects(); cancelAim(); clearGraffiti(); clearTrails();   // the custodian scrubs the walls (and takes down the TP) overnight
@@ -2280,7 +2298,7 @@ function morningSetup() {
   for (const c of crowd) if (c.friend) c.friend.cd = rand(0, 6);
 }
 
-function resetGame(save = null) {
+function resetGame(save = null, arrive = true) {
   game.day = save?.day ?? 1; game.period = save?.period ?? 1; game.score = save?.score ?? 0; game.time = 0;
   game.strikes = save?.strikes ?? 0; game.highAlert = save?.highAlert ?? false;
   game.periodScore = 0; game.periodsSkipped = save?.periodsSkipped ?? 0; game.dayPeriodsSkipped = 0;
@@ -2291,7 +2309,7 @@ function resetGame(save = null) {
   game.dares = (save?.dares ?? []).filter((m) => DARES[m.id]); game.dareOffer = null; game.daresDone = [];
   game.tally = { ...(save?.tally ?? {}) }; game.chaseOn = false; game.lastPX = null;
   paLast = {}; Ads.newDay();
-  morningSetup();
+  morningSetup(arrive);
 }
 function resetSpotsForPeriod() {
   game.lockerUses = CFG.hiding.lockerUsesPerPeriod;
@@ -2318,7 +2336,8 @@ function startPassing(first) {
   const P = phaseLen("passing"), doors = DOOR_SPOTS();
   for (const c of crowd) {
     c.leaveAt = game.alarmT > 0 ? Infinity : rand(CFG.crowd.leaveStartFrac, CFG.crowd.leaveEndFrac) * P;   // nobody goes to class during a fire alarm
-    c.door = first || c.mode !== "gone" ? pick(floorDoors(floorOf(c.x))) : pick(doors.filter((d) => !d.jammed));   // (kids already out stay on their floor)
+    if (first && c.mode === "spawning") c.leaveAt = Math.max(c.leaveAt, c.spawnAt + rand(5, 9));   // (morning arrivals hang around a bit first)
+    c.door = first ? pick(floorDoors(HALLS[c.spawnDoor?.h ?? c.h].floor)) : c.mode !== "gone" ? pick(floorDoors(floorOf(c.x))) : pick(doors.filter((d) => !d.jammed));   // (kids already out stay on their floor)
     if (!first) { c.mode = "spawning"; c.spawnAt = rand(0, CFG.crowd.floodSpreadSec); c.speed = rand(CFG.crowd.speedMin, CFG.crowd.speedMax); }
   }
   // staff for this period (the within-day curve); they stay on for the rest of the day
@@ -2347,7 +2366,7 @@ function periodSurvived() {
   playBell();
   game.periodsSkipped++; game.dayPeriodsSkipped++;
   if (!game.survival) { game.heat *= 1 - CFG.heat.bellDrop; game.heatPending *= 1 - CFG.heat.bellDrop; }
-  if (game.period >= periodsToday()) { dayOver(); return; }
+  if (game.period >= periodsToday()) { startDismissal(); return; }
   game.period++;
   resetSpotsForPeriod();
   if (player.hidden?.kind === "classroom") exitSpot(false, "Bell! You slip out with the class.");
@@ -2356,9 +2375,62 @@ function periodSurvived() {
   saveGame();
 }
 
+// Step 76: the last bell. Everyone pours out of class and heads for the exit; get out with them before the doors close.
+function startDismissal() {
+  game.phase = "passing"; game.dismissal = true; game.phaseT = 0; game.periodScore = 0;
+  const P = CFG.dismissal.sec, doors = DOOR_SPOTS();
+  for (const c of crowd) {
+    c.leaveAt = rand(...CFG.dismissal.leaveFrac) * P;
+    if (c.mode === "gone" || c.mode === "spawning") { const d = pick(doors.filter((x) => !x.jammed)); c.spawnDoor = d; c.door = exitDoor(HALLS[d.h].floor); c.mode = "spawning"; c.spawnAt = rand(0, CFG.crowd.floodSpreadSec); c.speed = rand(CFG.crowd.speedMin, CFG.crowd.speedMax); }
+    else c.door = exitDoor(floorOf(c.x));
+  }
+  if (player.hidden?.kind === "classroom") exitSpot(false, "Last bell! You slip out with the class.");
+  banner(`LAST BELL! +${CFG.pointsPerPeriod}<small>School's out. Get to the front doors with everyone else before they lock up.</small>`, 3.2);
+  pa(null, "That's the last bell. Have a great evening, everyone. Walk, don't run.", 4);
+}
+function updateDismissal() {
+  if (!game.dismissal || player.hidden) return;
+  const E = ENTRANCE_DOOR, f = hallPos(E.h, E.t, E.wallLat - E.side * 0.6, tmp);
+  if (Math.hypot(player.x - f.x, player.z - f.z) < CFG.dismissal.exitRadius) { tally("walkedOut"); dayOver(); }
+}
+// a marker that points the way out: the front doors, or (upstairs) the nearest stairs down. At the screen edge when it's off screen.
+const exitMarkEl = $("exitMark");
+function drawExitMark() {
+  if (!game.dismissal || game.state !== "playing" || player.hidden) { exitMarkEl.style.display = "none"; return; }
+  const up = floorOf(player.x) === 1;
+  let p, label;
+  if (!up) { const E = ENTRANCE_DOOR; p = hallPos(E.h, E.t, E.wallLat - E.side * 0.3, {}); label = "🚪 EXIT"; }
+  else {
+    const sp = SPOTS.filter((x) => x.kind === "stairs" && x.floor === 1).sort((a, b) => spotDist(a) - spotDist(b))[0];
+    p = hallPos(sp.h, sp.t, sp.wallLat, {}); label = "🪜 STAIRS DOWN";
+  }
+  const w = window.innerWidth, h = window.innerHeight;
+  projA.set(p.x, 1.6, p.z).applyMatrix4(camera.matrixWorldInverse);
+  const behind = projA.z > -0.2;
+  projA.set(p.x, 1.6, p.z).project(camera);
+  let x = ((projA.x + 1) / 2) * w, y = ((1 - projA.y) / 2) * h;
+  if (behind) { x = w - x; y = h - y; }
+  const m = 46, off = behind || x < m || x > w - m || y < m || y > h - m;
+  if (off) {   // pin it to the screen edge, pointing toward it
+    const cx = w / 2, cy = h / 2, dx = x - cx, dy = (behind ? Math.max(y, cy + 1) : y) - cy, k = Math.min((cx - m) / Math.abs(dx || 1e-3), (cy - m) / Math.abs(dy || 1e-3));
+    x = cx + dx * k; y = cy + dy * k;
+    exitMarkEl.dataset.arrow = Math.abs(dx) * (h / w) > Math.abs(dy) ? (dx > 0 ? "→" : "←") : dy > 0 ? "↓" : "↑";
+  } else exitMarkEl.dataset.arrow = "";
+  const html = `${exitMarkEl.dataset.arrow ? `<b>${exitMarkEl.dataset.arrow}</b> ` : ""}${label}`;
+  if (exitMarkEl.dataset.h !== html) { exitMarkEl.innerHTML = html; exitMarkEl.dataset.h = html; }
+  exitMarkEl.style.display = "block"; exitMarkEl.style.left = x + "px"; exitMarkEl.style.top = y + "px";
+}
+// the doors closed with you still inside: the nearest staff member finds you (a strike), then the day's over anyway
+function missedExit() {
+  const st = staff.filter(chaser).sort((a, b) => Math.hypot(a.x - player.x, a.z - player.z) - Math.hypot(b.x - player.x, b.z - player.z))[0] ?? staff[0];
+  game.dayEndAfterScene = true;
+  toast("The doors are locked. You're still inside.", 2.4);
+  caught(st, true);
+}
+
 // End of the day: a summary screen, then the next (harder) day starts in the morning.
 function dayOver() {
-  game.state = "dayEnd";
+  game.state = "dayEnd"; game.dismissal = false; game.dayEndAfterScene = false;
   releaseControls();
   ui.banner.classList.remove("show"); bannerTimer = 0;
   if (player.hidden) exitSpot(false);
@@ -2402,16 +2474,16 @@ function releaseControls() { stick.id = look.id = null; keys.clear(); sprintTouc
 }
 
 const RELEASE_LINES = ["Now get to class!!!", "Get out of my sight!!!", "Go. GO. Before I change my mind.", "I don't want to see you again today.", "Class. Now. MOVE."];
-function caught(st) {
+function caught(st, forced = false) {
   if (tut) { tutCaught(st); return; }   // step 72: practice catches don't count
   game.chaseOn = false;   // a catch isn't an escape
   cancelAim();
   game.catcher = st;
   hopOff(true);
   if (player.ride) endRide(false);
-  if (game.phase === "passing" && game.stars < 1 && !game.survival) { shoo(st); return; }
+  if (game.phase === "passing" && game.stars < 1 && !game.survival && !forced) { shoo(st); return; }
   game.unseenT = 0;
-  if (game.passShield) {   // the fake pass: one free get-out
+  if (game.passShield && !forced) {   // the fake pass: one free get-out
     game.passShield = false; tally("passUsed");
     shoo(st, `You flash the fake pass. The ${st.type.name} squints at it... "Fine. Go."`);
     return;
@@ -2497,6 +2569,7 @@ function endScene(skipAd = false) {
   player.invisT = CFG.strikes.afterStrikeGraceSec;
   letGo(game.catcher, CFG.strikes.catcherIgnoreSec);
   game.state = "playing";
+  if (game.dayEndAfterScene) { dayOver(); clock.getDelta(); return; }   // step 76: found inside after the doors locked
   saveGame();
   clock.getDelta();
 }
@@ -2955,12 +3028,12 @@ function updateCrowd(dt) {
     if (c.slipT > 0) { c.slipT -= dt; continue; }   // on the floor for a moment
     if (c.mode === "spawning") {
       if (game.phaseT < c.spawnAt) continue;
-      const d = c.door;
-      c.mode = "exiting"; c.h = d.h; c.t = d.t + rand(-0.4, 0.4); c.lat = d.wallLat;
+      const d = c.spawnDoor ?? c.door; c.spawnDoor = null;
+      c.mode = "exiting"; c.h = d.h; c.t = d.t + (d.entrance ? rand(-1, 1) : rand(-0.4, 0.4)); c.lat = d.wallLat;
       const [lo, hi] = latLimits(c.h, c.t);
       c.targetLat = rand(lo, hi);
       c.to = Math.random() < 0.5 ? HALLS[c.h].a : HALLS[c.h].b;
-      c.door = pick(floorDoors(HALLS[d.h].floor));   // a class on the floor they came out on
+      c.door = game.dismissal ? exitDoor(HALLS[d.h].floor) : pick(floorDoors(HALLS[d.h].floor));   // a class on the floor they came out on (or, after school, the way out)
       hallPos(c.h, c.t, c.lat, c);
     }
     if (c.mode === "exiting") {
@@ -2976,7 +3049,7 @@ function updateCrowd(dt) {
         if (c.h === h0 && Math.random() < 0.12) c.to = otherEnd(c.h, c.to);   // change of heart
       }
       c.lat += (c.targetLat - c.lat) * damp(1.5, dt);
-      if (game.phase === "passing" && game.phaseT >= c.leaveAt) c.mode = "toClass";
+      if (game.phase === "passing" && game.phaseT >= c.leaveAt) { c.mode = "toClass"; if (game.dismissal && !c.door?.entrance && c.door?.kind !== "stairs") c.door = exitDoor(HALLS[c.h].floor); }
     } else if (c.mode === "gather") {   // crowding round something (a geyser, a staff member with a sign on their back)
       const G = c.gather;
       if (G.done()) { c.mode = "wander"; c.gather = null; c.retargetT = 0; }
@@ -2985,6 +3058,7 @@ function updateCrowd(dt) {
         c.lat += ((c.h === G.h ? G.lat : 0) - c.lat) * damp(there ? 4 : 1.5, dt);
       }
     } else if (c.mode === "toClass") {
+      if (!c.door || HALLS[c.door.h].floor !== HALLS[c.h].floor) c.door = game.dismissal ? exitDoor(HALLS[c.h].floor) : pick(floorDoors(HALLS[c.h].floor));   // (no hallway between floors)
       const d = c.door;
       if (c.h !== d.h || Math.abs(c.t - d.t) > 0.05) {
         walkTo(c, d.h, d.t, c.speed * dt);
@@ -3481,16 +3555,17 @@ function drawStamina() {
 let lastHud = "";
 function updateHud() {
   const left = Math.max(0, Math.ceil(phaseLen() - game.phaseT));
-  const label = `DAY ${game.day} · PERIOD ${game.period} · ${game.phase === "passing" ? "PASSING" : "SKIPPING"} · ${floorOf(player.x) ? "2F" : "1F"}`;
+  const label = game.dismissal ? `DAY ${game.day} · SCHOOL'S OUT · GET TO THE EXIT · ${floorOf(player.x) ? "2F" : "1F"}`
+    : `DAY ${game.day} · PERIOD ${game.period} · ${game.phase === "passing" ? "PASSING" : "SKIPPING"} · ${floorOf(player.x) ? "2F" : "1F"}`;
   const label2 = game.survival ? label.replace(/ · (PASSING|SKIPPING)$/, " · REBEL RUN") : label;
   const multTxt = [streakMult() > 1 ? `STREAK ×${streakMult()}` : "", game.nearMissT > 0 ? "NEAR MISS ×2" : "", game.survival ? `REBEL RUN ×${CFG.survival.scoreMult}` : ""].filter(Boolean).join(" · ");
-  const key = multTxt + game.passShield + label2 + left + Math.floor(game.score) + "|" + game.lockerUses + "|" + game.strikes + game.highAlert + "|" + Math.round(game.heat) + game.stars + game.survival;
+  const key = multTxt + game.passShield + game.dismissal + label2 + left + Math.floor(game.score) + "|" + game.lockerUses + "|" + game.strikes + game.highAlert + "|" + Math.round(game.heat) + game.stars + game.survival;
   if (key === lastHud) return;
   lastHud = key;
   ui.label.textContent = label2;
   drawStars();
   ui.timer.textContent = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
-  ui.phase.className = game.phase + (game.survival ? " survival" : "");
+  ui.phase.className = game.phase + (game.survival ? " survival" : "") + (game.dismissal ? " dismissal" : "");
   if (Math.floor(game.score) > (+ui.score.textContent || 0)) { ui.score.classList.remove("bump"); void ui.score.offsetWidth; ui.score.classList.add("bump"); }
   ui.score.textContent = Math.floor(game.score);
   ui.uses.textContent = `LOCKERS ×${game.lockerUses}`;
@@ -3502,7 +3577,7 @@ function updateHud() {
 
 function update(dt) {
   game.time += dt; game.phaseT += dt;
-  if (game.phase === "passing" && game.phaseT >= phaseLen("passing")) startSkipping();
+  if (game.phase === "passing" && game.phaseT >= phaseLen("passing")) { if (game.dismissal) { missedExit(); return; } startSkipping(); }
   else if (game.phase === "skipping") {
     const pts = (CFG.pointsPerPeriod / phaseLen("skipping")) * dt * scoreMult() * streakMult();
     game.score += pts; game.periodScore += pts;
@@ -3512,6 +3587,7 @@ function update(dt) {
   tallyFrame(dt);
   updateCrowd(dt);
   updateStaff(dt, crowdCoverCount());
+  if (game.state === "playing") updateDismissal();
   if (game.state === "playing") { updateKickMe(dt); updateObjects(dt); updateTrails(dt); kidsGrab(dt); updateHeat(dt); updateRisk(dt); updateFriends(dt); updateAirplanes(dt); updateAlarm(dt); }
 }
 
@@ -6428,7 +6504,7 @@ const TUT_STEPS = [
 // a fresh passing period with nobody on staff
 function tutScene() {
   const keep = game.hotbar.slice();
-  morningSetup(); clearStaff(); clearObjects();
+  morningSetup(false); clearStaff(); clearObjects();
   game.hotbar = keep.map(() => null); renderHotbar();
   tut.blind = false; tut.mon = null;
 }
@@ -6466,7 +6542,7 @@ function tutTick(dt) {
   // keep the world quiet: no surprise planes, friend offers, or bells
   game.nextPlaneT = 99;
   for (const c of crowd) if (c.friend) c.friend.cd = Math.max(c.friend.cd, 5);
-  game.phaseT = Math.min(game.phaseT, 4);
+  game.phaseT = Math.min(game.phaseT, CFG.morning.streamSec + 4);   // (long enough for the morning arrivals)
   game.heat = Math.min(game.heat, CFG.heat.stars[1] - 1); game.heatPending = 0;   // one star at most (no extra staff)
   if (tut.blind) for (const st of staff) if (st.state !== "patrol") { st.state = "patrol"; st.suspicion = 0; st.camping = false; }   // it really doesn't see you
   const S = TUT_STEPS[tut.i];
@@ -6510,7 +6586,7 @@ function endTutorial(play) {
   tutEl.hidden = true; tutCard.hidden = true;
   releaseControls(); cancelAim();
   if (play) { startRun(null); clock.getDelta(); return; }
-  resetGame();
+  resetGame(null, false);
   game.state = "title"; $("title").hidden = false;
   updateCrowd(0.016); drawCrowd();
 }
@@ -6535,7 +6611,7 @@ let fpsAcc = 0, fpsN = 0;
 const clock = new THREE.Clock();
 let timeScale = 1;
 const slowFx = $("slowFx");
-resetGame();        // lay out the scene behind the title screen
+resetGame(null, false);        // lay out the scene behind the title screen (halls already full)
 updateCrowd(0.016); drawCrowd(); for (const st of staff) updateCone(st);
 
 renderer.setAnimationLoop(() => {
@@ -6571,6 +6647,7 @@ renderer.setAnimationLoop(() => {
   updateSpotsUI();
   drawFriends();
   updateHud();
+  drawExitMark();
   if (tut) tutDraw();
   if (performance.now() > snapHold) renderer.render(scene, camera);   // (a test close-up holds the frame briefly)
   if (debug) { fpsAcc += dt; fpsN++; if (fpsAcc > 0.5) { ui.fps.textContent = `${Math.round(fpsN / fpsAcc)} fps · ${crowdDrawn}/${crowd.length} kids drawn`; fpsAcc = fpsN = 0; } }
@@ -6595,6 +6672,7 @@ if (debug) {   // a small test panel for phone playtests (only with ?debug in th
   };
   $("dbgToggle").addEventListener("pointerdown", (e) => { e.stopPropagation(); e.preventDefault(); btns.hidden = !btns.hidden; });
   add("End phase", () => { game.phaseT = phaseLen() - 0.05; });
+  add("Last bell", () => { game.period = periodsToday(); game.phase = "skipping"; game.phaseT = phaseLen("skipping") - 0.05; });
   add("Skip to last period", () => {
     const last = typeof periodsToday === "function" ? periodsToday() : CFG.periodsPerDay;
     game.period = last - 1; game.phase = "skipping"; game.phaseT = phaseLen("skipping") - 0.05;
@@ -6784,6 +6862,10 @@ if (debug) {   // test-only helpers (only with ?debug in the URL)
     stuck() { return { player: player.stuckT, staff: staff.map((s) => s.stuckT ?? 0) }; },
     lockers() { return SPOTS.map((sp, i) => ({ i, kind: sp.kind })).filter((x) => x.kind === "locker").map((x) => x.i); },
     selectSlot(i) { selectSlot(i); },
+    lastBell() { game.period = periodsToday(); if (game.phase !== "skipping") startSkipping(); game.phaseT = phaseLen("skipping") - 0.05; },
+    dismissal() { return { on: !!game.dismissal, t: game.phaseT, len: phaseLen(), gone: crowd.filter((c) => c.mode === "gone").length, toExit: crowd.filter((c) => c.door === ENTRANCE_DOOR || c.door?.kind === "stairs").length, mark: exitMarkEl.style.display === "block" ? exitMarkEl.textContent : "" }; },
+    exitPos() { const E = ENTRANCE_DOOR, f = hallPos(E.h, E.t, E.wallLat - E.side * 3, {}); return { x: f.x, z: f.z, nx: E.side * HALLS[E.h].nx, nz: E.side * HALLS[E.h].nz }; },
+    crowdModes() { const m = {}; for (const c of crowd) m[c.mode] = (m[c.mode] ?? 0) + 1; return m; },
     phaseLens() { return { passing: phaseLen("passing"), skipping: phaseLen("skipping") }; },
     insideWalls() {   // how many people are standing inside a wall (should be 0)
       const inWall = (x, z) => WALLS.some((b) => x > b.x0 + 0.05 && x < b.x1 - 0.05 && z > b.z0 + 0.05 && z < b.z1 - 0.05);
