@@ -327,6 +327,7 @@ const CFG = {
     forgeNotePerDay: 1,           // rewarded: erase a strike
     fakePassPerDay: 1,            // rewarded: start tomorrow with a fake pass
   },
+  restroomRolls: 2,               // step 66: rolls of toilet paper in each restroom, each period
   barkSec: 1.8, barkCooldownSec: 3,   // staff speech bubbles
 
   footsteps: { hearRange: 20, patrolInterval: 0.55, chaseInterval: 0.3, volume: 0.55 },
@@ -572,7 +573,7 @@ const ITEM_TYPES = {
   // (it stays until the custodian clears it overnight). From the restrooms.
   toiletPaper:   { label: "Toilet paper", icon: "🧻", kind: "throw", flight: "glide2", speed: [6, 10], pitchDeg: 8, gravity: 1.2, glide: true,
                    cruiseY: 2.85, climb: 8, highSec: [0.8, 1.8], lowY: 1.4, sinkRate: 0.8, drag: 0.3,   // high enough to clear the banner wires
-                   perStudent: 10, crowdLandBonus: 30, crowdLandCount: 3, trailPointsPerM: 4,
+                   perStudent: 10, crowdLandBonus: 30, crowdLandCount: 3, trailPointsPerM: 4, bannerPoints: 250,   // step 66: draped over a spirit banner
                    hit: { student: 15, staff: 60, studentSec: 0.5, staffSec: 0.8, style: "flinch" } },
   // Same idea again, but it stays up much longer and you can pick it back up. Gym only.
   frisbee:       { label: "Frisbee", icon: "🥏", kind: "throw", flight: "glide2", recoverable: true, speed: [9, 14], pitchDeg: 6, gravity: 1.2, glide: true,
@@ -1213,7 +1214,7 @@ function makePerson({ body, skin = 0xf1c27d, scale = 1, hat = null, kind = null 
   if (!hat && hairStyle !== "bald") {
     mesh(new THREE.SphereGeometry(headR * 1.07, 12, 5, 0, Math.PI * 2, 0, Math.PI * 0.42), hairM, 0, headY + 0.02, -0.015).scale.y = 1.1;
     if (hairStyle === "bun") mesh(new THREE.IcosahedronGeometry(0.075, 1), hairM, 0, headY + 0.17, -0.13);
-    if (hairStyle === "long") mesh(new THREE.BoxGeometry(0.36, 0.3, 0.07), hairM, 0, headY - 0.1, -0.17);
+    if (hairStyle === "long") { const dm = hairM.clone(); dm.side = THREE.DoubleSide; g.add(new THREE.Mesh(longHairGeo(headR, headY, 0.34), dm)); }
   } else if (hairStyle === "bald" && !hat) for (const sx of [-1, 1]) mesh(new THREE.BoxGeometry(0.04, 0.08, 0.12), hairM, sx * headR * 0.95, headY - 0.01, -0.04);   // a fringe over the ears
   if (hat) {   // a cap with a brim
     const hm = lam(hat);
@@ -1584,6 +1585,15 @@ function buildHat(g, kind, m, r, y, style) {
   }
 }
 // hat: a hat sits on top, so skip the parts that would poke through it
+// step 66: long hair, as a curtain open at the face that falls from ear level past the shoulders and flares a little, with uneven tips
+function longHairGeo(r, y, len = 0.36, gap = 1.9) {
+  const top = y - r * 0.25, parts = [[new THREE.CylinderGeometry(r * 1.07, r * 1.32, len, 16, 1, true, gap / 2, Math.PI * 2 - gap).scale(1, 1, 0.85).translate(0, top - len / 2, -0.03)]];
+  for (let k = 0; k < 8; k++) {
+    const a = gap / 2 + 0.4 + k * ((Math.PI * 2 - gap - 0.8) / 7), tl = 0.06 + (k % 3) * 0.035;
+    parts.push([new THREE.ConeGeometry(0.055, tl, 4).rotateX(Math.PI).translate(Math.sin(a) * r * 1.29, top - len - tl / 2 + 0.01, Math.cos(a) * r * 1.29 * 0.85 - 0.03)]);
+  }
+  return mergeGeo(parts);
+}
 function buildHair(hair, style, m, r, y, hat = false) {
   const mesh = (geo, x, yy, z) => { const o = new THREE.Mesh(geo, m); o.position.set(x, yy, z); hair.add(o); return o; };
   const cap = (s = 1.07) => { const c = mesh(new THREE.SphereGeometry(r * s, 14, 6, 0, Math.PI * 2, 0, Math.PI * 0.42), 0, y + 0.02, -0.012); c.scale.y = 1.12; return c; };
@@ -1601,7 +1611,10 @@ function buildHair(hair, style, m, r, y, hat = false) {
   if (style === "spiky") mesh(new THREE.ConeGeometry(0.05, 0.18, 4), 0, y + r + 0.1, -0.02);
   if (style === "swoop") { const s = mesh(new THREE.BoxGeometry(0.2, 0.06, 0.16), 0.05, y + 0.08, r * 0.78); s.rotation.set(-0.5, 0, -0.45); }
   if (style === "bob") { const b = mesh(hairShell(r * 1.12, 1.6, Math.PI * 0.6), 0, y + 0.01, -0.01); b.scale.y = 1.1; }
-  if (style === "long") { const b = mesh(hairShell(r * 1.1, 1.6, Math.PI * 0.55), 0, y + 0.01, -0.01); b.scale.y = 1.1; mesh(new THREE.BoxGeometry(r * 1.9, 0.38, 0.07), 0, y - 0.2, -r * 0.82); }
+  if (style === "long") {
+    const b = mesh(hairShell(r * 1.1, 1.6, Math.PI * 0.62), 0, y + 0.01, -0.01); b.scale.y = 1.1;
+    const dm = m.clone(); dm.side = THREE.DoubleSide; hair.add(new THREE.Mesh(longHairGeo(r, y), dm));
+  }
   if (style === "ponytail") { mesh(new THREE.IcosahedronGeometry(0.06, 0), 0, y + 0.06, -r - 0.02); const t = mesh(new THREE.CylinderGeometry(0.05, 0.025, 0.26, 6), 0, y - 0.08, -r - 0.06); t.rotation.x = 0.25; }
   if (style === "bun") mesh(new THREE.IcosahedronGeometry(0.085, 1), 0, y + r + 0.02, -r * 0.45);
   if (style === "pigtails") for (const sx of [-1, 1]) { mesh(new THREE.IcosahedronGeometry(0.045, 0), sx * r * 0.95, y + 0.04, -0.03); const t = mesh(new THREE.CylinderGeometry(0.045, 0.02, 0.24, 6), sx * (r + 0.03), y - 0.1, -0.03); t.rotation.z = -sx * 0.15; }
@@ -1672,7 +1685,7 @@ const crowdParts = (() => {
   const cap = () => new THREE.SphereGeometry(C.headR * 1.08, 12, 5, 0, Math.PI * 2, 0, Math.PI * 0.45).scale(1, 1.12, 1).translate(0, C.headY + 0.01, -0.012);
   const hair = [
     mergeGeo([[cap()]]),                                                                                                   // short
-    mergeGeo([[cap()], [new THREE.BoxGeometry(0.3, 0.3, 0.07).translate(0, C.headY - 0.12, -0.14)]]),                  // long
+    (() => { const L = longHairGeo(C.headR, C.headY, 0.3); return mergeGeo([[cap()], [L]]); })(),                         // long
     mergeGeo([[cap()], [cyl(0.045, 0.03, 0.2, 6).rotateX(0.5).translate(0, C.headY - 0.05, -0.2)]]),                     // ponytail
     mergeGeo([[new THREE.IcosahedronGeometry(0.22, 1).scale(1, 0.85, 1).translate(0, C.headY + 0.07, -0.05)]]),           // big and round
   ];
@@ -1690,7 +1703,7 @@ function crowdInst(geo, max) {
 const N_KIDS = CFG.crowd.count;
 const crowdBodies = crowdInst(crowdParts.torso, N_KIDS), crowdHips = crowdInst(crowdParts.hips, N_KIDS), crowdHeads = crowdInst(crowdParts.head, N_KIDS);
 const crowdLegs = crowdInst(crowdParts.leg, N_KIDS * 2), crowdSleeves = crowdInst(crowdParts.sleeve, N_KIDS * 2), crowdArms = crowdInst(crowdParts.forearm, N_KIDS * 2);
-const crowdHair = crowdParts.hair.map((g) => crowdInst(g, N_KIDS)), crowdPacks = crowdInst(crowdParts.pack, N_KIDS);
+const crowdHair = crowdParts.hair.map((g, i) => { const m = crowdInst(g, N_KIDS); if (i === 1) { m.material = crowdMat.clone(); m.material.side = THREE.DoubleSide; } return m; }), crowdPacks = crowdInst(crowdParts.pack, N_KIDS);
 const CROWD_DETAIL_SCALE = 0.93;   // the full character model is a little taller than a crowd kid
 function crowdLook() { const L = randomLook(); L.outfit = pick(Object.keys(OUTFITS).filter((k) => k !== "goblin")); L.skin = Math.floor(Math.random() * 8); return L; }   // (goblins are special)
 const DOOR_SPOTS = () => SPOTS.filter((sp) => sp.kind === "classroom");
@@ -2084,6 +2097,7 @@ const RUN_STATS = [
     text: (n) => `Beaned ${plural(n, "person", "people")} with sports equipment` },
   { id: "flyover", icon: "✈️", get: (t) => t.flyover ?? 0, prior: [0.8, 1], min: 5, text: (n) => `Flew paper over the heads of ${plural(n, "kid")}` },
   { id: "tp", icon: "🧻", get: (t) => Math.round(t.tpM ?? 0), prior: [2, 4], min: 10, text: (n) => `TP'd ${meters(n)} of hallway` },
+  { id: "tpBanner", icon: "🎏", get: (t) => t.tpBanner ?? 0, prior: [0.05, 0.1], min: 1, text: (n) => `TP'd ${plural(n, "spirit banner")}` },
   { id: "gum", icon: "🍬", get: (t) => hv(t, "gum"), prior: [0.2, 0.25], min: 2, text: (n) => `Stuck ${plural(n, "wad")} of gum around the school` },
   { id: "graffiti", icon: "🎨", get: (t) => hv(t, "sprayPaint"), prior: [0.1, 0.15], min: 2, text: (n) => `Tagged ${plural(n, "wall")} with spray paint` },
   { id: "slips", icon: "🍌", get: (t) => hv(t, "bananaPeelStaff", "bananaPeelStudent", "mopBucketStaff", "mopBucketStudent"), prior: [0.2, 0.3], min: 2,
@@ -2223,7 +2237,7 @@ function resetGame(save = null) {
 function resetSpotsForPeriod() {
   game.lockerUses = CFG.hiding.lockerUsesPerPeriod;
   for (const sp of SPOTS) {
-    sp.used = false; sp.stayT = 0; sp.rummaged = false; sp.tpTaken = false;
+    sp.used = false; sp.stayT = 0; sp.rummaged = false; sp.tpLeft = CFG.restroomRolls;
     if (sp.kind === "closet") sp.taken.clear();   // (restocked, but still locked if you stole from it today)
     if (sp.kind === "classroom") {
       // raided last period: locked for a while, and nothing gets restocked until it opens again
@@ -3571,7 +3585,7 @@ function updateHidePanel() {
 // Rooms as shops: tap an item on the desk to grab it. It costs hiding time, and the teacher might call security.
 const lootEl = $("hpLoot");
 function renderLoot(sp) {
-  const key = sp.kind === "classroom" || sp.kind === "closet" ? `${sp.room}:${sp.lootVer}:${sp.loot?.length}:${[...sp.taken]}:${game.passShield}:${game.breakerUsed}:${sp.grabs}:${player.hoodT > 0}` : `${sp.kind}${sp.h}:${sp.t}:${!!sp.rummaged}:${!!sp.tpTaken}:${game.dareOffer?.id}:${game.dares.length}`;
+  const key = sp.kind === "classroom" || sp.kind === "closet" ? `${sp.room}:${sp.lootVer}:${sp.loot?.length}:${[...sp.taken]}:${game.passShield}:${game.breakerUsed}:${sp.grabs}:${player.hoodT > 0}` : `${sp.kind}${sp.h}:${sp.t}:${!!sp.rummaged}:${sp.tpLeft}:${game.dareOffer?.id}:${game.dares.length}`;
   if (lootEl.dataset.key === key) return;
   lootEl.dataset.key = key; lootEl.innerHTML = "";
   if (sp.kind === "restroom") {   // the bathroom flood: big points and heat, and it's closed for the rest of the day
@@ -3587,9 +3601,9 @@ function renderLoot(sp) {
       lootEl.appendChild(d);
     } else kid.innerHTML = `<span>Kid by the sinks: "${game.dares.length >= CFG.dares.max ? "Finish the dares you've got first." : "Nothing today. Come back later."}"</span>`;
     lootEl.prepend(kid);
-    if (!sp.tpTaken) {
+    if (sp.tpLeft > 0) {
       const t = document.createElement("button"); t.type = "button";
-      t.innerHTML = `🧻 Grab a roll<small>-1s</small>`;
+      t.innerHTML = `🧻 Grab a roll${sp.tpLeft > 1 ? ` (${sp.tpLeft} left)` : ""}<small>-1s</small>`;
       t.addEventListener("click", grabRoll);
       lootEl.appendChild(t);
     }
@@ -3688,9 +3702,9 @@ function grabLoot(i) {
 }
 function grabRoll() {
   const sp = player.hidden;
-  if (!sp || sp.kind !== "restroom" || sp.tpTaken || game.state !== "playing") return;
+  if (!sp || sp.kind !== "restroom" || !(sp.tpLeft > 0) || game.state !== "playing") return;
   if (!addItem("toiletPaper")) return;
-  sp.tpTaken = true; player.hideT += 1;
+  sp.tpLeft--; player.hideT += 1;
   updateHidePanel();
 }
 // Slam the locker door open: everyone close by is stunned, you get a head start, and the locker's busted for the day.
@@ -4828,10 +4842,17 @@ function stepTrail(tr, dt) {
       if (p.y < TP.floorY) { p.y = TP.floorY; p.held = true; continue; }
       const s = tpSupport(p.x, p.z);
       if (p.snag) { p.y = p.snag; continue; }
-      if (s > TP.floorY && p.y < s && p.py >= s - 0.04) { p.y = s + 0.01; p.held = true; p.snag = p.y; }   // it came down onto something: snagged
+      if (s > TP.floorY && p.y < s && p.py >= s - 0.04) { p.y = s + 0.01; p.held = true; p.snag = p.y; tpBanner(tr, p); }   // it came down onto something: snagged
       else if (p.held && p.y > TP.floorY + 0.02 && p.y < s - 0.06) p.held = false;       // pulled off the edge
     }
   }
+}
+// step 66: TP draped over a spirit banner's wire is worth a bonus (once per banner, per throw)
+function tpBanner(tr, p) {
+  const pr = hallProject(p.x, p.z), b = BANNERS.find((b) => b.h === pr.h && Math.abs(pr.t - b.t) < 0.3 && p.y > b.wireY - 0.1);
+  if (!b || (tr.banners ??= new Set()).has(b)) return;
+  tr.banners.add(b); tally("tpBanner");
+  havoc("tpBanner:" + BANNERS.indexOf(b), ITEM_TYPES.toiletPaper.bannerPoints, `TP'd the ${b.text} banner!`, { x: p.x, z: p.z });   // each banner its own trick, so a new one pays in full
 }
 function updateTrails(dt) {
   for (const tr of tpTrails) {
