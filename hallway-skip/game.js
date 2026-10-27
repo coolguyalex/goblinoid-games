@@ -69,7 +69,8 @@ const CFG = {
 
   // Within-day curve: index = period - 1. Period 1 is easy, period 6 is very hard but possible.
   monitorsPerPeriod: [2, 2, 3, 3, 4, 4],   // (two floors' worth)
-  guardsPerPeriod:   [0, 1, 1, 2, 2, 2],
+  guardsPerPeriod:   [2, 3, 3, 4, 4, 4],   // step 77: +1 per floor (was 0,1,1,2,2,2)
+  walkersPerPeriod:  [1, 1, 1, 2, 2, 2],   // step 77: teachers on a free period, walking the halls
   teachersPerPeriod: [0, 0, 1, 2, 3, 4],   // teachers standing guard at their doors
   custodiansPerPeriod: [2, 2, 2, 2, 2, 2],   // one per floor   // teachers standing guard at their doors
 
@@ -115,11 +116,11 @@ const CFG = {
     signsFor: ["slime", "mentos", "mopBucket"],   // wet messes get two signs (so do stink clouds and floods)
     signGap: 1.8,                 // how far either side of the mess he sets them
     retrieveAfterSec: 10,         // steal a sign and, this long after, he drops everything to get it back
-    pickupSec: 1.6,               // picking up an item or litter
-    scrubSec: 4,                  // scrubbing graffiti off a wall
-    tpSec: 3,                     // pulling down a toilet-paper streamer
-    mopSec: 7,                    // mopping a flooded restroom (it reopens)
-    airSec: 2.5,                  // airing out what's left of a stink bomb
+    pickupSec: 4,                 // picking up an item or litter            (step 77: everything takes ~2.5x longer;
+    scrubSec: 10,                 // scrubbing graffiti off a wall             was 1.6 / 4 / 3 / 7 / 2.5)
+    tpSec: 7.5,                   // pulling down a toilet-paper streamer
+    mopSec: 18,                   // mopping a flooded restroom (it reopens)
+    airSec: 6,                    // airing out what's left of a stink bomb
     radioCooldownSec: 15, radioHeat: 5, radioStaff: 2,
     kidsTake: ["basketball", "football", "frisbee", "paperAirplane", "bassDrum", "globe", "skateboard"],
     kidGrabRange: 0.9, kidGrabAfterSec: 1.5,
@@ -395,6 +396,27 @@ const STAFF_TYPES = {
     vestColor: 0x4f6d7a, hatColor: 0x2d3b45, scale: 1.1, coneColor: 0x9fd8ff,
     caughtLine: "\"Not my department, kid.\"",
   },
+  roamTeacher: {   // step 77: a teacher on a free period, wandering the halls with a coffee
+    name: "teacher",
+    patrolSpeed: 1.8, chaseSpeed: 3.6,        // slower than you, but they'll try
+    visionRange: 8, visionHalfAngleDeg: 40,
+    sweepDeg: 40, sweepRate: 0.6,
+    roamTurnSec: [8, 16],
+    notice: 1.0, mug: true,
+    vestColor: 0x8e5a9b, hatColor: null, scale: 1.08,
+    caughtLine: "\"Hall pass? No? Inside. Now.\"",
+  },
+  postedGuard: {   // step 77: a guard posted for good (outside a restroom you flooded, or the office you raided)
+    name: "security guard",
+    stationary: true, noMug: true,
+    visionRange: 9, visionHalfAngleDeg: 40,
+    sweepDeg: 65, sweepRate: 0.45,
+    notice: 1.2,
+    alarmCooldownSec: 8,
+    catchRange: 1.7,
+    vestColor: 0x26364f, hatColor: 0x111111, scale: 1.2,
+    caughtLine: "\"Saw that coming a mile away.\"",
+  },
   hallTeacher: {
     name: "teacher",
     stationary: true,                          // stands at their classroom door
@@ -440,6 +462,8 @@ const BARKS = {   // speech bubbles over staff heads
   custodian:     { suspicious: ["Hm.", "*squints*"], tidy: ["Every. Single. Day.", "Kids these days.", "*mutters*", "Who raised you?"],
                    slip: ["Oof! My knees!", "Not again..."], radio: ["Got a kid out here!", "Yeah, I see one. Over.", "Somebody come get this one."] },
   hallTeacher:   { suspicious: ["Excuse me?"], alarm: ["HALL PASS!", "Excuse me?!", "SECURITY!"] },
+  roamTeacher:   { suspicious: ["Hm?", "Excuse me?"], chase: ["Young man! Young lady! Whoever you are!", "Stop right there!"], search: ["I know you're around here..."], giveUp: ["Not paid enough for this."] },
+  postedGuard:   { suspicious: ["...", "I see you."], alarm: ["Not today.", "Backup to my post!", "Hey! HEY!"] },
   principal:     { suspicious: ["Mm-hm."], chase: ["YOUNG PERSON!", "MY OFFICE!"], search: ["Hiding won't help."],
                    giveUp: ["This isn't over."], slip: ["Who put this here?!"], bust: ["Out. Now."], tidy: ["In MY school?", "Disgraceful."], check: ["Hey, do you kids have a pass?", "I know someone's in here."] },
 };
@@ -477,6 +501,8 @@ const CAUGHT_LINES = {   // strike 1, by who caught you
   hallMonitor:   ["\"You better get to class.\"", "\"Pass? No? Didn't think so.\"", "\"I'm writing this down. In pen.\""],
   securityGuard: ["\"Let's go, chief. Walk with me.\"", "\"I used to be fast like you.\"", "\"You have the right to remain in class.\""],
   hallTeacher:   ["\"Hall pass? No? Inside. Now.\"", "\"I will be emailing your parents. In ALL CAPS.\""],
+  roamTeacher:   ["\"I was on my coffee break. Now I'm not.\"", "\"Hall pass? No? Inside. Now.\""],
+  postedGuard:   ["\"I've been standing here ALL day for this.\"", "\"Saw that coming a mile away.\""],
   principal:     ["\"My office. Now.\"", "\"We've been expecting you.\""],
 };
 const OFFICE_RANTS = [
@@ -1234,8 +1260,10 @@ for (const [mh, t] of [[6, 5], [6, 19.5], [6, 34], [6 + BASE_HALLS, 9], [6 + BAS
 const STAFF_LOOKS = {
   hallMonitor:   { shirt: 0x4a6fa5, pants: 0xb59f74, shoes: 0x3a2a1c, vest: 0xe8c547, whistle: true },
   securityGuard: { shirt: 0x26364f, pants: 0x1a1f2b, shoes: 0x0e0e0e, badge: true, belt: true },
+  postedGuard:   { shirt: 0x26364f, pants: 0x1a1f2b, shoes: 0x0e0e0e, badge: true, belt: true },
   principal:     { shirt: 0x3b3f4a, pants: 0x3b3f4a, shoes: 0x1a1a1a, suit: true, glasses: true, hair: ["bald", "short"] },
   custodian:     { shirt: 0x4f6d7a, pants: 0x4f6d7a, shoes: 0x2b2b2b, keys: true },
+  roamTeacher:   { shirt: 0x5a7d9b, pants: 0x3a3a44, shoes: 0x2b1d14, cardigan: true, glasses: 0.5, hair: ["bun", "short", "long", "bald"] },
   hallTeacher:   { shirt: 0x8e5a9b, pants: 0x3a3a44, shoes: 0x2b1d14, cardigan: true, glasses: 0.5, hair: ["bun", "short", "long", "bald"] },
 };
 function makePerson({ body, skin = 0xf1c27d, scale = 1, hat = null, kind = null }) {
@@ -1790,7 +1818,7 @@ function spawnStaff(typeKey, place) {
     pole.position.set(0.32, 0.9, 0); pole.rotation.z = 0.35; mesh.add(pole);
     const head = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.14, 0.22), lambert(0xe8e2d0)); head.position.set(0.6, 0.18, 0); mesh.add(head);
   }
-  if (T.stationary) {   // a coffee mug, so teachers read differently from a distance
+  if ((T.stationary && !T.noMug) || T.mug) {   // a coffee mug, so teachers read differently from a distance
     const mug = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.055, 0.13, 8), lambert(0xffffff));
     mug.position.set(0, 0.0, 0.06); mesh.userData.hand.add(mug); mesh.userData.arms[1].rotation.x = -1.0;   // held up, mid-sip
   }
@@ -2069,7 +2097,7 @@ function readInput() {
 // =====================================================================================
 const game = { state: "title", day: 1, period: 1, phase: "passing", phaseT: 0, score: 0, time: 0,
   strikes: 0, highAlert: false, periodScore: 0, periodsSkipped: 0, dayPeriodsSkipped: 0, sceneT: 0, sceneEnd: null,
-  lockerUses: 0, pendingOffice: false, hotbar: [], aim: null, havocCount: {}, heat: 0, heatPending: 0, stars: 0, survival: false, survivalT: 0, nextArrivalT: 0, nextRadioT: 0, alarmT: 0, alarmPulled: false,
+  lockerUses: 0, pendingOffice: false, hotbar: [], aim: null, havocCount: {}, heat: 0, heatPending: 0, stars: 0, posts: [], survival: false, survivalT: 0, nextArrivalT: 0, nextRadioT: 0, alarmT: 0, alarmPulled: false,
   unseenT: 0, nearMissT: 0, passShield: false, nextPlaneT: 0, nerveAcc: 0, dares: [], dareOffer: null, daresDone: [], chasedThisSkip: false, blackoutT: 0, breakerUsed: false };
 let tut = null;   // step 72: the tutorial, while it's running
 const cam = { yaw: 0 };
@@ -2108,7 +2136,7 @@ const SAVE_KEY = "hallwaySkip.save.v1";
 function saveGame() {
   if (tut) return;   // step 72: the tutorial isn't a run
   try { localStorage.setItem(SAVE_KEY, JSON.stringify({ day: game.day, period: game.period, score: Math.floor(game.score),
-    strikes: game.strikes, highAlert: game.highAlert, periodsSkipped: game.periodsSkipped, survival: game.survival, dares: game.dares, tally: game.tally })); } catch (e) { /* storage blocked: fine */ }
+    strikes: game.strikes, highAlert: game.highAlert, periodsSkipped: game.periodsSkipped, posts: game.posts, survival: game.survival, dares: game.dares, tally: game.tally })); } catch (e) { /* storage blocked: fine */ }
 }
 function loadSave() { try { const s = JSON.parse(localStorage.getItem(SAVE_KEY)); return s && s.day ? s : null; } catch (e) { return null; } }
 // ---- step 52: run stats. A tally of everything you did this run, saved with the run. At the end, each stat is compared
@@ -2294,6 +2322,7 @@ function morningSetup(arrive = true) {   // (arrive = false: the halls are alrea
   stolenSigns.length = 0;
   game.breakerUsed = false; if (game.blackoutT > 0) { game.blackoutT = 0; lightsOn(); }
   startPassing(true);
+  spawnPosts();
   if (game.strikes >= 2) ensurePrincipal(false);
   for (const c of crowd) if (c.friend) c.friend.cd = rand(0, 6);
 }
@@ -2303,6 +2332,7 @@ function resetGame(save = null, arrive = true) {
   game.strikes = save?.strikes ?? 0; game.highAlert = save?.highAlert ?? false;
   game.periodScore = 0; game.periodsSkipped = save?.periodsSkipped ?? 0; game.dayPeriodsSkipped = 0;
   game.heat = game.heatPending = 0; game.stars = 0;
+  game.posts = (save?.posts ?? []).filter((i) => SPOTS[i]);   // step 77: guards posted for good
   game.survival = !!save?.survival; game.survivalT = 0; game.alarmT = 0;
   if (game.survival) { game.heat = 100; game.stars = 5; game.highAlert = true; }   // a saved run in survival mode stays in it
   game.unseenT = 0; game.nearMissT = 0; game.passShield = false;
@@ -2341,7 +2371,7 @@ function startPassing(first) {
     if (!first) { c.mode = "spawning"; c.spawnAt = rand(0, CFG.crowd.floodSpreadSec); c.speed = rand(CFG.crowd.speedMin, CFG.crowd.speedMax); }
   }
   // staff for this period (the within-day curve); they stay on for the rest of the day
-  for (const [key, table, line] of [["hallMonitor", CFG.monitorsPerPeriod], ["securityGuard", CFG.guardsPerPeriod, "guardOnDuty"], ["hallTeacher", CFG.teachersPerPeriod, "teacherOut"], ["custodian", CFG.custodiansPerPeriod]]) {
+  for (const [key, table, line] of [["hallMonitor", CFG.monitorsPerPeriod], ["securityGuard", CFG.guardsPerPeriod, "guardOnDuty"], ["hallTeacher", CFG.teachersPerPeriod, "teacherOut"], ["roamTeacher", CFG.walkersPerPeriod], ["custodian", CFG.custodiansPerPeriod]]) {
     let have = staff.filter((st) => st.key === key && !st.wanted).length;   // (extra staff from your heat don't count)
     const want = perPeriod(table);
     if (have < want && line && game.state === "playing") pa(line);
@@ -3200,6 +3230,7 @@ function canSeePlayer(st, rangeMult, needCone) {
   const T = st.type, dx = player.x - st.x, dz = player.z - st.z, d = Math.hypot(dx, dz);
   if (player.invisT > 0) return { seen: false, d };   // just served a strike: a moment to get away
   if (st.ignoreT > 0) return { seen: false, d };      // the one who just caught you is letting it go
+  if (st.postGrace > 0) return { seen: false, d };    // step 77: a guard who's only just been posted
   if (d > T.visionRange * staffMult("vision") * rangeMult) return { seen: false, d };
   if (needCone && Math.abs(angDiff(st.facing, Math.atan2(dx, dz))) > coneHalf(T)) return { seen: false, d };
   return { seen: lineOfSight(st.x, st.z, player.x, player.z), d };
@@ -3235,6 +3266,7 @@ function updateStaff(dt, cover) {
     const T = st.type;
     st.sweep += dt * T.sweepRate;
     if (st.ignoreT > 0) st.ignoreT -= dt;
+    if (st.postGrace > 0 && !player.hidden) st.postGrace -= dt;
     let speed = 0;
     st.distractT = Math.max(0, st.distractT - dt);
     if (st.stunT > 0) {   // slipped on a banana peel (flat on the floor), or hit by something (staggering)
@@ -3269,7 +3301,7 @@ function updateStaff(dt, cover) {
       if (st.suspicion >= 1 && st.alarmT <= 0) {
         st.alarmT = T.alarmCooldownSec; st.suspicion = 0.5;
         playBlip([620, 880, 620], 0.1, "square", 0.08);
-        toast("Teacher: \"HEY! Where's your hall pass?!\"", 2.2);
+        toast(st.key === "postedGuard" ? "Guard: \"HEY! Backup to my post!\"" : "Teacher: \"HEY! Where's your hall pass?!\"", 2.2);
         bark(st, "alarm", true);
         callBackup(st, false);
       }
@@ -3880,6 +3912,7 @@ function grabLoot(i) {
   }
   sp.raided = true;   // locked for a while from the next bell
   dareEvent("raid", { room: sp.room, type: sp.roomType });
+  if (sp.roomType === "office") postGuard(sp, "Something is missing from the main office. Security will be posted at the door from now on.");
   player.hideT += TT.grabSec ?? CFG.rooms.grabSec;
   updateHidePanel();
 }
@@ -6007,6 +6040,7 @@ function floodRestroom() {
   exitSpot(false, "Water everywhere. You slosh back out into the hall.");
   havoc("flood", Fl.points, "Flooded the toilets!", { x: f.x, z: f.z });
   dareEvent("flood");
+  postGuard(sp, "Due to a... plumbing incident, security will be stationed outside that restroom. Permanently.");
   makeNoise(f.x, f.z, Fl.noiseRadius, true);
   playBlip([180, 150, 120, 100], 0.2, "sine", 0.1);
   if (!sp.puddle) {
@@ -6087,6 +6121,21 @@ function popup(text, cls = "") {
 // =====================================================================================
 // Step 8: the principal, friends and passing-period mini-games, risk scoring
 // =====================================================================================
+// Step 77: guards posted for the rest of the run: outside a restroom you flooded, outside the office you raided.
+function postGuard(sp, line) {
+  const i = SPOTS.indexOf(sp);
+  if (game.posts.includes(i)) return;
+  game.posts.push(i);
+  const st = spawnPost(sp); if (st) st.postGrace = 6;   // a head start: they don't see you until you've been back out for 6 s
+  if (line) setTimeout(() => game.state === "playing" && pa(null, line, 4.5), 2500);
+  toast("🛡 A security guard is posted there now. For good.", 2.6);
+}
+function spawnPost(sp) {
+  if (staff.some((s) => s.key === "postedGuard" && s.post === sp)) return null;
+  const p = hallPos(sp.h, sp.t + 1.1, sp.wallLat - sp.side * 0.55);
+  return spawnStaff("postedGuard", { post: sp, h: sp.h, x: p.x, z: p.z, facing: Math.atan2(-sp.side * HALLS[sp.h].nx, -sp.side * HALLS[sp.h].nz) });
+}
+function spawnPosts() { for (const i of game.posts) if (SPOTS[i]) spawnPost(SPOTS[i]); }
 function ensurePrincipal(announce) {
   if (staff.some((s) => s.key === "principal")) return;
   spawnStaff("principal", pickStaffPlace("principal"));
@@ -6830,7 +6879,7 @@ if (debug) {   // test-only helpers (only with ?debug in the URL)
     playerState() { return { slipT: player.slipT, stuckT: player.stuckT, dazeT: player.dazeT, riding: !!player.ride, x: player.x, z: player.z, rideSpeed: player.ride?.speed ?? 0, heading: player.heading }; },
     jumpOff() { jumpOff(); },
     board() { return player.board ? { vx: player.board.vx, vz: player.board.vz } : null; },
-    staffFull(k) { const s = staff[k]; return { camping: !!s.camping, state: s.state, stunT: s.stunT, distractT: s.distractT, x: s.x, z: s.z, key: s.key, fleeT: s.fleeT ?? 0 }; },
+    staffFull(k) { const s = staff[k]; return { camping: !!s.camping, state: s.state, stunT: s.stunT, distractT: s.distractT, x: s.x, z: s.z, key: s.key, fleeT: s.fleeT ?? 0, facing: s.facing }; },
     searchTo(k, x, z) { const st = staff[k]; st.state = "search"; st.searchT = -30; st.lastX = st.tx = x; st.lastZ = st.tz = z; },
     nodes() { return NODES.map((n) => ({ id: n.id, x: n.x, z: n.z })); },
     tidyInfo() { return staff.map((s) => ({ key: s.key, state: s.state, obj: s.tidyObj && !s.tidyObj.dead && s.state === "tidy" ? s.tidyObj.id : null, stunT: s.stunT, tidyT: s.tidyT, x: s.x, z: s.z, pauseT: s.pauseT })); },
@@ -6865,6 +6914,10 @@ if (debug) {   // test-only helpers (only with ?debug in the URL)
     lastBell() { game.period = periodsToday(); if (game.phase !== "skipping") startSkipping(); game.phaseT = phaseLen("skipping") - 0.05; },
     dismissal() { return { on: !!game.dismissal, t: game.phaseT, len: phaseLen(), gone: crowd.filter((c) => c.mode === "gone").length, toExit: crowd.filter((c) => c.door === ENTRANCE_DOOR || c.door?.kind === "stairs").length, mark: exitMarkEl.style.display === "block" ? exitMarkEl.textContent : "" }; },
     exitPos() { const E = ENTRANCE_DOOR, f = hallPos(E.h, E.t, E.wallLat - E.side * 3, {}); return { x: f.x, z: f.z, nx: E.side * HALLS[E.h].nx, nz: E.side * HALLS[E.h].nz }; },
+    posts() { return { posts: game.posts.map((i) => SPOTS[i].kind + (SPOTS[i].room ? " " + SPOTS[i].room : "")), guards: staff.filter((s) => s.key === "postedGuard").map((s) => [s.post?.kind, s.state, Math.round(s.x * 10) / 10, Math.round(s.z * 10) / 10]) }; },
+    spots(kind) { return SPOTS.map((sp, i) => ({ i, kind: sp.kind, room: sp.room, type: sp.roomType, floor: HALLS[sp.h].floor })).filter((x) => x.kind === kind); },
+    nextMorning() { morningSetup(); },
+    staffKeys() { const m = {}; for (const s of staff) m[s.key] = (m[s.key] ?? 0) + 1; return m; },
     crowdModes() { const m = {}; for (const c of crowd) m[c.mode] = (m[c.mode] ?? 0) + 1; return m; },
     phaseLens() { return { passing: phaseLen("passing"), skipping: phaseLen("skipping") }; },
     insideWalls() {   // how many people are standing inside a wall (should be 0)
