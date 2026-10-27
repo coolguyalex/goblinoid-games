@@ -141,6 +141,8 @@ const CFG = {
   keyboard: { aimTurnRate: 1.8, aimPowerRate: 0.9, startPower: 0.55 },   // arrow-key aiming: radians/s and power/s
   camera: {
     keyTurnRate: 2.4,             // step 83: radians a second with an arrow key held
+    // step 84: ↑ / ↓ zoom (0 = first person, 1 = the usual view, up to zoomMax = further back)
+    zoomRate: 1.1, zoomMax: 1.5, eyeHeight: 1.5, fpFov: 95, fpLookDown: 1.0, fpLookAhead: 3,
     fov: 75,                      // wide, to help with corner blindness
     height: 3.0,                  // slightly raised
     distance: 4.4,
@@ -2110,6 +2112,8 @@ let sprintTouch = false;
 // step 83: ← / → turn the camera (the mouse doesn't drag the view any more)
 function tickKeyLook(dt) {
   if (game.aim) return;
+  const zoom = (keys.has("arrowdown") ? 1 : 0) - (keys.has("arrowup") ? 1 : 0);   // step 84
+  if (zoom) cam.zoom = clamp(cam.zoom + zoom * CFG.camera.zoomRate * dt, 0, CFG.camera.zoomMax);
   const turn = (keys.has("arrowleft") ? 1 : 0) - (keys.has("arrowright") ? 1 : 0);
   if (!turn) return;
   const r = turn * CFG.camera.keyTurnRate * dt;
@@ -2136,7 +2140,7 @@ const game = { state: "title", day: 1, period: 1, phase: "passing", phaseT: 0, s
   lockerUses: 0, pendingOffice: false, hotbar: [], aim: null, havocCount: {}, heat: 0, heatPending: 0, stars: 0, posts: [], survival: false, survivalT: 0, nextArrivalT: 0, nextRadioT: 0, alarmT: 0, alarmPulled: false,
   unseenT: 0, nearMissT: 0, passShield: false, nextPlaneT: 0, nerveAcc: 0, dares: [], dareOffer: null, daresDone: [], chasedThisSkip: false, blackoutT: 0, breakerUsed: false };
 let tut = null;   // step 72: the tutorial, while it's running
-const cam = { yaw: 0 };
+const cam = { yaw: 0, zoom: 1, zs: 1 };   // step 84: zoom (zs eases toward it)
 const $ = (id) => document.getElementById(id);
 const ui = { phase: $("phase"), label: $("phaseLabel"), timer: $("timer"), score: $("score"), uses: $("uses"), banner: $("banner"), fps: $("fps"),
   toast: $("toast"), hide: $("hidePanel"), hpTitle: $("hpTitle"), hpFill: $("hpFill"), hpLine: $("hpLine"), hpWarn: $("hpWarn") };
@@ -3570,10 +3574,19 @@ function updateCone(st) {
 
 function updateCamera(dt) {
   const C = CFG.camera, fx = Math.sin(cam.yaw), fz = Math.cos(cam.yaw);
-  const hit = raycast(player.x, player.z, -fx, -fz, C.distance + C.wallMargin);
-  const dist = clamp(hit - C.wallMargin, C.minDistance, C.distance);
-  camera.position.set(player.x - fx * dist, C.height, player.z - fz * dist);
-  camera.lookAt(player.x + fx * C.lookAhead, C.lookHeight, player.z + fz * C.lookAhead);
+  // step 84: zoom. 1 is the usual over-the-shoulder view; down to 0 it slides in to your kid's eyes (first person,
+  // wide and tipped down so you can see the floor); above 1 it pulls further back.
+  cam.zs += (cam.zoom - cam.zs) * Math.min(1, dt * 10);
+  const z = cam.zs, t = Math.min(z, 1), far = Math.max(0, z - 1);
+  const want = C.distance * z, height = Math.min(C.eyeHeight + (C.height - C.eyeHeight) * t + far * 0.5, LAYOUT.wallHeight - 0.15);   // (stays under the ceiling)
+  const hit = raycast(player.x, player.z, -fx, -fz, want + C.wallMargin);
+  const dist = clamp(hit - C.wallMargin, Math.min(C.minDistance, want), want);
+  camera.position.set(player.x - fx * dist, height, player.z - fz * dist);
+  const ahead = C.fpLookAhead + (C.lookAhead - C.fpLookAhead) * t, lookY = C.eyeHeight - C.fpLookDown + (C.lookHeight - C.eyeHeight + C.fpLookDown) * t;
+  camera.lookAt(player.x + fx * ahead, lookY, player.z + fz * ahead);
+  const fov = C.fpFov + (C.fov - C.fpFov) * t;
+  if (Math.abs(camera.fov - fov) > 0.05) { camera.fov = fov; camera.updateProjectionMatrix(); }
+  if (player.kid) player.kid.visible = dist > 0.7;   // (don't look out from inside your own head)
   camera.updateMatrixWorld();
   camRight.set(-Math.cos(cam.yaw), 0, Math.sin(cam.yaw));   // screen-right in world space
 }
@@ -7325,6 +7338,7 @@ if (debug) {   // test-only helpers (only with ?debug in the URL)
     seedRuns(a) { saveRuns(a); },
     kickMe() { const i = game.hotbar.findIndex((x) => x?.key === "kickMe"); if (i >= 0) stickKickMe(i); },
     camYaw() { return cam.yaw; },
+    camInfo() { return { zoom: cam.zoom, zs: cam.zs, fov: camera.fov, y: camera.position.y, d: Math.hypot(camera.position.x - player.x, camera.position.z - player.z), kidVisible: player.kid.visible }; },
     kicks() { return { staff: staff.filter((s) => s.kickMe).map((s) => [s.key, !!s.penned, Math.round(s.stunT * 100) / 100]), kidKicks: crowd.filter((c) => c.kickT > 0).length, target: kickTarget() ? (kickTarget().isStaff ? "staff" : "kid") : null, ring: crowd.filter((c) => c.mode === "gather").length, ringD: staff.filter((s) => s.penned).map((s) => crowd.filter((c) => c.mode === "gather").map((c) => Math.round(Math.hypot(c.x - s.x, c.z - s.z) * 10) / 10)), next: staff.filter((s) => s.penned).map((s) => s.nextKickT) }; },
     penInfo() { return staff.map((s) => ({ key: s.key, kickMe: !!s.kickMe, penned: !!s.penned, x: s.x, z: s.z, facing: s.facing })); },
     gathered() { return crowd.filter((c) => c.mode === "gather").length; },
