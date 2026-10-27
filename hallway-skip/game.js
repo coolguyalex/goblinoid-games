@@ -339,7 +339,6 @@ const CFG = {
     afterStrikeGraceSec: 6,       // after a strike scene, staff can't see you for this long (was 3 before step 35)...
     catcherIgnoreSec: 20,         // ...and whoever caught you ignores you for this long ("Now get to class!")
     shooGraceSec: 4, shooIgnoreSec: 12,   // the same after a no-strike "get to class!" in a passing period
-    officeLosesPeriodPoints: true,   // strike 2 costs you everything earned this period
     alert: { vision: 1.2, notice: 1.4, speed: 1.1 },   // after strike 2, staff stay this much sharper for the rest of the day
   },
   backup: { range: 60, maxResponders: 2 },   // a radio call / yell pulls this many nearby staff toward you
@@ -467,10 +466,13 @@ const RUN_ENDINGS = {
 };
 // Spray-paint graffiti. Plain strings are painted as text; the others have their own drawings (see drawGraffiti).
 const GRAFFITI = [
-  "I wuz hea", { draw: "coolS" }, "(He × Li × N) × Ne", "SKOOL SUX", "officer dale is a dork", "I just lost the game",
+  "I wuz hea", { draw: "coolS" }, "(He × Li × N) × Ne", "Skool is 4 Foolz", "officer dale is a dork", "I just lost the game",
   "√-1 2³ Σ π", "d/dt (my grades) < 0", { draw: "dontRead" }, "TARDY 4 LYFE", "LUNCH LADIES R HOT", "school | prison",
   { draw: "brick", text: "ANOTHER BRICK IN THE WALL" }, "sudo rm -rf /school", "BILLIONAIRE DROPOUTS CLUB", "SPICOLI WAS RIGHT",
-  "I AM THE KWISATZ HADERACH", "Tm with your mom", { draw: "heart" }, "THE EARTH IS A TORUS",
+  "TOM RIDDLE WAS FRAMED", "Tm with your mom", { draw: "heart" }, "THE EARTH IS A TORUS",
+  // step 67: drawings
+  { draw: "kilroy" }, { draw: "balloonGirl" }, { draw: "monaGoblina" }, { draw: "eye" }, { draw: "skull" }, { draw: "deadBunny" },
+  { draw: "ankh" }, { draw: "peace" }, { draw: "yinYang" },
 ];
 const LUNCHES = ["mystery tacos.", "rectangle pizza.", "the meatloaf (again).", "\"breakfast for lunch.\"", "chicken nuggets of uncertain origin.", "soup?"];
 
@@ -2381,20 +2383,18 @@ function caught(st) {
   game.state = "scene"; game.sceneT = 0;
   const office = game.strikes === 2;
   game.sceneEnd = office ? CFG.strikes.officeSceneSec : CFG.strikes.warningSceneSec;
-  const lost = office && CFG.strikes.officeLosesPeriodPoints ? Math.floor(game.periodScore) : 0;
   $("strikeTitle").textContent = office ? "STRIKE 2 · THE OFFICE" : "STRIKE 1 · WARNING";
   $("strikeLine").textContent = office
     ? `${pick(OFFICE_RANTS)} Staff will be watching you for the rest of the day.`
     : `The ${st.type.name} catches you. ${pick(CAUGHT_LINES[st.key] ?? [st.type.caughtLine])}`;
   $("strikeExcuse").textContent = `Your excuse: "${pick(EXCUSES)}" It does not work.`;
-  $("strikeSub").textContent = office ? (lost ? `-${lost} points (this period's skipping)` : "") : "One more and you're going to the office.";
+  $("strikeSub").textContent = office ? "One more and your run is over." : "One more and you're going to the office.";   // step 67: getting caught never costs points
   $("strikeDots").innerHTML = strikeDotsHtml();
   const canForge = Ads.canRewarded("forgeNote");
   $("forgeBtn").hidden = !canForge;
   if (canForge) game.sceneEnd += 3.5;   // a little longer, so there's time to decide
   $("strike").className = "overlay " + (office ? "office" : "warning");
   $("strike").hidden = false;
-  if (office) { game.score -= lost; game.periodScore = 0; }
   pa(office ? "strike2" : "strike1");
   // everyone backs off
   for (const o of staff) {
@@ -5072,6 +5072,72 @@ function drawGraffiti(g) {
       x.fillRect(bx, by, 104, 49); x.strokeRect(bx, by, 104, 49);
     }
     x.restore(); x.fillStyle = col; text(g.text, 0, 80);
+  } else if (g.draw === "kilroy") {   // a bald head and a long nose peeking over a wall, fingers hooked over the top
+    x.save(); x.translate(0, -16); x.scale(1.35, 1.35);
+    x.lineWidth = 6; x.beginPath(); x.moveTo(-200, 20); x.lineTo(200, 20); x.stroke();                    // the wall
+    x.beginPath(); x.arc(0, 20, 62, Math.PI, 0); x.stroke();                                                 // the head
+    for (const ex of [-22, 22]) { x.beginPath(); x.arc(ex, -5, 9, 0, Math.PI * 2); x.stroke(); x.beginPath(); x.arc(ex, -2, 3.5, 0, Math.PI * 2); x.fill(); }   // eyes
+    x.beginPath(); x.moveTo(-6, 4); x.bezierCurveTo(-12, 30, -10, 62, 0, 66); x.bezierCurveTo(10, 62, 12, 30, 6, 4); x.stroke();   // the nose, hanging over
+    for (const sx of [-1, 1]) for (let k = 0; k < 3; k++) { x.beginPath(); x.arc(sx * (88 + k * 12), 22, 6, Math.PI, 0); x.stroke(); }   // fingers
+    x.restore(); x.save(); x.translate(0, 100); line("KILROY WAS HERE", 0, 40, 420); x.restore();
+  } else if (g.draw === "balloonGirl") {   // after Banksy: a stencil girl reaching for a heart balloon drifting away
+    x.fillStyle = "#151515";
+    x.beginPath(); x.arc(-70, -18, 17, 0, Math.PI * 2); x.fill();                                              // head
+    x.beginPath(); x.moveTo(-82, -14); x.quadraticCurveTo(-98, -2, -94, 14); x.quadraticCurveTo(-86, 4, -80, -4); x.fill();   // hair blowing back
+    x.beginPath(); x.moveTo(-82, 0); x.lineTo(-58, 0); x.lineTo(-48, 62); x.lineTo(-92, 62); x.closePath(); x.fill();   // dress
+    x.lineWidth = 6; x.strokeStyle = "#151515"; x.beginPath(); x.moveTo(-60, 6); x.lineTo(-30, -18); x.stroke();      // arm reaching up
+    x.beginPath(); x.moveTo(-78, 60); x.lineTo(-80, 100); x.moveTo(-62, 60); x.lineTo(-58, 100); x.stroke();          // legs
+    x.lineWidth = 2; x.beginPath(); x.moveTo(-24, -24); x.bezierCurveTo(10, -10, 30, -60, 66, -52); x.stroke();      // the string
+    x.fillStyle = "#d7191c"; const bx = 80, by = -78, r = 26;
+    x.beginPath(); x.moveTo(bx, by + r * 1.25); x.bezierCurveTo(bx - r * 2.1, by - r * 0.2, bx - r * 0.9, by - r * 1.6, bx, by - r * 0.5); x.bezierCurveTo(bx + r * 0.9, by - r * 1.6, bx + r * 2.1, by - r * 0.2, bx, by + r * 1.25); x.fill();
+    x.fillStyle = "#151515"; x.font = font(22); x.fillText("THERE IS ALWAYS HOPE", 105, 40);
+  } else if (g.draw === "monaGoblina") {   // the Mona Lisa, but she's a goblin
+    x.fillStyle = "#6b4a22"; x.fillRect(-70, -118, 140, 236); x.fillStyle = "#3d4a2c"; x.fillRect(-58, -106, 116, 212);   // frame, murky landscape
+    x.fillStyle = "#56603a"; x.fillRect(-58, -40, 116, 30);
+    x.fillStyle = "#1c1410"; x.beginPath(); x.ellipse(0, -48, 34, 44, 0, 0, Math.PI * 2); x.fill();               // hair
+    x.fillStyle = "#7bb043"; x.beginPath(); x.ellipse(0, -46, 24, 32, 0, 0, Math.PI * 2); x.fill();              // green face
+    for (const sx of [-1, 1]) { x.beginPath(); x.moveTo(sx * 20, -52); x.lineTo(sx * 52, -66); x.lineTo(sx * 22, -38); x.fill(); }   // pointy ears
+    x.fillStyle = "#1c1410"; x.fillRect(-26, -82, 52, 14);                                                           // center-parted hair over the brow
+    x.fillStyle = "#111"; for (const sx of [-1, 1]) { x.beginPath(); x.ellipse(sx * 9, -50, 4, 2.5, 0, 0, Math.PI * 2); x.fill(); }
+    x.strokeStyle = "#2c3a18"; x.lineWidth = 2; x.beginPath(); x.moveTo(-8, -30); x.quadraticCurveTo(0, -27, 9, -32); x.stroke();   // that smile
+    x.fillStyle = "#24261a"; x.beginPath(); x.moveTo(-14, -16); x.lineTo(14, -16); x.lineTo(52, 106); x.lineTo(-52, 106); x.closePath(); x.fill();   // dress
+    x.fillStyle = "#7bb043"; x.beginPath(); x.ellipse(-6, 66, 22, 9, 0.2, 0, Math.PI * 2); x.fill(); x.beginPath(); x.ellipse(8, 72, 20, 8, -0.2, 0, Math.PI * 2); x.fill();   // folded hands
+    x.fillStyle = col; x.font = font(28); x.save(); x.translate(170, 10); x.rotate(-0.12); x.fillText("MONA", 0, -18); x.fillText("GOBLINA", 0, 18); x.restore();
+  } else if (g.draw === "eye") {   // a bloodshot eye
+    x.fillStyle = "#f4f1ea"; x.beginPath(); x.ellipse(0, 0, 120, 62, 0, 0, Math.PI * 2); x.fill();
+    x.strokeStyle = "#c0262d"; x.lineWidth = 2;
+    for (let i = 0; i < 14; i++) { const a = (i / 14) * Math.PI * 2, r0 = 112, r1 = 52; x.beginPath(); x.moveTo(Math.cos(a) * r0, Math.sin(a) * r0 * 0.5); x.quadraticCurveTo(Math.cos(a + 0.2) * 80, Math.sin(a + 0.2) * 40, Math.cos(a) * r1, Math.sin(a) * r1 * 0.9); x.stroke(); }
+    x.fillStyle = col; x.beginPath(); x.arc(0, 0, 44, 0, Math.PI * 2); x.fill(); x.fillStyle = "#111"; x.beginPath(); x.arc(0, 0, 20, 0, Math.PI * 2); x.fill();
+    x.fillStyle = "#fff"; x.beginPath(); x.arc(14, -14, 7, 0, Math.PI * 2); x.fill();
+    x.strokeStyle = "#151515"; x.lineWidth = 6; x.beginPath(); x.ellipse(0, 0, 120, 62, 0, 0, Math.PI * 2); x.stroke();
+  } else if (g.draw === "skull") {   // skull and crossbones
+    x.lineWidth = 16;
+    for (const [a, b] of [[-1, 1], [1, -1]]) { x.beginPath(); x.moveTo(a * 95, 90); x.lineTo(b * 95, -10); x.stroke(); for (const [ex, ey] of [[a * 95, 90], [b * 95, -10]]) for (const o of [-1, 1]) { x.beginPath(); x.arc(ex + o * 8, ey + o * 4, 10, 0, Math.PI * 2); x.fill(); } }
+    x.beginPath(); x.arc(0, -40, 62, 0, Math.PI * 2); x.fill(); x.fillRect(-36, -4, 72, 46);
+    x.fillStyle = "#151515"; for (const sx of [-1, 1]) { x.beginPath(); x.arc(sx * 24, -40, 16, 0, Math.PI * 2); x.fill(); }
+    x.beginPath(); x.moveTo(0, -18); x.lineTo(-8, -2); x.lineTo(8, -2); x.fill();
+    for (let k = -2; k <= 2; k++) x.fillRect(k * 14 - 2, 22, 4, 20);
+  } else if (g.draw === "deadBunny") {   // a bunny with X eyes
+    x.translate(0, 14); x.scale(0.88, 0.88);   // (room for the ears)
+    x.lineWidth = 8;
+    for (const sx of [-1, 1]) { x.beginPath(); x.ellipse(sx * 30, -78, 18, 52, sx * 0.15, 0, Math.PI * 2); x.stroke(); }
+    x.beginPath(); x.ellipse(0, 10, 78, 64, 0, 0, Math.PI * 2); x.stroke();
+    for (const sx of [-1, 1]) { const ex = sx * 30, ey = -4; x.beginPath(); x.moveTo(ex - 13, ey - 13); x.lineTo(ex + 13, ey + 13); x.moveTo(ex + 13, ey - 13); x.lineTo(ex - 13, ey + 13); x.stroke(); }
+    x.beginPath(); x.moveTo(-6, 22); x.lineTo(6, 22); x.lineTo(0, 30); x.closePath(); x.fill();
+    x.beginPath(); x.moveTo(-18, 40); x.quadraticCurveTo(0, 30, 18, 40); x.stroke();
+    x.fillStyle = "#e85a8a"; x.beginPath(); x.ellipse(10, 50, 9, 13, 0.2, 0, Math.PI * 2); x.fill();   // tongue out
+    for (const sx of [-1, 1]) { x.beginPath(); x.moveTo(sx * 40, 28); x.lineTo(sx * 100, 18); x.moveTo(sx * 40, 34); x.lineTo(sx * 100, 40); x.lineWidth = 3; x.stroke(); }   // whiskers
+  } else if (g.draw === "ankh") {
+    x.lineWidth = 22; x.beginPath(); x.ellipse(0, -66, 30, 42, 0, 0, Math.PI * 2); x.stroke();
+    x.beginPath(); x.moveTo(-70, -12); x.lineTo(70, -12); x.moveTo(0, -24); x.lineTo(0, 112); x.stroke();
+  } else if (g.draw === "peace") {
+    x.lineWidth = 18; x.beginPath(); x.arc(0, 0, 100, 0, Math.PI * 2); x.stroke();
+    x.beginPath(); x.moveTo(0, -100); x.lineTo(0, 100); x.moveTo(0, 0); x.lineTo(-71, 71); x.moveTo(0, 0); x.lineTo(71, 71); x.stroke();
+  } else if (g.draw === "yinYang") {
+    const R = 100; x.fillStyle = "#f4f1ea"; x.beginPath(); x.arc(0, 0, R, 0, Math.PI * 2); x.fill();
+    x.fillStyle = "#151515"; x.beginPath(); x.arc(0, 0, R, -Math.PI / 2, Math.PI / 2); x.arc(0, R / 2, R / 2, Math.PI / 2, -Math.PI / 2, true); x.arc(0, -R / 2, R / 2, Math.PI / 2, -Math.PI / 2); x.fill();
+    x.beginPath(); x.arc(0, R / 2, R / 7, 0, Math.PI * 2); x.fill(); x.fillStyle = "#f4f1ea"; x.beginPath(); x.arc(0, -R / 2, R / 7, 0, Math.PI * 2); x.fill();   // each dot the other color
+    x.strokeStyle = col; x.lineWidth = 7; x.beginPath(); x.arc(0, 0, R, 0, Math.PI * 2); x.stroke();
   } else text(g, 0, 90);
   const tex = new THREE.CanvasTexture(cv);
   tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;
