@@ -123,7 +123,7 @@ const CFG = {
     airSec: 6,                    // airing out what's left of a stink bomb
     radioCooldownSec: 15, radioHeat: 5, radioStaff: 2,
     kidsTake: ["basketball", "football", "frisbee", "paperAirplane", "bassDrum", "globe", "skateboard"],
-    kidGrabRange: 0.9, kidGrabAfterSec: 1.5,
+    kidGrabRange: 0.9, kidGrabAfterSec: 6,   // step 82: counted from when it lands, so you can go get your own throw back
     lingerRadius: 0.55,           // a stink cloud shrinks to this fraction once it fades, and hangs around until he airs it out
   },
   // The custodian's closet: each item can be taken once per period; the breaker box once a day.
@@ -2045,7 +2045,7 @@ window.addEventListener("keydown", (e) => {
   if (game.aim && k.startsWith("arrow") && !game.aim.kb) startKeyAim(game.aim);   // arrows take over a mouse aim
   if (k === " " && game.aim && !e.repeat) { keyThrow(); return; }
   if (/^[1-9]$/.test(e.key) && !e.repeat) {
-    if (player.hidden) { lootEl.querySelectorAll("button")[+e.key - 1]?.click(); return; }   // grab the Nth thing on the desk
+    if (player.hidden) { lootEl.querySelector(`button[data-n="${e.key}"]`)?.click(); return; }   // step 82: each action keeps its number
     selectSlot(+e.key - 1, true); return;
   }
   if (player.ride && (k === "e" || k === " ") && !e.repeat) { e.preventDefault(); jumpOff(); return; }
@@ -2388,6 +2388,7 @@ function resetSpotsForPeriod() {
 
 function startPassing(first) {
   game.phase = "passing"; game.phaseT = 0; game.periodScore = 0;
+  sendQueuedPosts();
   game.havocCount = {}; game.nextPlaneT = rand(...CFG.airplanes.everySec);
   const P = phaseLen("passing"), doors = DOOR_SPOTS();
   for (const c of crowd) {
@@ -2722,7 +2723,38 @@ const opts = { autoAim: true, stickGuide: true };
 try { Object.assign(opts, JSON.parse(localStorage.getItem(OPTS_KEY)) || {}); } catch (e) { /* storage blocked: defaults */ }
 function saveOpts() { try { localStorage.setItem(OPTS_KEY, JSON.stringify(opts)); } catch (e) { /* fine */ } }
 function renderOptSummary() { $("optSummary").textContent = `Auto-aim ${opts.autoAim ? "on" : "off"} · joystick guide ${opts.stickGuide ? "on" : "off"}`; }
-function openOptions(e) { e?.stopPropagation(); $("optAutoAim").checked = opts.autoAim; $("optStick").checked = opts.stickGuide; $("options").hidden = false; }
+function openOptions(e) {
+  e?.stopPropagation(); $("optAutoAim").checked = opts.autoAim; $("optStick").checked = opts.stickGuide; $("options").hidden = false;
+  const inRun = game.state === "paused" || !!loadSave() || !!tut;   // step 82: Reset game only shows when there's a run to end
+  $("restartBtn").hidden = $("restartNote").hidden = !inRun; disarmRestart();
+}
+// step 82: Reset game ends this run and goes back to the title (Delete game data is the one that erases everything)
+let restartArmT = 0;
+function disarmRestart() { restartArmT = 0; $("restartBtn").classList.remove("armed"); $("restartBtn").textContent = "↺ Reset game"; }
+$("restartBtn").addEventListener("click", (e) => {
+  e.stopPropagation();
+  if (performance.now() > restartArmT) {
+    restartArmT = performance.now() + 4000;
+    $("restartBtn").classList.add("armed"); $("restartBtn").textContent = "Tap again to end this run";
+    setTimeout(() => performance.now() > restartArmT && disarmRestart(), 4100);
+    return;
+  }
+  disarmRestart(); backToTitle();
+});
+function backToTitle() {
+  clearSave();
+  $("options").hidden = true; $("paused").hidden = true;
+  if (tut) { endTutorial(false); }
+  else {
+    releaseControls(); cancelAim();
+    resetGame(null, false);
+    game.state = "title"; $("title").hidden = false;
+    updateCrowd(0.016); drawCrowd();
+  }
+  $("continueBtn").hidden = true; $("startBtn").textContent = "Play";
+  renderBestRuns();
+  clock.getDelta();
+}
 $("optionsBtn").addEventListener("click", openOptions);
 $("pauseOptionsBtn").addEventListener("click", openOptions);
 $("optAutoAim").addEventListener("change", (e) => { opts.autoAim = e.target.checked; saveOpts(); renderOptSummary(); });
@@ -2731,7 +2763,7 @@ $("options").addEventListener("click", (e) => e.stopPropagation());
 $("optionsClose").addEventListener("click", () => { $("options").hidden = true; disarmReset(); });
 // step 73: reset everything (two taps, so it can't happen by accident)
 let resetArmT = 0;
-function disarmReset() { resetArmT = 0; $("resetBtn").classList.remove("armed"); $("resetBtn").textContent = "🗑 Reset game"; }
+function disarmReset() { resetArmT = 0; $("resetBtn").classList.remove("armed"); $("resetBtn").textContent = "🗑 Delete game data"; }
 $("resetBtn").addEventListener("click", () => {
   if (performance.now() > resetArmT) {
     resetArmT = performance.now() + 4000;
@@ -3336,9 +3368,14 @@ function updateStaff(dt, cover) {
         bark(st, "alarm", true);
         callBackup(st, false);
       }
+      if (st.commute && !stuck) {   // step 82: still walking over to their post
+        const d = navToward(st, st.commute.x, st.commute.z, 2.4, dt); speed = 2.4;
+        if (d < 0.3) { st.commute = null; st.x = st.post ? postPoint(st.post).x : st.x; st.z = st.post ? postPoint(st.post).z : st.z; }
+        if (st.commute) { if (st.suspicion > 0.05) st.facing = lerpAngle(st.facing, Math.atan2(player.x - st.x, player.z - st.z), damp(5, dt)); }
+      }
       const base = st.post ? Math.atan2(-st.post.side * HALLS[st.post.h].nx, -st.post.side * HALLS[st.post.h].nz) : st.facing;
       const want = st.suspicion > 0.05 ? Math.atan2(player.x - st.x, player.z - st.z) : st.distractT > 0 ? Math.atan2(st.dX - st.x, st.dZ - st.z) : base + Math.sin(st.sweep) * (T.sweepDeg * Math.PI / 180);
-      st.facing = lerpAngle(st.facing, want, damp(st.suspicion > 0.05 ? 5 : 2, dt));
+      if (!st.commute) st.facing = lerpAngle(st.facing, want, damp(st.suspicion > 0.05 ? 5 : 2, dt));
     } else if (st.state === "patrol" || st.state === "return" || st.state === "tidy" || st.state === "check") {
       const look = canSeePlayer(st, 1, true);
       if (look.seen) {
@@ -3832,35 +3869,36 @@ function updateHidePanel() {
 // Rooms as shops: tap an item on the desk to grab it. It costs hiding time, and the teacher might call security.
 const lootEl = $("hpLoot");
 function renderLoot(sp) {
-  const key = sp.kind === "classroom" || sp.kind === "closet" ? `${sp.room}:${sp.lootVer}:${sp.loot?.length}:${[...sp.taken]}:${game.passShield}:${game.breakerUsed}:${sp.grabs}:${player.hoodT > 0}` : `${sp.kind}${sp.h}:${sp.t}:${!!sp.rummaged}:${sp.tpLeft}:${game.dareOffer?.id}:${game.dares.length}`;
+  const key = sp.kind === "classroom" || sp.kind === "closet" ? `${sp.room}:${sp.lootVer}:${sp.loot?.filter(Boolean).length}:${[...sp.taken]}:${game.passShield}:${game.breakerUsed}:${sp.grabs}:${player.hoodT > 0}` : `${sp.kind}${sp.h}:${sp.t}:${!!sp.rummaged}:${sp.tpLeft}:${game.dareOffer?.id}:${game.dares.length}`;
   if (lootEl.dataset.key === key) return;
   lootEl.dataset.key = key; lootEl.innerHTML = "";
   if (sp.kind === "restroom") {   // the bathroom flood: big points and heat, and it's closed for the rest of the day
     const b = document.createElement("button"); b.type = "button"; b.className = "prize";
-    b.innerHTML = `🚽 Flood the toilets<small>+${CFG.flood.points} · lots of heat</small>`;
+    b.innerHTML = `🚽 Flood the toilets<small>+${CFG.flood.points} · lots of heat</small>`; b.dataset.n = 3;
     b.addEventListener("click", floodRestroom);
     const kid = document.createElement("div"); kid.className = "dareKid";
     if (game.dareOffer) {
       kid.innerHTML = `<span>Kid by the sinks: "${game.dareOffer.line ??= pick(DARE_KID_LINES)} ${DARES[game.dareOffer.id].text(game.dareOffer).replace(/^./, (c) => c.toLowerCase())}."</span>`;
       const d = document.createElement("button"); d.type = "button"; d.className = "prize";
-      d.innerHTML = `📜 Take the dare<small>+${DARES[game.dareOffer.id].points}</small>`;
+      d.innerHTML = `📜 Take the dare<small>+${DARES[game.dareOffer.id].points}</small>`; d.dataset.n = 2;
       d.addEventListener("click", takeDare);
-      lootEl.appendChild(d);
+      lootEl.dareBtn = d;
     } else kid.innerHTML = `<span>Kid by the sinks: "${game.dares.length >= CFG.dares.max ? "Finish the dares you've got first." : "Nothing today. Come back later."}"</span>`;
     lootEl.prepend(kid);
     if (sp.tpLeft > 0) {
       const t = document.createElement("button"); t.type = "button";
-      t.innerHTML = `🧻 Grab a roll${sp.tpLeft > 1 ? ` (${sp.tpLeft} left)` : ""}<small>-1s</small>`;
+      t.innerHTML = `🧻 Grab a roll${sp.tpLeft > 1 ? ` (${sp.tpLeft} left)` : ""}<small>-1s</small>`; t.dataset.n = 1;
       t.addEventListener("click", grabRoll);
       lootEl.appendChild(t);
     }
+    if (lootEl.dareBtn) { lootEl.appendChild(lootEl.dareBtn); lootEl.dareBtn = null; }   // step 82: 1 TP, 2 dare, 3 flood, always in that order
     lootEl.appendChild(b);
     return;
   }
   if (sp.kind === "closet") {   // the custodian's stuff, plus the breaker box
-    for (const key of CFG.closet.items) {
+    for (const [j, key] of CFG.closet.items.entries()) {
       if (sp.taken.has(key)) continue;
-      const T = ITEM_TYPES[key], b = document.createElement("button"); b.type = "button";
+      const T = ITEM_TYPES[key], b = document.createElement("button"); b.type = "button"; b.dataset.n = j + 1;
       b.innerHTML = `${T.icon} ${T.label}<small>-${CFG.closet.grabSec}s</small>`;
       b.addEventListener("click", () => grabCloset(key));
       lootEl.appendChild(b);
@@ -3868,7 +3906,7 @@ function renderLoot(sp) {
     if (!sp.taken.size) {} else if (sp.taken.size >= CFG.closet.items.length) lootEl.insertAdjacentHTML("afterbegin", `<span class="none">Shelves are bare until next period.</span>`);
     if (!game.breakerUsed) {
       const x = document.createElement("button"); x.type = "button"; x.className = "prize";
-      x.innerHTML = `⚡ Flip the breaker<small>lights out ${CFG.breaker.sec}s · once a day</small>`;
+      x.innerHTML = `⚡ Flip the breaker<small>lights out ${CFG.breaker.sec}s · once a day</small>`; x.dataset.n = CFG.closet.items.length + 1;
       x.addEventListener("click", flipBreaker);
       lootEl.appendChild(x);
     }
@@ -3878,12 +3916,12 @@ function renderLoot(sp) {
     if (sp.rummaged) lootEl.innerHTML = `<span class="none">You already went through this one.</span>`;
     else {
       const b = document.createElement("button"); b.type = "button";
-      b.innerHTML = `🎒 Rummage around<small>-${CFG.lockers.rummageSec}s · might be junk</small>`;
+      b.innerHTML = `🎒 Rummage around<small>-${CFG.lockers.rummageSec}s · might be junk</small>`; b.dataset.n = 1;
       b.addEventListener("click", rummageLocker);
       lootEl.appendChild(b);
     }
     const x = document.createElement("button"); x.type = "button"; x.className = "prize";
-    x.innerHTML = `💥 Burst out<small>stuns staff nearby · busts this locker</small>`;
+    x.innerHTML = `💥 Burst out<small>stuns staff nearby · busts this locker</small>`; x.dataset.n = 2;
     x.addEventListener("click", burstOut);
     lootEl.appendChild(x);
     return;
@@ -3893,24 +3931,25 @@ function renderLoot(sp) {
   const note = game.dares.find((m) => m.id === "loveNote" && m.p.from === sp.room && !m.p.has);
   if (note) {   // the love note for the dare (no grab time, and it doesn't count as raiding the room)
     const b = document.createElement("button"); b.type = "button"; b.className = "prize";
-    b.innerHTML = `💌 Love note<small>for the dare</small>`;
+    b.innerHTML = `💌 Love note<small>for the dare</small>`; b.dataset.n = sp.loot.length + Object.keys(sp.R.specials ?? {}).length + 1;
     b.addEventListener("click", () => { if (addItem("loveNote")) { note.p.has = true; renderDares(); lootEl.dataset.key = ""; updateHidePanel(); } });
     lootEl.appendChild(b);
   }
   sp.loot.forEach((k, i) => {
-    const b = document.createElement("button"); b.type = "button";
+    if (!k) return;
+    const b = document.createElement("button"); b.type = "button"; b.dataset.n = i + 1;
     b.innerHTML = `${iconHTML(k)} ${ITEM_TYPES[k].label}<small>-${grab}s · ${risk}</small>`;
     b.addEventListener("click", () => grabLoot(i));
     lootEl.appendChild(b);
   });
-  for (const [id, X] of Object.entries(sp.R.specials ?? {})) {   // the office specials
-    if (sp.taken.has(id)) continue;
-    const b = document.createElement("button"); b.type = "button"; b.className = "prize";
+  Object.entries(sp.R.specials ?? {}).forEach(([id, X], j) => {   // the office specials
+    if (sp.taken.has(id)) return;
+    const b = document.createElement("button"); b.type = "button"; b.className = "prize"; b.dataset.n = sp.loot.length + j + 1;
     const note = id === "prize" ? `+${X.points} · ` : id === "fakePass" && game.passShield ? "you have one · " : "";
     b.innerHTML = `${X.icon} ${X.label}<small>${note}-${grab}s · ${risk}</small>`;
     b.addEventListener("click", () => grabLoot(id));
     lootEl.appendChild(b);
-  }
+  });
   if (!lootEl.children.length) lootEl.innerHTML = `<span class="none">Nothing left on the desks.</span>`;
 }
 // Take an item (desk, special, locker): a hall pass becomes your fake pass, a second staff key tops up the one you have.
@@ -3940,7 +3979,7 @@ function grabLoot(i) {
     sp.taken.add(i);
   } else {
     if (!takeItem(sp.loot[i])) return;   // inventory full (or already have a pass): nothing happens
-    sp.loot.splice(i, 1);
+    sp.loot[i] = null;   // step 82: a gap, so the other things keep their numbers
   }
   sp.raided = true;   // locked for a while from the next bell
   dareEvent("raid", { room: sp.room, type: sp.roomType });
@@ -4785,7 +4824,9 @@ function kidsGrab(dt) {
   kidGrabT = 0.4;
   const C = CFG.custodian;
   for (const o of objects) {
-    if (o.dead || o.state !== "resting" || !kidsWant(o) || o.age < C.kidGrabAfterSec) continue;
+    if (o.dead || o.state !== "resting" || !kidsWant(o)) { if (o.state !== "resting") o.restSince = null; continue; }
+    o.restSince ??= o.age;
+    if (o.age - o.restSince < C.kidGrabAfterSec) continue;
     if (crowd.some((c) => isActive(c) && c.slipT <= 0 && Math.hypot(c.x - o.x, c.z - o.z) < C.kidGrabRange)) {
       removeObject(o);
       if (Math.hypot(o.x - player.x, o.z - player.z) < 14) popup(`A kid grabs the ${o.T.label.toLowerCase()}`, "meh");
@@ -4920,7 +4961,7 @@ function landObject(o) {
     case "paperAirplane": case "toiletPaper": case "frisbee": {
       const n = o.flown.size, near = crowd.filter((c) => isActive(c) && Math.hypot(c.x - o.x, c.z - o.z) < 2.5).length;
       const crowdLand = near >= T.crowdLandCount, name = { paperAirplane: "Airplane", toiletPaper: "TP", frisbee: "Frisbee" }[o.key];
-      if (o.wild) { o.state = "spent"; o.life = 1.5; break; }
+      if (o.wild) { o.wild = false; o.state = "resting"; o.mesh.rotation.set(0, o.mesh.rotation.y, 0); capLying(); break; }   // step 82: lies there to pick up
       if (n) havoc(o.key, n * T.perStudent + (crowdLand ? T.crowdLandBonus : 0), `${name} over ${n} kid${n === 1 ? "" : "s"}${crowdLand ? " · crowd landing!" : ""}`, { x: o.x, z: o.z });
       else if (!o.hitSet?.size && !o.trail) popup(`The ${T.label.toLowerCase()} lands. Nobody notices.`, "meh");
       if (o.trail) finishTrail(o);
@@ -6266,16 +6307,35 @@ function postGuard(sp, line) {
   const i = SPOTS.indexOf(sp);
   if (game.posts.includes(i)) return;
   game.posts.push(i);
+  if (sp.kind === "restroom") {   // step 82: they walk over from the main office at the next passing period
+    (game.postQueue ??= []).push(sp);
+    if (line) setTimeout(() => game.state === "playing" && pa(null, line, 4.5), 2500);
+    toast("🛡 Security will be posted there from next period. For good.", 2.6);
+    return;
+  }
   const st = spawnPost(sp); if (st) st.postGrace = 6;   // a head start: they don't see you until you've been back out for 6 s
   if (line) setTimeout(() => game.state === "playing" && pa(null, line, 4.5), 2500);
   toast("🛡 A security guard is posted there now. For good.", 2.6);
 }
-function spawnPost(sp) {
+const postPoint = (sp) => hallPos(sp.h, sp.t + 1.1, sp.wallLat - sp.side * 0.55);
+function spawnPost(sp, from = null) {
   if (staff.some((s) => s.key === "postedGuard" && s.post === sp)) return null;
-  const p = hallPos(sp.h, sp.t + 1.1, sp.wallLat - sp.side * 0.55);
-  return spawnStaff("postedGuard", { post: sp, h: sp.h, x: p.x, z: p.z, facing: Math.atan2(-sp.side * HALLS[sp.h].nx, -sp.side * HALLS[sp.h].nz) });
+  const p = postPoint(sp), at = from ?? p;
+  const st = spawnStaff("postedGuard", { post: sp, h: hallProject(at.x, at.z).h, x: at.x, z: at.z, facing: Math.atan2(-sp.side * HALLS[sp.h].nx, -sp.side * HALLS[sp.h].nz) });
+  if (st && from) st.commute = { x: p.x, z: p.z };
+  return st;
 }
-function spawnPosts() { for (const i of game.posts) if (SPOTS[i]) spawnPost(SPOTS[i]); }
+// step 82: guards for flooded restrooms leave the main office at the start of the next passing period and walk to their post
+function sendQueuedPosts() {
+  const q = game.postQueue; if (!q?.length) return;
+  game.postQueue = [];
+  const office = SPOTS.find((s) => s.kind === "classroom" && s.roomType === "office");
+  for (const sp of q) {
+    const st = spawnPost(sp, office ? spotFront(office, {}) : null);
+    if (st) { st.postGrace = 3; if (office && Math.hypot(st.x - player.x, st.z - player.z) < 25) toast("🛡 A guard heads out of the main office to their new post.", 2.4); }
+  }
+}
+function spawnPosts() { game.postQueue = []; for (const i of game.posts) if (SPOTS[i]) spawnPost(SPOTS[i]); }
 function ensurePrincipal(announce) {
   if (staff.some((s) => s.key === "principal")) return;
   spawnStaff("principal", pickStaffPlace("principal"));
@@ -6384,7 +6444,7 @@ function drawFriends() {
   }
 }
 
-// ---- paper airplanes: kids toss them across the hall during passing; walk into one (or tap it) to catch it ----
+// ---- paper airplanes: kids toss them across the hall during passing; catch one with E (or tap it), or pick it up once it lands ----
 function updateAirplanes(dt) {
   if (game.phase === "passing") {
     game.nextPlaneT -= dt;
@@ -6397,10 +6457,7 @@ function updateAirplanes(dt) {
       }
     }
   }
-  for (const o of objects) {
-    if (!o.wild || o.state !== "flying" || player.hidden) continue;
-    if (o.y < 2.3 && Math.hypot(o.x - player.x, o.z - player.z) < CFG.airplanes.catchRadius) catchPlane(o);
-  }
+  // step 82: no catching by walking into one. Press E (or tap it) while it's in the air, or pick it up off the floor.
 }
 // step 79: a kid near you drops a banana peel now and then during passing periods
 const PEEL_LINES = ["Done with this.", "*drops peel*", "Potassium, baby.", "Someone'll clean it up."];
@@ -6489,6 +6546,7 @@ const HOLE = {
   stick: elHole("#stickGuide .gBase", 14), look: elHole("#lookGuide", 16), sprint: elHole("#sprintBtn", 10), slot0: elHole("#hotbar .slot", 8),
   locker: worldHole(() => tut?.locker && { ...hallPos(tut.locker.h, tut.locker.t, tut.locker.wallLat - tut.locker.side * 0.15, {}), y: 1.05 }, 58),
   mon: worldHole(() => tut?.mon && { x: tut.mon.x, y: 1.2, z: tut.mon.z }, 46),
+  plane: worldHole(() => tut?.plane && !tut.plane.dead && { x: tut.plane.x, y: tut.plane.y, z: tut.plane.z }, 40),
 };
 
 function tutCardShow(html, { center = false, low = false, next = null, dim = 0, holes = [], rings = holes, freeze = false, block = !!next, extra = "" } = {}) {
@@ -6591,13 +6649,22 @@ const TUT_STEPS = [
   { id: "plane", // scene 1. A normal passing period; a kid throws you a paper airplane.
     enter() {
       tutHide();
-      tutScene(); tut.lockMove = true; tut.plane = null;
+      tutScene(); tut.lockMove = true; tut.plane = null; tut.planeCard = tut.pickCard = false;
       banner("PASSING PERIOD<small>Kids heading to class</small>", 1.8);
     },
     tick() {
       if (tut.t > 1.4 && !tut.plane) tutThrowPlane();
       if (game.hotbar.some((s) => s?.key === "paperAirplane")) return true;
-      if (tut.t > 5.5) { addItem("paperAirplane"); if (tut.plane && !tut.plane.dead) removeObject(tut.plane); return true; }   // missed it somehow
+      const pl = tut.plane;
+      // step 82: catching is on you now. Freeze it in the air close by and say how.
+      if (pl && !pl.dead && !tut.planeCard && pl.state === "flying" && Math.hypot(pl.x - player.x, pl.z - player.z) < 2.6) {
+        tut.planeCard = true;
+        tutCardShow(`<p class="big">✈️ Incoming!</p><p>${say("Tap the airplane to catch it.", `Press ${key("E")} to catch it.`)}</p>`, { dim: 0.5, freeze: true, holes: [HOLE.plane] });
+      }
+      if (pl && (pl.dead || pl.state !== "flying") && !game.hotbar.some((s) => s?.key === "paperAirplane") && tut.t > 3 && !tut.planeCard) {   // it landed before it got close
+        if (pl.dead) { addItem("paperAirplane"); return true; }
+        if (!tut.pickCard) { tut.pickCard = true; tutCardShow(`<p>${say("Tap the airplane on the floor to pick it up.", `Walk to the airplane and press ${key("E")}.`)}</p>`, { low: true }); tut.lockMove = false; }
+      }
       return false;
     },
   },
@@ -6946,7 +7013,7 @@ function closeSplash() {
   }, 380);
   clock.getDelta();
 }
-if (!debug || URLQ.has("splash")) startSplash();
+if (!debug || URLQ.has("splash")) startSplash(); else $("splash").hidden = true;
 
 renderer.setAnimationLoop(() => {
   const dt = Math.min(clock.getDelta(), 0.05);
@@ -7149,6 +7216,11 @@ if (debug) {   // test-only helpers (only with ?debug in the URL)
     setUnseen(t) { game.unseenT = t; },
     spawnPrincipal() { ensurePrincipal(true); return staff.findIndex((s) => s.key === "principal"); },
     forcePlane() { game.nextPlaneT = 0; },
+    wildPlane(dx, dz, sp = 5) { const x = player.x + dx, z = player.z + dz, d = Math.hypot(dx, dz); return spawnObject("paperAirplane", "flying", x, 1.6, z, { vx: -dx / d * sp, vz: -dz / d * sp, vy: 0.1, wild: true }).id; },
+    dbgObjs() { return objects.filter((o) => !o.dead).map((o) => [o.key, o.state, Math.round(o.age * 10) / 10, o.restSince, Math.min(...crowd.filter(isActive).map((c) => Math.hypot(c.x - o.x, c.z - o.z))).toFixed(2)]); },
+    lootNums() { return [...lootEl.querySelectorAll("button")].map((b) => [b.dataset.n, b.textContent.slice(0, 22)]); },
+    interact() { doInteract(); },
+    phaseInfo() { return { phase: game.phase, period: game.period, t: game.phaseT }; },
     tut() { return tut && { i: tut.i, id: TUT_STEPS[tut.i].id, t: tut.t, frozen: tut.frozen, lockMove: tut.lockMove, blind: tut.blind, waitNext: tut.waitNext, looked: tut.looked, moved: tut.moved,
       mon: tut.mon && { state: tut.mon.state, d: Math.hypot(tut.mon.x - player.x, tut.mon.z - player.z) }, card: tutCard.hidden ? "" : tutCard.textContent.trim(), dim: +tutDim.style.opacity,
       lk: tut.locker && { i: SPOTS.indexOf(tut.locker), d: spotDist(tut.locker), why: spotBlocked(tut.locker), it: interactTarget()?.kind, hidden: !!player.hidden }, caughtN: tut.caughtN ?? 0 }; },
