@@ -29,10 +29,11 @@ Play against the CPU with the mouse, arrow keys / A·D, or touch. First to 7 win
 You're a kid skipping class. Each bell you slip out into a crowded hallway, dodge staff, and
 stay out of class until the next bell. Mobile first, played in landscape.
 
-**Status: prototype, build step 61.** A two-floor school with stairwells, six-period days that get harder,
+**Status: prototype, build step 80.** A two-floor school with stairwells, six-period days that get harder,
 hall monitors, security guards, teachers, the custodian and the principal; lockers, restrooms, closets and classrooms to hide in
 (each with its own odds of getting spotted); a hotbar of throwables and gadgets (spitballs, socks, TP, stink bombs, a skateboard,
-a bass drum and more); rooms to raid, friends to trade with, dares, heat and a school-wide alert; a character maker with
+a bass drum, a disguise kit, a rubber chicken and more); rooms to raid, friends to trade with, dares, 0–5 wanted stars;
+a crowd of kids who arrive each morning, chat, and walk out at the last bell; a tutorial; a character maker with
 stats, outfits and hairstyles; an end-of-run screen that calls out what made each run stand out; survival mode, the fire alarm,
 and touch and keyboard controls.
 
@@ -60,7 +61,7 @@ Connected to AWS Amplify Hosting: every push to `main` redeploys both games.
 
 ## Versions and rollback
 
-Each Hall Goblin build is its own commit with a tag (`hallway-step5` … `hallway-step61`;
+Each Hall Goblin build is its own commit with a tag (`hallway-step5` … `hallway-step80`;
 `hallway-step4-live` is the build that was live before step 5). Browse them on the repo's Tags page.
 
 To roll back, restore the files from an earlier tag in a new commit, then push:
