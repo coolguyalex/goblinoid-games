@@ -1591,7 +1591,8 @@ function buildHair(hair, style, m, r, y, hat = false) {
   if (style === "buzz") { cap(1.03); return; }
   if (hat && ["mohawk", "spiky", "swoop", "bun"].includes(style)) style = "buzz";   // squashed flat under the hat
   if (style === "mohawk") {   // a strip following the curve of the head, front to back
-    for (let k = 0; k < 6; k++) { const a = -0.9 + k * 0.42, b = mesh(new THREE.BoxGeometry(0.05, 0.13, 0.09), 0, y + Math.cos(a) * r * 1.1, Math.sin(a) * r * 1.02); b.rotation.x = a; }
+    // step 65: from the front hairline (a bit forward of the top) back over the crown and down to the nape; it used to run the other way, nearly to the eyes
+    for (let k = 0; k < 6; k++) { const a = 0.45 - k * 0.47, b = mesh(new THREE.BoxGeometry(0.05, k === 5 ? 0.1 : 0.13, 0.09), 0, y + Math.cos(a) * r * 1.1, Math.sin(a) * r * 1.02); b.rotation.x = a; }
     return;
   }
   cap();
