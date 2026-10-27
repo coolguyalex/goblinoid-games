@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover, user-scalable=no">
 <meta name="theme-color" content="#1d2230">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet">
 <title>Hall Goblin</title>
 <style>
   /* step 51: control sizes follow the screen height, so small phones aren't cramped */
@@ -373,6 +375,45 @@
     .pop { font-size: 15px; }
     #caughtText { font-size: 14px; } ul.rs { font-size: 13px; } ul.rs li { padding: 2px 8px; margin: 1px 0; } .rsHead { margin: 5px 0 3px; }
   }
+  /* step 81: the splash screen (logo with items peeking out, a little chase, then "tap or click to start") */
+  #splash { position: fixed; inset: 0; z-index: 9; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: clamp(4px, 2vh, 18px); cursor: pointer; overflow: hidden; transition: opacity .35s;
+    background: radial-gradient(ellipse at 50% 35%, #2b3350 0%, #161a28 70%, #0e1018 100%); }
+  #splash.out { opacity: 0; pointer-events: none; }
+  #splash[hidden] { display: none; }
+  #splash::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 34vh; pointer-events: none;   /* a row of lockers along the bottom */
+    background: linear-gradient(#0e1018 0 3px, transparent 3px) top / 100% 100% no-repeat,
+      repeating-linear-gradient(90deg, rgba(70,96,140,.22) 0 46px, rgba(20,26,40,.5) 46px 48px);
+    -webkit-mask: linear-gradient(transparent, #000 40%); mask: linear-gradient(transparent, #000 40%); }
+  #logo { position: relative; isolation: isolate; text-align: center; line-height: .86; margin-top: 2vh;
+    font-family: "Bungee", "Impact", "Arial Black", sans-serif; font-weight: 400; z-index: 1; }
+  #logo .w { display: block; white-space: nowrap; }
+  #logo .w1 { font-size: clamp(30px, min(9.5vw, 13vh), 92px); color: #ffd36b; --ex: #a8701c; --ex2: #6b4310; }
+  #logo .w2 { font-size: clamp(50px, min(16vw, 22vh), 156px); color: #8fe04a; --ex: #3f7a1f; --ex2: #234a10; }
+  #logo .l { display: inline-block; -webkit-text-stroke: .045em #10131c; paint-order: stroke fill;
+    text-shadow: 0 .03em 0 var(--ex), 0 .06em 0 var(--ex), 0 .09em 0 var(--ex2), 0 .12em 0 var(--ex2), .02em .2em .12em rgba(0,0,0,.55);
+    transform: rotate(var(--r)) translateY(var(--y, 0)); animation: letterIn .5s cubic-bezier(.3,1.6,.5,1) both; animation-delay: calc(var(--i) * 70ms); }
+  @keyframes letterIn { from { transform: translateY(-120%) rotate(0deg) scale(.6); opacity: 0; } }
+  #logo .peek { position: absolute; z-index: -1; pointer-events: none; }
+  #logo .peek svg { display: block; width: 100%; height: auto; overflow: visible; filter: drop-shadow(0 3px 3px rgba(0,0,0,.45)); }
+  #logo .peek > i { display: block; animation: peekIn .6s cubic-bezier(.3,1.5,.5,1) both, bob 2.6s ease-in-out infinite; animation-delay: var(--d), calc(var(--d) + .6s); }
+  @keyframes peekIn { from { transform: translate(var(--fx, 0), var(--fy, 60%)) rotate(0deg); opacity: 0; } 40% { opacity: 1; } }
+  @keyframes bob { 50% { transform: translate(calc(var(--fx, 0) * -.06), calc(var(--fy, 60%) * -.06)) rotate(var(--wob, 4deg)); } }
+  #chase { width: 100%; height: clamp(110px, 32vh, 300px); display: block; position: relative; z-index: 1; }
+  #tapStart { position: relative; z-index: 1; font: 900 clamp(15px, 4.6vh, 24px) system-ui, sans-serif; letter-spacing: .16em; text-transform: uppercase;
+    color: #fff; text-shadow: 0 2px 6px rgba(0,0,0,.7); opacity: 0; min-height: 1.3em; margin-bottom: 3vh; }
+  #tapStart.show { animation: tapIn .5s ease-out both, tapPulse 1.4s ease-in-out .5s infinite; }
+  @keyframes tapIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; } }
+  @keyframes tapPulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+  #bonk { position: absolute; z-index: 2; pointer-events: none; font: 400 clamp(18px, 6vh, 40px) "Bungee", "Impact", sans-serif; color: #ffd36b;
+    -webkit-text-stroke: .06em #10131c; paint-order: stroke fill; transform: translate(-50%, -50%) scale(0); opacity: 0; }
+  #bonk.show { animation: bonk .9s ease-out both; }
+  @keyframes bonk { 0% { transform: translate(-50%, -50%) scale(0) rotate(-12deg); opacity: 1; } 25% { transform: translate(-50%, -50%) scale(1.25) rotate(-8deg); }
+    70% { opacity: 1; } 100% { transform: translate(-50%, -90%) scale(1) rotate(-8deg); opacity: 0; } }
+  #title h1 { font-family: "Bungee", "Impact", "Arial Black", sans-serif; font-weight: 400; color: #8fe04a; letter-spacing: .02em;
+    -webkit-text-stroke: .05em #10131c; paint-order: stroke fill; text-shadow: 0 .04em 0 #3f7a1f, 0 .08em 0 #234a10, 0 .14em .1em rgba(0,0,0,.5); }
+  #title h1 span { color: #ffd36b; text-shadow: 0 .04em 0 #a8701c, 0 .08em 0 #6b4310, 0 .14em .1em rgba(0,0,0,.5); }
+  @media (prefers-reduced-motion: reduce) { #logo .l, #logo .peek > i { animation: none; } }
 </style>
 </head>
 <body>
@@ -435,16 +476,25 @@
 </div>
 <div id="stickBase"></div><div id="stickKnob"></div>
 
+<div id="splash" hidden>
+  <div id="logo" role="img" aria-label="Hall Goblin"><div class="peek" style="left:6%;top:4%;width:14%;transform:rotate(-14deg)"><i style="--fx:0;--fy:65%;--wob:4deg;--d:.75s"><svg viewBox="0 0 100 120"><g stroke="#10131c" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"><path d="M38 120 C 40 90, 44 70, 46 50 L 62 52 C 60 72, 58 95, 60 120 Z" fill="#f7d13b"/><circle cx="56" cy="20" r="0" /><path d="M40 24 a8 8 0 0 1 12 -8 a8 8 0 0 1 14 2 a8 8 0 0 1 8 12 Z" fill="#e0342c"/><circle cx="56" cy="40" r="20" fill="#f7d13b"/><polygon points="73,34 96,42 73,48" fill="#ff8a2b"/><path d="M72 50 q 6 14 -4 16 q -8 -4 -2 -14" fill="#e0342c"/><path d="M54 32 l8 8 M62 32 l-8 8" fill="none" stroke-width="3.5"/></g></svg></i></div><div class="peek" style="left:58%;top:-16%;width:24%;transform:rotate(-10deg)"><i style="--fx:-40%;--fy:55%;--wob:4deg;--d:.9s"><svg viewBox="0 0 100 70"><g stroke="#10131c" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"><polygon points="4,40 96,6 40,48" fill="#f4f7fc"/><polygon points="40,48 96,6 46,66" fill="#c9d4e6"/><polyline points="40,48 52,40" fill="none"/></g></svg></i></div><div class="peek" style="right:9%;top:2%;width:11%;transform:rotate(8deg)"><i style="--fx:0;--fy:60%;--wob:4deg;--d:1.05s"><svg viewBox="0 0 80 110"><g stroke="#10131c" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"><rect x="31" y="4" width="18" height="12" rx="3" fill="#a5743c"/><path d="M32 16 V 42 L 8 96 Q 6 104 14 104 H 66 Q 74 104 72 96 L 48 42 V 16 Z" fill="#e8f4ff" fill-opacity=".9"/><path d="M20 70 H 60 L 71 96 Q 72 102 66 102 H 14 Q 8 102 9 96 Z" fill="#7ee04a" stroke="none"/><path d="M32 16 V 42 L 8 96 Q 6 104 14 104 H 66 Q 74 104 72 96 L 48 42 V 16 Z" fill="none"/><circle cx="34" cy="84" r="5" fill="#b8f58a" stroke-width="2.5"/><circle cx="50" cy="60" r="3.5" fill="#b8f58a" stroke-width="2.5"/></g></svg></i></div><div class="peek" style="right:-13%;top:46%;width:19%;transform:rotate(10deg)"><i style="--fx:-55%;--fy:0;--wob:4deg;--d:1.2s"><svg viewBox="0 0 120 100"><g stroke="#10131c" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"><path d="M18 22 q 22 -14 36 -2 M66 20 q 14 -12 36 2" fill="none" stroke-width="9"/><path d="M60 36 C 50 56, 44 68, 58 72 C 72 72, 70 58, 60 36 Z" fill="#f2a98c"/><circle cx="36" cy="40" r="17" fill="#cfe9ff" fill-opacity=".55" stroke-width="6"/><circle cx="84" cy="40" r="17" fill="#cfe9ff" fill-opacity=".55" stroke-width="6"/><path d="M53 38 q 7 -6 14 0" fill="none" stroke-width="6"/><path d="M60 74 C 50 66, 34 70, 26 84 C 38 80, 48 84, 60 80 C 72 84, 82 80, 94 84 C 86 70, 70 66, 60 74 Z" fill="#3a2414"/></g></svg></i></div><div class="peek" style="left:-13%;top:50%;width:18%;transform:rotate(-8deg)"><i style="--fx:55%;--fy:0;--wob:4deg;--d:1.35s"><svg viewBox="0 0 110 90"><g stroke="#10131c" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"><path d="M30 18 H 74 V 72 H 30" fill="#f6f6f0"/><ellipse cx="74" cy="45" rx="12" ry="27" fill="#ffffff"/><ellipse cx="74" cy="45" rx="4.5" ry="10" fill="#9a8f7a"/><ellipse cx="30" cy="45" rx="12" ry="27" fill="#f6f6f0"/><path d="M30 72 C 20 80, 10 76, 4 88" fill="none" stroke="#f6f6f0" stroke-width="10"/><path d="M30 72 C 20 80, 10 76, 4 88" fill="none" stroke-width="2"/></g></svg></i></div><div class="peek" style="left:27%;bottom:-17%;width:12%;transform:rotate(6deg)"><i style="--fx:0;--fy:-60%;--wob:4deg;--d:1.5s"><svg viewBox="0 0 100 100"><g stroke="#10131c" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"><path d="M50 20 C 30 30, 20 50, 14 74 C 30 66, 40 54, 48 46 Z" fill="#ffd84a"/><path d="M50 20 C 70 30, 82 50, 88 74 C 72 66, 60 54, 52 46 Z" fill="#ffd84a"/><path d="M48 46 C 46 64, 44 80, 50 96 C 56 80, 54 64, 52 46 Z" fill="#f2c230"/><path d="M42 6 Q 50 2 58 6 L 56 24 H 44 Z" fill="#8a6a2a"/></g></svg></i></div><div class="peek" style="right:24%;bottom:-15%;width:9%;transform:rotate(-6deg)"><i style="--fx:0;--fy:-60%;--wob:4deg;--d:1.65s"><svg viewBox="0 0 90 100"><g stroke="#10131c" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"><rect x="20" y="34" width="50" height="60" rx="8" fill="#ff7ad1"/><rect x="16" y="22" width="58" height="16" rx="4" fill="#ffcf3f"/><path d="M14 8 l3 7 7 3 -7 3 -3 7 -3 -7 -7 -3 7 -3 Z M76 2 l2 5 5 2 -5 2 -2 5 -2 -5 -5 -2 5 -2 Z" fill="#fff6a8" stroke-width="2"/><circle cx="34" cy="56" r="3" fill="#fff" stroke="none"/><circle cx="52" cy="72" r="2.5" fill="#fff" stroke="none"/><circle cx="44" cy="84" r="2" fill="#fff" stroke="none"/></g></svg></i></div>
+    <span class="w w1"><span class="l" style="--i:0;--r:-4deg">H</span><span class="l" style="--i:1;--r:2deg">A</span><span class="l" style="--i:2;--r:-2deg">L</span><span class="l" style="--i:3;--r:5deg">L</span></span>
+    <span class="w w2"><span class="l" style="--i:4;--r:3deg">G</span><span class="l" style="--i:5;--r:-3deg">O</span><span class="l" style="--i:6;--r:2deg">B</span><span class="l" style="--i:7;--r:-4deg">L</span><span class="l" style="--i:8;--r:3deg">I</span><span class="l" style="--i:9;--r:-2deg">N</span></span>
+  </div>
+  <canvas id="chase" aria-hidden="true"></canvas>
+  <div id="bonk">BONK!</div>
+  <div id="tapStart">Tap or click to start</div>
+</div>
 <div class="overlay" id="title">
   <div>
-    <span class="tag">prototype · build step 80</span>
-    <h1>Hall Goblin</h1>
+    <span class="tag">prototype · build step 81</span>
+    <h1><span>Hall</span> Goblin</h1>
     <p>Skip class. Don't get caught.</p>
     <div class="buttons">
       <button class="go" id="startBtn" type="button">Play</button>
       <button class="go alt" id="continueBtn" type="button" hidden></button>
       <button class="go ghost" id="aboutBtn" type="button">How to play</button>
-      <button class="go ghost" id="charBtn" type="button">🧑 Your kid</button>
+      <button class="go ghost" id="charBtn" type="button">🧑 Character Creation</button>
       <button class="go ghost" id="optionsBtn" type="button">⚙ Options</button>
     </div>
     <div id="charSummary"></div>

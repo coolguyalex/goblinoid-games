@@ -6821,8 +6821,136 @@ const slowFx = $("slowFx");
 resetGame(null, false);        // lay out the scene behind the title screen (halls already full)
 updateCrowd(0.016); drawCrowd(); for (const st of staff) updateCone(st);
 
+// =====================================================================================
+// Step 81: the splash screen. A random kid runs across with a security guard on their tail, stops, turns, and bonks the
+// guard with a paper airplane; both run off, then "tap or click to start" leads to the title screen. Tapping early skips it.
+// It has its own small renderer (like the character preview), thrown away when the splash closes. Not shown with ?debug (tests).
+// =====================================================================================
+const splash = { on: false, r: null, scene: null, cam: null, t: 0, last: 0, done: false };
+function startSplash() {
+  const el = $("splash"), cv = $("chase");
+  splash.on = true; el.hidden = false;
+  try { splash.r = new THREE.WebGLRenderer({ canvas: cv, antialias: true, alpha: true }); }
+  catch { splash.r = null; }   // no second WebGL context: just the logo and the prompt
+  if (!splash.r) { $("tapStart").classList.add("show"); splash.done = true; }
+  else {
+    splash.r.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+    const S = splash.scene = new THREE.Scene();
+    S.add(new THREE.HemisphereLight(0xffffff, 0x445066, 1.7));
+    const sun = new THREE.DirectionalLight(0xffffff, 1.5); sun.position.set(2, 5, 4); S.add(sun);
+    splash.cam = new THREE.PerspectiveCamera(20, 2, 0.1, 60);
+    const holder = (model, yaw) => { const g = new THREE.Group(); model.rotation.y = yaw; g.add(model); S.add(g);
+      const sh = new THREE.Mesh(new THREE.CircleGeometry(0.42, 20), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.3 }));
+      sh.rotation.x = -Math.PI / 2; sh.position.y = 0.01; sh.scale.set(1.3, 0.8, 1); S.add(sh); g.userData.sh = sh; return g; };
+    const look = randomLook();
+    splash.kid = holder(buildKid(look), Math.PI / 2); splash.kidM = splash.kid.children[0];
+    const T = STAFF_TYPES.securityGuard;
+    const gm = makePerson({ body: T.vestColor, skin: pick(SKIN_COLORS), scale: T.scale, hat: T.hatColor, kind: "securityGuard" });
+    splash.guard = holder(gm, Math.PI / 2); splash.guardM = gm;
+    splash.plane = makeItemMesh("paperAirplane"); splash.plane.scale.setScalar(1.5); splash.plane.visible = false; S.add(splash.plane);
+    // dizzy stars over the guard's head
+    const star = new THREE.Shape(); for (let i = 0; i < 10; i++) { const a = Math.PI / 2 + i * Math.PI / 5, r = i % 2 ? 0.045 : 0.11; i ? star.lineTo(Math.cos(a) * r, Math.sin(a) * r) : star.moveTo(Math.cos(a) * r, Math.sin(a) * r); }
+    const sg = new THREE.ShapeGeometry(star), sm = new THREE.MeshBasicMaterial({ color: 0xffd36b, side: THREE.DoubleSide });
+    splash.stars = new THREE.Group(); for (let i = 0; i < 4; i++) { const m = new THREE.Mesh(sg, sm); m.userData.a = i * Math.PI / 2; splash.stars.add(m); }
+    splash.stars.visible = false; S.add(splash.stars);
+    Object.assign(splash, { t: 0, step: "run", kx: 0, gx: 0, stepT: 0, stunT: 0, guardRun: true, kidRun: true, last: performance.now() });
+    splashLayout(true);
+    requestAnimationFrame(splashFrame);
+  }
+  const go = (e) => { e?.preventDefault?.(); closeSplash(); };
+  el.addEventListener("click", go);
+  addEventListener("keydown", function k(e) { if (!splash.on) return removeEventListener("keydown", k); if (!e.repeat) go(); });
+}
+function splashLayout(first) {   // size the canvas; keep the characters about a third of the strip tall
+  const cv = $("chase"), w = cv.clientWidth, h = cv.clientHeight; if (!w || !h) return;
+  const pr = splash.r.getPixelRatio();
+  if (first || cv.width !== Math.round(w * pr) || cv.height !== Math.round(h * pr)) { splash.r.setSize(w, h, false); splash.cam.aspect = w / h; splash.cam.updateProjectionMatrix(); }
+  const D = 1.6 / Math.tan((splash.cam.fov / 2) * Math.PI / 180);   // the strip shows 3.2 m from top to bottom
+  splash.cam.position.set(0, 1.25, D); splash.cam.lookAt(0, 0.95, 0);
+  splash.halfW = 1.6 * splash.cam.aspect;
+  if (first) { splash.kx = -splash.halfW - 1.2; splash.gx = splash.kx - 4.2; }
+}
+function splashFrame(now) {
+  if (!splash.on || !splash.r) return;
+  const dt = Math.min(0.05, (now - splash.last) / 1000); splash.last = now; splash.t += dt; splash.stepT += dt;
+  splashLayout(false);
+  const P = splash, hw = P.halfW, stopX = hw * 0.5, kidV = Math.max(6, hw * 0.75), next = (s) => { P.step = s; P.stepT = 0; };
+  const K = P.kidM.userData, arm = K.arms[1];
+  let kidSpeed = 0, guardSpeed = 0;
+  const face = (m, from, to, k) => { m.rotation.y = from + (to - from) * clamp(k, 0, 1); };
+  switch (P.step) {
+    case "run":     // both sprint in from the left
+      kidSpeed = kidV * clamp((stopX - P.kx) / 1.2, 0.15, 1); guardSpeed = kidV * 0.92;
+      if (P.kx > stopX - 0.05) next("turn");
+      break;
+    case "turn":    // skid, spin round (facing the camera on the way)
+      guardSpeed = 3.6; face(P.kidM, Math.PI / 2, -Math.PI / 2, P.stepT / 0.28);
+      if (P.stepT > 0.28) next("windup");
+      break;
+    case "windup":  // arm back over the head...
+      guardSpeed = 3.6; arm.rotation.x = -3.6 * clamp(P.stepT / 0.18, 0, 1);
+      if (P.stepT > 0.18) { next("throw"); P.plane.visible = true; P.plane.position.set(P.kx - 0.35, 1.55, 0.3); playBlip([700, 1100], 0.05, "triangle", 0.03); }
+      break;
+    case "throw": { // ...and the plane flies at the guard's head
+      guardSpeed = 3.6; arm.rotation.x = -3.6 + 2.4 * clamp(P.stepT / 0.12, 0, 1);
+      const tx = P.gx + 0.15, ty = 1.85, pl = P.plane, dx = tx - pl.position.x, dy = ty - pl.position.y, d = Math.hypot(dx, dy);
+      pl.position.x += dx / d * 11 * dt; pl.position.y += dy / d * 11 * dt + Math.sin(P.stepT * 9) * 0.02;
+      pl.rotation.set(Math.sin(P.stepT * 12) * 0.4, -Math.PI / 2, 0);   // nose toward the guard, wings wobbling
+      if (d < 0.35) { next("bonk"); P.stunT = 0; P.plane.userData.vy = 2.5; splashBonk(); }
+      break;
+    }
+    case "bonk": {  // the guard reels; the plane bounces off and drops
+      arm.rotation.x *= 0.85;
+      P.guard.rotation.z = 0.45 * Math.min(1, P.stepT * 6) + Math.sin(P.stepT * 14) * 0.08;
+      const pl = P.plane; pl.userData.vy -= 9 * dt; pl.position.x -= 1.2 * dt; pl.position.y = Math.max(0.05, pl.position.y + pl.userData.vy * dt); pl.rotation.z += dt * 6;
+      if (P.stepT > 0.45) face(P.kidM, -Math.PI / 2, Math.PI / 2, (P.stepT - 0.45) / 0.22);
+      if (P.stepT > 0.7) { kidSpeed = kidV * 1.1; P.kidGone = true; }
+      if (P.stepT > 1.6) { next("chase"); P.guard.rotation.z = 0; }
+      break;
+    }
+    case "chase":   // the guard shakes it off and goes after them
+      kidSpeed = kidV * 1.1; guardSpeed = kidV;
+      if (P.gx > hw + 1.5 && P.kx > hw + 1.5) { next("end"); $("tapStart").classList.add("show"); P.done = true; }
+      break;
+    case "end": break;
+  }
+  if (P.step === "bonk" && P.kidGone && P.stepT > 0.7) kidSpeed = kidV * 1.1;
+  P.kx += kidSpeed * dt; P.gx += guardSpeed * dt;
+  P.kid.position.x = P.kx; P.guard.position.x = P.gx;
+  P.kid.userData.sh.position.x = P.kx; P.guard.userData.sh.position.x = P.gx;
+  animateKid(P.kidM, P.step === "windup" || P.step === "throw" ? 0 : kidSpeed, dt);
+  animateKid(P.guardM, P.step === "bonk" ? 0 : guardSpeed, dt);
+  if (P.step === "windup" || P.step === "throw" || P.step === "bonk") { const u = P.kidM.userData; u.legs[0].rotation.x *= 0.8; u.legs[1].rotation.x *= 0.8; }
+  P.kid.position.y = kidSpeed > 0.5 ? Math.abs(Math.sin(K.walk)) * 0.06 : 0;
+  // dizzy stars while the guard reels
+  P.stars.visible = P.step === "bonk";
+  if (P.stars.visible) { P.stars.position.set(P.gx - 0.2, 2.25, 0); for (const m of P.stars.children) { const a = m.userData.a + P.stepT * 7; m.position.set(Math.cos(a) * 0.32, Math.sin(a * 2) * 0.03, Math.sin(a) * 0.32); } }
+  if (P.step === "end") P.plane.visible = false;
+  P.r.render(P.scene, P.cam);
+  requestAnimationFrame(splashFrame);
+}
+function splashBonk() {   // the comic "BONK!" over the guard's head
+  const v = new THREE.Vector3(splash.gx, 2.3, 0).project(splash.cam), cv = $("chase").getBoundingClientRect(), b = $("bonk");
+  b.style.left = cv.left + (v.x + 1) / 2 * cv.width + "px"; b.style.top = cv.top + (1 - v.y) / 2 * cv.height + "px";
+  b.classList.remove("show"); void b.offsetWidth; b.classList.add("show");
+  playBlip([220, 160], 0.08, "square", 0.04);
+}
+function closeSplash() {
+  if (!splash.on) return;
+  initAudio(); playBlip([523, 784], 0.07, "triangle", 0.05);
+  splash.on = false;
+  const el = $("splash"); el.classList.add("out");
+  setTimeout(() => {
+    el.hidden = true;
+    if (splash.r) { disposeTree(splash.scene); splash.r.dispose(); splash.r.forceContextLoss?.(); splash.r = null; }
+  }, 380);
+  clock.getDelta();
+}
+if (!debug || URLQ.has("splash")) startSplash();
+
 renderer.setAnimationLoop(() => {
   const dt = Math.min(clock.getDelta(), 0.05);
+  if (splash.on && !$("splash").classList.contains("out")) return;   // step 81: the school waits behind the splash
   // slow motion while aiming: eases in and out, with a tinted edge so you can tell
   const tsGoal = game.aim && game.state === "playing" ? CFG.items.aimTimeScale : 1;
   timeScale += (tsGoal - timeScale) * Math.min(1, dt / CFG.items.aimEaseSec);
