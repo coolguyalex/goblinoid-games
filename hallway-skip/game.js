@@ -296,14 +296,14 @@ const CFG = {
     items: 8,                     // items scattered around the halls; they don't vanish until picked up
   },
   flood: { points: 400, heat: 45, noiseRadius: 16 },
-  dares: { max: 2, recentAvoid: 4 },   // dares you can hold at once; don't re-offer the last few you finished   // flooding a bathroom: points, heat, and that bathroom is closed for the day
+  dares: { max: 3, recentAvoid: 6 },   // dares you can hold at once; don't re-offer the last few you finished   // flooding a bathroom: points, heat, and that bathroom is closed for the day
 
   // Friends in the crowd raise a hand during passing periods: tap their bubble.
   friends: {
     count: 4,
     offerRange: 9,                // bubbles show within this distance (and line of sight)
     interactRange: 2.6,           // ...but you have to be this close to take them up on it
-    offers: [["highFive", 3], ["gumTrade", 2]],   // fake passes now come from gum trades (and the principal's office)
+    offers: [["highFive", 3], ["gumTrade", 2], ["dare", 1.5]],   // step 70: friends dare you too   // fake passes now come from gum trades (and the principal's office)
     gumTradePoints: 150,          // trading gum pays well, and it's the main way to get a fake pass
     highFivePoints: 75,           // "meeting a friend" risk bonus
     cooldownSec: 20,
@@ -491,26 +491,42 @@ const DARES = {
                    if (d.sp.roomType !== "gym" || !game.hotbar.some((it) => it?.key === "loveNote")) return false;
                    if (game.period !== m.p.period) { toast(`💌 Not yet: the note's for period ${m.p.period}.`); return false; }
                    consumeSlot(game.hotbar.findIndex((it) => it?.key === "loveNote")); return true; } } },
-  tagHalls:    { need: 7, points: 800, text: () => "Tag 7 different hallways with graffiti", on: { tag: (m, d) => (m.got.includes(d.h) ? false : (m.got.push(d.h), true)) } },
+  tagHalls:    { need: 3, points: 350, text: () => "Tag 3 different hallways with graffiti", on: { tag: (m, d) => (m.got.includes(d.h) ? false : (m.got.push(d.h), true)) } },
   floodPeriod: { need: 1, points: 350,
                  setup(m) { if (!RESTROOMS.some((sp) => !sp.closed)) return false; m.p.period = Math.min(periodsToday(), game.period + Math.floor(Math.random() * 3)); return true; },
                  text: (m) => `Flood a bathroom during period ${m.p.period}`, on: { flood: (m) => game.period === m.p.period } },
-  flyOver:     { need: 1, points: 300, text: () => "Fly something over 10 kids in one throw", on: { flyover: (m, d) => d.n >= 10 } },
-  raidHall:    { need: 3, points: 500, scope: "day",
-                 setup(m) { const halls = [0, 3, 6]; m.p.h = pick(halls); m.p.rooms = SPOTS.filter((sp) => sp.kind === "classroom" && sp.h === m.p.h).map((sp) => sp.room); m.need = m.p.rooms.length; return true; },
-                 text: (m) => `Raid every room on the ${HALLS[m.p.h].name} today`,
+  flyOver:     { need: 1, points: 250, text: () => "Fly something over 6 kids in one throw", on: { flyover: (m, d) => d.n >= 6 } },
+  raidHall:    { need: 2, points: 400, scope: "day",   // step 70: two rooms (was every room on the hall)
+                 setup(m) { const halls = [0, 3, 6]; m.p.h = pick(halls); m.p.rooms = SPOTS.filter((sp) => sp.kind === "classroom" && sp.h === m.p.h).map((sp) => sp.room); return m.p.rooms.length >= 2; },
+                 text: (m) => `Raid 2 rooms on the ${HALLS[m.p.h].name} today`,
                  on: { raid: (m, d) => (m.p.rooms.includes(d.room) && !m.got.includes(d.room) ? (m.got.push(d.room), true) : false) } },
-  combo:       { need: 3, points: 600, scope: "period", text: () => "Hit staff with a basketball, a spitball AND a banana peel in one period",
-                 on: { hit: (m, d) => (d.staff && ["basketball", "spitball", "bananaPeel"].includes(d.item) && !m.got.includes(d.item) ? (m.got.push(d.item), true) : false) } },
-  chaseSlip:   { need: 1, points: 400, text: () => "Make a staff member slip on a banana peel while they're chasing you", on: { hit: (m, d) => d.item === "bananaPeel" && d.staff && d.chasing } },
-  lureWhoopee: { need: 1, points: 250, text: () => "Get a hall monitor to sit... er, step on a whoopee cushion", on: { whoopee: (m, d) => d.staff === "hallMonitor" } },
-  slimeGuard:  { need: 1, points: 350, text: () => "Slime a security guard", on: { hit: STAFF_ITEM("slime", "securityGuard") } },
+  combo:       { need: 3, points: 450, scope: "day", text: () => "Hit staff with 3 different things today",
+                 on: { hit: (m, d) => (d.staff && !m.got.includes(d.item) ? (m.got.push(d.item), true) : false) } },
+  chaseSlip:   { need: 1, points: 300, text: () => "Make a staff member slip (banana peel, mop bucket or a fizzy puddle)", on: { hit: (m, d) => d.slip && d.staff } },
+  lureWhoopee: { need: 1, points: 250, text: () => "Get a staff member to sit... er, step on a whoopee cushion", on: { whoopee: (m, d) => !!d.staff } },
+  slimeGuard:  { need: 1, points: 300, text: () => "Get a staff member stuck in slime", on: { hit: (m, d) => d.item === "slime" && !!d.staff } },
   cleanPeriod: { need: 1, points: 300, text: () => "Get through a whole skipping period without anyone chasing you",
                  on: { bell: (m, d) => d.clean && m.p.armed } },
-  tpTrail:     { need: 1, points: 250, text: () => "TP the halls: leave a 15 m toilet-paper trail", on: { trail: (m, d) => d.len >= 15 } },
-  kickGuard:   { need: 1, points: 400, text: () => "Stick a \"kick me\" sign on a security guard", on: { kickMe: (m, d) => d.staff === "securityGuard" } },
-  geyserCrowd: { need: 1, points: 300, text: () => "Get 8 kids watching a fizzy-flask geyser", on: { geyser: (m, d) => d.n >= 8 } },
+  tpTrail:     { need: 1, points: 250, text: () => "TP the halls: leave a 12 m toilet-paper trail", on: { trail: (m, d) => d.len >= 12 } },
+  kickGuard:   { need: 1, points: 350, text: () => "Stick a \"kick me\" sign on a staff member", on: { kickMe: (m, d) => !!d.staff } },
+  geyserCrowd: { need: 1, points: 250, text: () => "Get 5 kids watching a fizzy-flask geyser", on: { geyser: (m, d) => d.n >= 5 } },
   officeRaid:  { need: 1, points: 250, text: () => "Steal something from the main office", on: { raid: (m, d) => d.type === "office" } },
+  // step 70: more dares, mostly quick ones
+  airplaneStaff: { need: 1, points: 200, text: () => "Bonk a staff member with a paper airplane", on: { hit: (m, d) => d.item === "paperAirplane" && !!d.staff } },
+  grossOut:    { need: 1, points: 150, text: () => "Hit someone with an old gym sock or a moldy sandwich", on: { hit: (m, d) => d.item === "oldSock" || d.item === "sandwich" } },
+  lockerHop:   { need: 3, points: 250, scope: "period", text: () => "Hide in 3 different lockers in one period",
+                 on: { hide: (m, d) => (d.sp.kind === "locker" && !m.got.includes(d.sp) ? (m.got.push(d.sp), true) : false) } },
+  burstStaff:  { need: 1, points: 350, text: () => "Burst out of a locker and knock down a staff member", on: { burst: (m, d) => d.n > 0 } },
+  trumpetSolo: { need: 1, points: 200, text: () => "Play a trumpet solo in the halls", on: { trumpet: () => true } },
+  plungerHead: { need: 1, points: 350, text: () => "Get a plunger stuck on a staff member's head", on: { hit: (m, d) => d.item === "plunger" && !!d.staff } },
+  stinkThree:  { need: 1, points: 250, text: () => "Get 3 people to walk into the same stink cloud", on: { stink: (m, d) => d.n >= 3 } },
+  bannerTP:    { need: 1, points: 250, text: () => "Drape toilet paper over a spirit banner", on: { tpBanner: () => true } },
+  boneScare:   { need: 1, points: 300, text: () => "Scare 3 people with the skeleton on wheels", on: { skeleton: (m, d) => d.staff + d.kids >= 3 } },
+  wetSign:     { need: 1, points: 200, text: () => "Turn a staff member back with a wet-floor sign", on: { wetSign: () => true } },
+  highFives:   { need: 3, points: 200, scope: "day", text: () => "High-five 3 friends today", on: { highFive: () => true } },
+  mopJam:      { need: 1, points: 250, text: () => "Jam a classroom door shut with a mop", on: { mopJam: () => true } },
+  cardio:      { need: 4, points: 150, scope: "period", text: () => "Cardio day: take the stairs 4 times in one period", on: { stairs: () => true } },
+  sneakIn:     { need: 2, points: 200, scope: "day", text: () => "Sneak into 2 classrooms today without getting spotted", on: { enterRoom: (m, d) => (d.sp.kind === "classroom" && d.sp.roomType !== "gym" && !m.got.includes(d.sp) ? (m.got.push(d.sp), true) : false) } },
 };
 const DARE_KID_LINES = ["Psst. Bet you can't", "Hey. You look bored. I dare you to", "Five bucks says you won't", "Legend says nobody's ever managed to"];
 
@@ -3487,6 +3503,7 @@ function enterSpot(sp) {
     playBlip([1200, 900], 0.05, "square", 0.05);
   } else if (why) { toast(why); playBlip([180], 0.08, "square", 0.04); return false; }
   if (sp.kind === "locker") game.lockerUses--; else if (sp.kind !== "classroom") sp.used = true;   // step 56: classrooms only lock once they kick you out
+  dareEvent("hide", { sp });
   if (player.board) hopOff(true);
   const f = spotFront(sp, {});
   player.hidden = sp; player.hideT = 0; player.hideArmed = false; player.pushT = 0; player.pushSpot = null;
@@ -3736,6 +3753,7 @@ function burstOut() {
   playBlip([140, 90, 600, 300], 0.08, "sawtooth", 0.1);   // BANG
   banner(`BURST OUT!<small>${n ? `${n} staff member${n === 1 ? "" : "s"} knocked flat. Go!` : "Nobody there, but it sure was loud."}</small>`, 1.8);
   havoc("burstOut", B.points + n * 50, n ? `Burst out! ${n} down` : "Burst out!", { x: f.x, z: f.z, loud: true });
+  dareEvent("burst", { n });
   makeNoise(f.x, f.z, B.noiseRadius, true);
 }
 function rummageLocker() {
@@ -4796,7 +4814,7 @@ function playTrumpet() {
   playBlip([233, 233, 311, 233, 175, 175], 0.17, "sawtooth", 0.14);
   const n = summonStaff(player.x, player.z);
   banner(`🎺 BWAAAMP!<small>${n ? `${n} staff member${n === 1 ? "" : "s"} heard that. Get moving!` : "Nobody's around to hear it. Shame."}</small>`, 2.4);
-  havoc("trumpet", T.points, "Trumpet solo!", { x: player.x, z: player.z, loud: true });
+  havoc("trumpet", T.points, "Trumpet solo!", { x: player.x, z: player.z, loud: true }); dareEvent("trumpet");
   addHeat(T.heat);
   for (const c of crowd) if (isActive(c) && Math.hypot(c.x - player.x, c.z - player.z) < 6) { c.slipT = Math.max(c.slipT, 0.5); c.stunStyle = "flinch"; }   // kids jump
 }
@@ -4860,7 +4878,7 @@ function trapCheck(o) {
   };
   for (const st of staff) {
     if (!chaser(st) || st.stunT > 0 || o.hitSet.has(st) || Math.hypot(st.x - o.x, st.z - o.z) > (T.trapRadius ?? 0.5) + 0.05) continue;   // (the custodian steps around it)
-    dareEvent("hit", { item: o.key, staff: st.key, chasing: st.state === "chase" || st.state === "bust" });
+    dareEvent("hit", { item: o.key, staff: st.key, chasing: st.state === "chase" || st.state === "bust", slip: true });
     stunStaff(st, T.slipStaffSec, "fall"); bark(st, "slip", true);
     playBlip([700, 300], 0.12, "sawtooth", 0.07);
     havoc(o.key + "Staff", T.staffPoints, `Wipeout! The ${st.type.name} slips`, { x: o.x, z: o.z, loud: true });
@@ -5001,7 +5019,7 @@ function stepTrail(tr, dt) {
 function tpBanner(tr, p) {
   const pr = hallProject(p.x, p.z), b = BANNERS.find((b) => b.h === pr.h && Math.abs(pr.t - b.t) < 0.3 && p.y > b.wireY - 0.1);
   if (!b || (tr.banners ??= new Set()).has(b)) return;
-  tr.banners.add(b); tally("tpBanner");
+  tr.banners.add(b); tally("tpBanner"); dareEvent("tpBanner");
   havoc("tpBanner:" + BANNERS.indexOf(b), ITEM_TYPES.toiletPaper.bannerPoints, `TP'd the ${b.text} banner!`, { x: p.x, z: p.z });   // each banner its own trick, so a new one pays in full
 }
 function updateTrails(dt) {
@@ -5169,12 +5187,12 @@ function stinkCloud(o, dt) {
     if (o.hitSet.has(st) || st.type.custodian || !inside(st.x, st.z)) continue;
     o.hitSet.add(st); stunStaff(st, T.staffGagSec, "flinch");
     st.bubble.textContent = pick(["*cough*", "UGH. What IS that?", "*gag*"]); st.barkUntil = performance.now() + 1500; st.barkAt = game.time;
-    addScore(T.perStaff, `The ${st.type.name} walks into the stink`, "small"); tally("stinkGag");
+    addScore(T.perStaff, `The ${st.type.name} walks into the stink`, "small"); tally("stinkGag"); dareEvent("stink", { n: [...o.hitSet].filter((w) => w !== player).length });
   }
   for (const c of crowd) {
     if (!isActive(c) || o.hitSet.has(c) || !inside(c.x, c.z)) continue;
     o.hitSet.add(c); c.slipT = Math.max(c.slipT, T.studentGagSec); c.stunStyle = "flinch";
-    addScore(T.perStudent, "Ew!", "small"); tally("stinkGag");
+    addScore(T.perStudent, "Ew!", "small"); tally("stinkGag"); dareEvent("stink", { n: [...o.hitSet].filter((w) => w !== player).length });
   }
   // step 68: you're not immune either (after it's had a moment to spread)
   if (o.age > 0.8 && !o.hitSet.has(player) && !player.hidden && !player.ride && inside(player.x, player.z)) {
@@ -5463,7 +5481,7 @@ function jamDoor() {
   const f = hallPos(sp.h, sp.t, sp.wallLat - sp.side * 0.12);
   sp.mopMesh = makeItemMesh("mop"); sp.mopMesh.position.set(f.x, 1.0, f.z); sp.mopMesh.rotation.set(0, wallRot(sp.h), 0.5);
   if (player.hidden === sp) exitSpot(false);
-  havoc("mopJam", T.points, `Room ${sp.room} jammed shut!`, { x: f.x, z: f.z });
+  havoc("mopJam", T.points, `Room ${sp.room} jammed shut!`, { x: f.x, z: f.z }); dareEvent("mopJam");
   playBlip([300, 240], 0.08, "square", 0.06);
   setTimeout(() => game.state === "playing" && sp.jammed && toast(`*BANG BANG* "Who did this?! Open this door!" (room ${sp.room})`, 2.6), 1500);
   return true;
@@ -5508,7 +5526,7 @@ function wetSignCheck(o) {
     st.to = otherEnd(st.h, st.to);
     if (st.route) { st.rstep = -st.rstep; st.ri = mod(st.ri + st.rstep, st.route.length); }
     st.bubble.textContent = pick(["Wet floor. Nope.", "Not risking it.", "I'll go around.", "Ugh. Fine."]); st.barkUntil = performance.now() + 1800; st.barkAt = game.time;
-    if (!o.custSign) addScore(T.points, `The ${st.type.name} turns back`, "small");
+    if (!o.custSign) { addScore(T.points, `The ${st.type.name} turns back`, "small"); dareEvent("wetSign"); }
   }
 }
 // 10 s after you swipe a sign, the custodian drops everything to get it back (from the floor, or from you)
@@ -5898,8 +5916,8 @@ function updateRisk(dt) {
 
 // ---- friends: a few kids in the crowd who raise a hand during passing periods ----
 const friendsEl = $("friends");
-const OFFER_ICONS = { highFive: "✋", gumTrade: "🍬?", fakePass: "🎫" };
-const OFFER_LABELS = { highFive: "High five", gumTrade: "Trade gum", fakePass: "Fake pass" };
+const OFFER_ICONS = { highFive: "✋", gumTrade: "🍬?", fakePass: "🎫", dare: "📜" };
+const OFFER_LABELS = { highFive: "High five", gumTrade: "Trade gum", fakePass: "Fake pass", dare: "Dare" };
 {
   const c = new THREE.Color();
   crowd.slice(0, CFG.friends.count).forEach((k, i) => {
@@ -5915,7 +5933,7 @@ function friendTap(c) {
   if (game.state !== "playing" || F.cd > 0) return;
   if (Math.hypot(c.x - player.x, c.z - player.z) > R.interactRange) { toast("Get closer!"); return; }
   if (F.offer === "highFive") {
-    addScore(R.highFivePoints, "High five!", "item"); tally("highFives"); playBlip([880, 1320], 0.06, "square", 0.06);
+    addScore(R.highFivePoints, "High five!", "item"); tally("highFives"); dareEvent("highFive"); playBlip([880, 1320], 0.06, "square", 0.06);
   } else if (F.offer === "gumTrade") {
     const i = game.hotbar.findIndex((s) => s && s.key === "gum");
     if (i < 0) { toast("Friend: \"Got any gum?\" (Bring them gum to trade.)"); return; }
@@ -5929,6 +5947,10 @@ function friendTap(c) {
       game.hotbar[i] = { key: got, uses: ITEM_TYPES[got].uses ?? 1 }; renderHotbar();
       popup(`Traded gum for ${ITEM_TYPES[got].icon} ${ITEM_TYPES[got].label}`, "item"); playBlip([660, 990], 0.06, "triangle", 0.06);
     }
+  } else if (F.offer === "dare") {   // step 70: a friend dares you (skips the restroom kid)
+    if (game.dares.length >= CFG.dares.max) { toast(`Friend: "You've already got ${game.dares.length} dares going. Finish one!"`); return; }
+    const m = makeDareOffer(); if (!m) { toast("Friend: \"Eh, I'm out of ideas.\""); return; }
+    game.dareOffer = m; m.line = pick(DARE_KID_LINES); takeDare();
   } else if (F.offer === "fakePass") {
     if (game.passShield) { toast("You already have a fake pass."); return; }
     game.passShield = true; popup("🎫 Fake pass! Your next catch doesn't count.", "item"); playBlip([523, 659, 784], 0.08, "triangle", 0.06);
@@ -6151,7 +6173,7 @@ window.__hallwaySkip = { get state() { return { ...game,
   pa: $("pa").classList.contains("show") ? $("paText").textContent : null,
   crowdLeft: crowd.filter((c) => c.mode !== "gone").length,
   player: { x: player.x, z: player.z, hidden: player.hidden ? `${player.hidden.kind}${player.hidden.room ? " " + player.hidden.room : ""}` : null, graceT: player.graceT },
-  spots: SPOTS.map((sp) => ({ kind: sp.kind, h: sp.h, t: sp.t, room: sp.room, teacher: sp.teacher, blocked: spotBlocked(sp) })) }; }, CFG, STAFF_TYPES, TEACHER_TYPES, ROOM_TYPES, ITEM_TYPES };
+  spots: SPOTS.map((sp) => ({ kind: sp.kind, h: sp.h, t: sp.t, room: sp.room, teacher: sp.teacher, blocked: spotBlocked(sp) })) }; }, CFG, STAFF_TYPES, TEACHER_TYPES, ROOM_TYPES, ITEM_TYPES, DARES };
 if (debug) {   // test-only helpers (only with ?debug in the URL)
   Object.assign(window.__hallwaySkip, {
     place(h, t, lat) { const p = hallPos(h, t, lat); player.x = p.x; player.z = p.z; },
