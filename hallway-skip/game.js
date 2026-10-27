@@ -343,7 +343,7 @@ const CFG = {
   },
   backup: { range: 60, maxResponders: 2 },   // a radio call / yell pulls this many nearby staff toward you
   pa: { showSec: 4.5, sameKindCooldownSec: 12 },
-  render: { maxPixelRatio: 1.75, coneRays: 28 },
+  render: { maxPixelRatio: 1.75, coneRays: 28, anisotropy: 4 },   // anisotropy: keeps floor and ceiling textures sharp at a slant
 };
 
 if (URLQ.has("crowd")) CFG.crowd.count = Math.max(20, Math.min(250, parseInt(URLQ.get("crowd"), 10) || CFG.crowd.count));
@@ -907,8 +907,11 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x1d2230);
 scene.fog = new THREE.Fog(0x1d2230, 22, 48);
 const camera = new THREE.PerspectiveCamera(CFG.camera.fov, 1, 0.1, 53);   // (the other floor is 56+ m away: never drawn)
-const hemi = new THREE.HemisphereLight(0xffffff, 0x8a7f6a, 1.15); scene.add(hemi);
-const sun = new THREE.DirectionalLight(0xffffff, 0.75);
+// step 64: flat, slightly cool fluorescent light (brighter fill, a softer key light)
+const LIGHT = { hemi: 1.35, sun: 0.6 };
+const hemi = new THREE.HemisphereLight(0xf4f8ff, 0x9a917e, LIGHT.hemi); scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xffffff, LIGHT.sun);
+const glowMats = [];   // unlit things that should go dark in a blackout (the ceiling and its light panels)
 sun.position.set(6, 14, 9);
 scene.add(sun);
 
@@ -917,25 +920,82 @@ function box(w, h, d, color, x, y, z) {
   const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), lambert(color));
   m.position.set(x, y, z); scene.add(m); return m;
 }
+// ---- step 64: school textures, drawn here on canvases (nothing to download). Light, mostly gray images, so a material's color tints them. ----
+function schoolTex(w, h, draw, repeat = true) {
+  const c = document.createElement("canvas"); c.width = w; c.height = h; draw(c.getContext("2d"), w, h);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  if (repeat) t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.anisotropy = Math.min(CFG.render.anisotropy, renderer.capabilities.getMaxAnisotropy()); return t;
+}
+const speckle = (g, w, h, n, cols) => { for (let i = 0; i < n; i++) { g.fillStyle = cols[i % cols.length]; const s = Math.random() < 0.15 ? 2 : 1; g.fillRect(Math.random() * w, Math.random() * h, s, s); } };
+const TEX = {
+  // 2 m x 2 m of floor: 4 x 4 speckled tiles in two tones, thin grout, a few scuffs
+  floor: schoolTex(256, 256, (g, w, h) => {
+    const n = 4, tw = w / n;
+    for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) { g.fillStyle = (i + j) % 2 ? "#ece6d8" : "#d2c9b6"; g.fillRect(i * tw, j * tw, tw, tw); }
+    speckle(g, w, h, 2600, ["rgba(90,80,60,.35)", "rgba(255,255,255,.5)", "rgba(120,110,90,.25)", "rgba(70,90,110,.2)"]);
+    g.strokeStyle = "rgba(60,50,40,.28)"; g.lineWidth = 1.5; for (let i = 0; i <= n; i++) { g.beginPath(); g.moveTo(i * tw, 0); g.lineTo(i * tw, h); g.moveTo(0, i * tw); g.lineTo(w, i * tw); g.stroke(); }
+    g.strokeStyle = "rgba(40,35,30,.07)"; g.lineWidth = 1.5; for (let k = 0; k < 10; k++) { const x = Math.random() * w, y = Math.random() * h, a = Math.random() * 6; g.beginPath(); g.moveTo(x, y); g.lineTo(x + Math.cos(a) * (6 + Math.random() * 14), y + Math.sin(a) * (6 + Math.random() * 14)); g.stroke(); }   // scuffs
+  }),
+  // 1.6 m x 0.8 m of painted cinderblock: 0.4 x 0.2 m blocks, staggered rows
+  block: schoolTex(256, 128, (g, w, h) => {
+    g.fillStyle = "#f4f1ea"; g.fillRect(0, 0, w, h);
+    speckle(g, w, h, 1400, ["rgba(0,0,0,.05)", "rgba(255,255,255,.35)"]);
+    const bw = w / 4, bh = h / 4; g.fillStyle = "rgba(70,60,50,.2)";
+    for (let r = 0; r < 4; r++) { g.fillRect(0, r * bh, w, 3); for (let c = 0; c <= 4; c++) g.fillRect(c * bw + (r % 2 ? bw / 2 : 0), r * bh, 3, bh); }
+  }),
+  // a locker door: vents top and bottom, a handle, a number plate, a darker rim
+  locker: schoolTex(64, 224, (g, w, h) => {
+    g.fillStyle = "#f2f2f2"; g.fillRect(0, 0, w, h);
+    g.fillStyle = "rgba(0,0,0,.18)"; g.fillRect(0, 0, w, 3); g.fillRect(0, h - 3, w, 3); g.fillRect(0, 0, 3, h); g.fillRect(w - 3, 0, 3, h);
+    g.fillStyle = "rgba(0,0,0,.45)"; for (const y0 of [18, h - 34]) for (let k = 0; k < 4; k++) g.fillRect(14, y0 + k * 5, w - 28, 2);
+    g.fillStyle = "#c9cdd2"; g.fillRect(w - 16, h * 0.46, 6, 22); g.fillStyle = "rgba(0,0,0,.35)"; g.fillRect(w - 16, h * 0.46 + 20, 6, 2);   // handle
+    g.fillStyle = "#e8e2c8"; g.fillRect(w / 2 - 9, 44, 18, 9);   // number plate
+  }, false),
+  // a wooden classroom door
+  wood: schoolTex(64, 128, (g, w, h) => {
+    g.fillStyle = "#ffffff"; g.fillRect(0, 0, w, h);
+    for (let i = 0; i < 26; i++) { g.strokeStyle = `rgba(60,30,0,${0.06 + Math.random() * 0.1})`; g.lineWidth = 1 + Math.random() * 2; const x = Math.random() * w; g.beginPath(); g.moveTo(x, 0); for (let y = 0; y <= h; y += 16) g.lineTo(x + Math.sin(y * 0.05 + i) * 3, y); g.stroke(); }
+  }, false),
+  // 1.2 m x 1.2 m of drop ceiling: 0.6 m acoustic tiles on a metal grid
+  ceiling: schoolTex(128, 128, (g, w, h) => {
+    g.fillStyle = "#e9e7e1"; g.fillRect(0, 0, w, h);
+    speckle(g, w, h, 500, ["rgba(0,0,0,.09)", "rgba(0,0,0,.05)"]);
+    g.fillStyle = "#b9bcc0"; for (const k of [0, w / 2]) { g.fillRect(k, 0, 3, h); g.fillRect(0, k, w, 3); }
+  }),
+};
+// world-space UVs for a box, so a texture keeps the same scale on every wall whatever its size (texture covers tw x th meters)
+function worldUV(geo, tw, th) {
+  const p = geo.attributes.position, n = geo.attributes.normal, uv = geo.attributes.uv;
+  for (let i = 0; i < p.count; i++) {
+    const nx = Math.abs(n.getX(i)), ny = Math.abs(n.getY(i));
+    const u = ny > 0.5 ? p.getX(i) : nx > 0.5 ? p.getZ(i) : p.getX(i), v = ny > 0.5 ? p.getZ(i) : p.getY(i);
+    uv.setXY(i, u / tw, v / th);
+  }
+  uv.needsUpdate = true; return geo;
+}
+// a big wall box in painted cinderblock
+function blockBox(w, h, d, color, x, y, z) {
+  const geo = worldUV(new THREE.BoxGeometry(w, h, d).translate(x, y, z), 1.6, 0.8);
+  const m = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ color, map: TEX.block })); scene.add(m); return m;
+}
 // a box lying flat against a hall wall, centered at (h, t, lat)
 function wallBox(h, t, lat, w, hgt, d, color, y) { const p = hallPos(h, t, lat); const m = box(w, hgt, d, color, p.x, y, p.z); m.rotation.y = wallRot(h); return m; }
 
 // Floor: checker tiles via vertex colors.
 {
   const W = LAYOUT.outerHalf.x * 2, D = LAYOUT.outerHalf.z * 2;
-  const g = new THREE.PlaneGeometry(W, D, W, D).toNonIndexed();
-  g.rotateX(-Math.PI / 2);
-  const pos = g.attributes.position, colors = new Float32Array(pos.count * 3);
-  const a = new THREE.Color(0xdcd6c8), b = new THREE.Color(0xb9b2a2);
-  for (let i = 0; i < pos.count; i += 6) {   // two triangles per tile
-    let cx = 0, cz = 0;
-    for (let k = 0; k < 6; k++) { cx += pos.getX(i + k); cz += pos.getZ(i + k); }
-    const c = (Math.floor(cx / 6 + 100) + Math.floor(cz / 6 + 100)) % 2 ? a : b;
-    for (let k = 0; k < 6; k++) c.toArray(colors, (i + k) * 3);
+  const g = new THREE.PlaneGeometry(W, D); g.rotateX(-Math.PI / 2);
+  const ft = TEX.floor; ft.repeat.set(W / 2, D / 2);   // step 64: speckled tile, 2 m per repeat
+  scene.add(new THREE.Mesh(g, new THREE.MeshLambertMaterial({ map: ft })));
+  const up = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ map: ft, color: 0xdde4ee })); up.position.x = FLOOR_DX; scene.add(up);   // upstairs: a cooler tint
+  // the drop ceiling (faces down, so from above, outside the school, it isn't there) and its fluorescent panels
+  const ct = TEX.ceiling; ct.repeat.set(W / 1.2, D / 1.2);
+  for (const X of [0, FLOOR_DX]) {
+    const cg = new THREE.PlaneGeometry(W, D); cg.rotateX(Math.PI / 2);
+    const ceil = new THREE.Mesh(cg, new THREE.MeshBasicMaterial({ map: ct, color: X ? 0xc4c8ce : 0xcdcbc6 })); glowMats.push(ceil.material);   // unlit: the lights only reach it from below
+    ceil.position.set(X, LAYOUT.wallHeight - 0.002, 0); scene.add(ceil);
   }
-  g.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-  scene.add(new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true })));
-  const up = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true, color: 0xdde4ee })); up.position.x = FLOOR_DX; scene.add(up);   // upstairs: a cooler tint
 }
 
 // Walls
@@ -943,16 +1003,16 @@ function wallBox(h, t, lat, w, hgt, d, color, y) { const p = hallPos(h, t, lat);
   const H = LAYOUT.wallHeight, ox = LAYOUT.outerHalf.x, oz = LAYOUT.outerHalf.z;
   for (const b of LAYOUT.blocks) {
     const w = b.x1 - b.x0, d = b.z1 - b.z0, cx = (b.x0 + b.x1) / 2, cz = (b.z0 + b.z1) / 2;
-    box(w, H, d, b.color, cx, H / 2, cz);
+    blockBox(w, H, d, b.color, cx, H / 2, cz);
     box(w + 0.02, 0.25, d + 0.02, 0x6b8cae, cx, 1.05, cz);   // stripe
   }
-  box(ox * 2 + 1, H, 0.5, 0xcfc5ad, 0, H / 2, -oz - 0.25);
-  box(ox * 2 + 1, H, 0.5, 0xcfc5ad, 0, H / 2, oz + 0.25);
-  box(0.5, H, oz * 2 + 1, 0xcfc5ad, -ox - 0.25, H / 2, 0);
-  box(0.5, H, oz * 2 + 1, 0xcfc5ad, ox + 0.25, H / 2, 0);
+  blockBox(ox * 2 + 1, H, 0.5, 0xcfc5ad, 0, H / 2, -oz - 0.25);
+  blockBox(ox * 2 + 1, H, 0.5, 0xcfc5ad, 0, H / 2, oz + 0.25);
+  blockBox(0.5, H, oz * 2 + 1, 0xcfc5ad, -ox - 0.25, H / 2, 0);
+  blockBox(0.5, H, oz * 2 + 1, 0xcfc5ad, ox + 0.25, H / 2, 0);
   const X = FLOOR_DX, c2 = 0xc9c7bd;
-  box(ox * 2 + 1, H, 0.5, c2, X, H / 2, -oz - 0.25); box(ox * 2 + 1, H, 0.5, c2, X, H / 2, oz + 0.25);
-  box(0.5, H, oz * 2 + 1, c2, X - ox - 0.25, H / 2, 0); box(0.5, H, oz * 2 + 1, c2, X + ox + 0.25, H / 2, 0);
+  blockBox(ox * 2 + 1, H, 0.5, c2, X, H / 2, -oz - 0.25); blockBox(ox * 2 + 1, H, 0.5, c2, X, H / 2, oz + 0.25);
+  blockBox(0.5, H, oz * 2 + 1, c2, X - ox - 0.25, H / 2, 0); blockBox(0.5, H, oz * 2 + 1, c2, X + ox + 0.25, H / 2, 0);
 }
 
 // Lockers along the outer walls (one instanced mesh), skipping obstacles, hiding spots and the entrance.
@@ -969,7 +1029,7 @@ function wallBox(h, t, lat, w, hgt, d, color, y) { const p = hallPos(h, t, lat);
     }
   });
   const lockerGeo = new THREE.BoxGeometry(0.56, 2.0, LAYOUT.lockerDepth);
-  const lockers = new THREE.InstancedMesh(lockerGeo, lambert(0xffffff), positions.length);
+  const lockers = new THREE.InstancedMesh(lockerGeo, new THREE.MeshLambertMaterial({ map: TEX.locker }), positions.length);   // step 64: vents, handle, number plate
   const m = new THREE.Object3D(), c = new THREE.Color();
   positions.forEach(({ h, t }, i) => {
     const side = HALLS[h].outerSide, p = hallPos(h, t, wallLat(h, side) + side * LAYOUT.lockerDepth / 2);
@@ -981,6 +1041,15 @@ function wallBox(h, t, lat, w, hgt, d, color, y) { const p = hallPos(h, t, lat);
   scene.add(lockers);
 }
 
+// Step 64: fluorescent light panels down the middle of every hall (one instanced mesh, unlit so they glow)
+{
+  const spots = [];
+  HALLS.forEach((H, h) => { for (let t = 2; t < H.len - 1; t += 4) spots.push([h, t]); });
+  const lights = new THREE.InstancedMesh(new THREE.BoxGeometry(0.62, 0.05, 1.25), new THREE.MeshBasicMaterial({ color: 0xf3f7ff }), spots.length); glowMats.push(lights.material);
+  const m = new THREE.Object3D();
+  spots.forEach(([h, t], i) => { const p = hallPos(h, t, 0); m.position.set(p.x, LAYOUT.wallHeight - 0.03, p.z); m.rotation.y = hallHeading(h, 1); m.updateMatrix(); lights.setMatrixAt(i, m.matrix); });
+  scene.add(lights);
+}
 // Spirit banners strung across a few halls on a wire, overhead (toilet paper snags on the wires).
 const BANNERS = [
   { h: 0, f: 0.3, text: "GO GOBLINS!", bg: "#c0392b", fg: "#ffd36b" },
@@ -1022,8 +1091,8 @@ function addSpot(kind, h, t, side, extra = {}) {
 for (const { h, t } of LAYOUT.hideLockers) {
   const side = HALLS[h].outerSide, wl = wallLat(h, side), sp = addSpot("locker", h, t, side);
   sp.door = wallBox(h, t, wl + side * LAYOUT.lockerDepth / 2, 0.9, 2.1, LAYOUT.lockerDepth, 0x7d9a86, 1.05);
+  sp.door.material.map = TEX.locker; sp.door.material.flatShading = false;   // step 64: the same locker door, in green
   sp.glow.push(sp.door.material); sp.doorRot = sp.door.rotation.y;
-  for (let k = 0; k < 3; k++) wallBox(h, t, wl - side * 0.01, 0.5, 0.035, 0.02, 0x2a3a30, 1.62 + k * 0.09);
 }
 for (const { h, t } of LAYOUT.restrooms) {
   const side = HALLS[h].outerSide, wl = wallLat(h, side), sp = addSpot("restroom", h, t, side);
@@ -1062,6 +1131,9 @@ for (const d of LAYOUT.doors) {
   const H = HALLS[d.h], side = d.side ?? (H.sideType[1] === "block" ? 1 : -1), wl = wallLat(d.h, side);
   const R = ROOM_TYPES[d.type ?? "classroom"];
   const door = wallBox(d.h, d.t, wl - side * 0.03, 1.2, 2.2, 0.08, R.door ?? 0x8b5a2b, 1.1);
+  door.material.map = TEX.wood;   // step 64: wood grain, a kick plate and a handle
+  wallBox(d.h, d.t, wl - side * 0.075, 1.1, 0.25, 0.015, 0xaeb4bb, 0.15);
+  wallBox(d.h, d.t + 0.45 * side * (d.h % 2 ? 1 : -1), wl - side * 0.09, 0.05, 0.16, 0.05, 0xc9cdd2, 1.0);
   if (R.plaque) wallBox(d.h, d.t, wl - side * 0.03, 1.0, 0.24, 0.05, R.plaque, 2.42);   // colored sign over special rooms
   wallBox(d.h, d.t, wl - side * 0.08, 0.5, 0.6, 0.04, 0xa8d8ff, 1.55);
   // the tell: who's visible through the window, plus a sticky note on a sub's door
@@ -5116,14 +5188,18 @@ function flipBreaker() {
   const B = CFG.breaker;
   if (!player.hidden || player.hidden.kind !== "closet" || game.breakerUsed || game.state !== "playing") return;
   game.breakerUsed = true; game.blackoutT = B.sec;
-  hemi.intensity = 1.15 * B.light; sun.intensity = 0.75 * B.light;
+  setLights(B.light);
   banner("LIGHTS OUT!<small>The staff can barely see. Move!</small>", 2.4);
   playBlip([120, 60], 0.25, "square", 0.1);
   havoc("breaker", B.points, "Flipped the breaker!", { x: player.x, z: player.z, loud: true });
   setTimeout(() => game.state === "playing" && pa(null, "Uh, we seem to be having a power issue. Please stay where you are.", 4), 900);
   updateHidePanel();
 }
-function lightsOn() { hemi.intensity = 1.15; sun.intensity = 0.75; }
+function setLights(k) {
+  hemi.intensity = LIGHT.hemi * k; sun.intensity = LIGHT.sun * k;
+  for (const m of glowMats) { m.userData.base ??= m.color.clone(); m.color.copy(m.userData.base).multiplyScalar(Math.max(k, 0.12)); }
+}
+function lightsOn() { setLights(1); }
 function tickBlackout(dt) {
   if (game.blackoutT <= 0) return;
   game.blackoutT -= dt;

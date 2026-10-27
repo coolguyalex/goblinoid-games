@@ -15,6 +15,7 @@
 
   /* HUD */
   #hud { position: fixed; inset: 0; pointer-events: none; }
+  #hud::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 110px; background: linear-gradient(rgba(12,14,22,.6), rgba(12,14,22,0)); }   /* step 64: keeps the top HUD readable against the light ceiling */
   #phase { position: absolute; top: max(10px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%);
     text-align: center; text-shadow: 0 2px 4px rgba(0,0,0,.6); }
   #phase .label { font-size: clamp(10.5px, 3.4vh, 13px); letter-spacing: .14em; font-weight: 700; opacity: .9; }
@@ -386,7 +387,7 @@
 
 <div class="overlay" id="title">
   <div>
-    <span class="tag">prototype · build step 63</span>
+    <span class="tag">prototype · build step 64</span>
     <h1>Hall Goblin</h1>
     <p>Skip class. Don't get caught.</p>
     <div class="buttons">
