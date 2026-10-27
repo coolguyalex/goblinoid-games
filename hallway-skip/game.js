@@ -223,9 +223,17 @@ const CFG = {
     // Burst out: slam the door open. Staff close by are stunned and you get a head start, but the locker's busted
     // for the rest of the day. Only while you've still got locker time left.
     burst: { radius: 4.5, stunSec: 3, graceSec: 1.2, points: 75, noiseRadius: 12 },
-    loot: [["spitball", 4], ["gum", 4], ["paperAirplane", 3], ["whoopee", 2], ["bananaPeel", 2], ["kickMe", 1], ["energyDrink", 2], ["basketball", 1.5], ["football", 1], ["frisbee", 1.5], ["skateboard", 1.5],
-           ["oldSock", 3], ["sandwich", 3], ["homework", 3]],
+    // Step 79: a rummage picks the kind of thing first, then the item, so new items in one kind don't crowd out the pranks.
+    // (Bananas and whoopee cushions: about 1 in 10 rummages each, up from about 1 in 16.)
+    kinds: {
+      prank:  [0.45, [["spitball", 4], ["whoopee", 3], ["bananaPeel", 3], ["paperAirplane", 3], ["kickMe", 1]]],
+      sports: [0.2,  [["basketball", 1.5], ["football", 1], ["frisbee", 1.5], ["skateboard", 1.5]]],
+      snack:  [0.15, [["gum", 2], ["energyDrink", 1]]],
+      junk:   [0.2,  [["oldSock", 1], ["sandwich", 1], ["homework", 1]]],
+    },
   },
+  // Step 79: during passing periods a kid near you sometimes drops a banana peel (for you to pick up)
+  peelDrops: { everySec: [14, 26], maxLying: 2, range: [3, 10] },
 
   rooms: {
     grabSec: 1.5,                 // grabbing an item off a desk eats this much of your hiding time (subs: see TEACHER_TYPES)
@@ -542,7 +550,7 @@ const DARES = {
   loveNote:    { need: 1, points: 450,
                  setup(m) { const labs = SPOTS.filter((sp) => sp.roomType === "science" && !roomLocked(sp)); if (!labs.length) return false;
                    m.p.from = pick(labs).room; m.p.period = Math.min(periodsToday(), game.period + 1 + Math.floor(Math.random() * 2)); return true; },
-                 text: (m) => `Get the love note from the science lab (room ${m.p.from}) to the gym during period ${m.p.period}` + (m.p.has ? " · 💌 got it" : ""),
+                 text: (m) => m.p.mine ? `Get your love note to the gym during period ${m.p.period}` : `Get the love note from the science lab (room ${m.p.from}) to the gym during period ${m.p.period}` + (m.p.has ? " · 💌 got it" : ""),
                  on: { enterRoom: (m, d) => {
                    if (d.sp.roomType !== "gym" || !game.hotbar.some((it) => it?.key === "loveNote")) return false;
                    if (game.period !== m.p.period) { toast(`💌 Not yet: the note's for period ${m.p.period}.`); return false; }
@@ -623,7 +631,7 @@ const ROOM_TYPES = {
                loot: [["globe", 4], ["spitball", 4], ["paperAirplane", 4], ["gum", 3], ["wheelieChair", 1.2], ["energyDrink", 1], ["hallPass", 0.35], ["masterKey", 0.12]] },
   science:   { label: "Science lab", plaque: 0x2ecc71, loot: [["stinkBomb", 4], ["slime", 4], ["mentos", 3], ["skeleton", 1.5]], count: [1, 2] },
   art:       { label: "Art room", plaque: 0xe67e22, always: ["sprayPaint"], count: [1, 1],
-               loot: [["kickMe", 3], ["paperAirplane", 3], ["gum", 3], ["spitball", 2], ["wheelieChair", 1]] },
+               loot: [["kickMe", 3], ["paperAirplane", 3], ["glitterBomb", 2.5], ["gum", 3], ["spitball", 2], ["wheelieChair", 1]] },   // step 79: glitter bombs
   music:     { label: "Band room", plaque: 0x9b59b6, loot: [["trumpet", 3], ["bassDrum", 3]], count: [1, 2] },
   gym:       { label: "Gym", plaque: 0xe74c3c, loot: [["basketball", 4], ["football", 3], ["frisbee", 3], ["energyDrink", 2]], count: [1, 2] },
   // The office always has a hall pass and the staff key (restocked whenever the door's open again), but the secretary
@@ -669,6 +677,8 @@ const ITEM_TYPES = {
                    noiseRadius: 10, bouncePoints: 6,
                    hit: { student: 35, staff: 140, studentSec: 1.2, staffSec: 2.2, style: "fall", minSpeed: 2 } },
   // Step 68: the three science-lab items are flasks (yellow, green, red). The flask breaks: only the mess is left.
+  glitterBomb:   { label: "Glitter bomb", icon: "✨", kind: "throw", speed: [4, 9], pitchDeg: 30, gravity: 9.8,   // step 79: art rooms (and the fabulous kid)
+                   points: 30, fogRadius: 2.6, fogSec: 9, noiseRadius: 6 },   // a big sparkly cloud nobody can see into or through
   stinkBomb:     { label: "Stink bomb", icon: "🟡", flask: "stink", kind: "throw", speed: [4, 9], pitchDeg: 30, gravity: 9.8,   // science labs only
                    points: 60, cloudRadius: 3.2, cloudSec: 10, noiseRadius: 12,
                    perStudent: 15, perStaff: 60, studentGagSec: 1.4, staffGagSec: 2.2, playerGagSec: 0.7 },   // walk into it: you stop and gag (and pay out)
@@ -1456,6 +1466,13 @@ function bajaStripes(g, x0, y0, w, h, dir, sw = 9) {
 const ktex = (k) => (kidTex[k] ??= (([name, arg]) => KID_TEX[name](arg && Number(arg)))(k.split(":")));   // "ripped:15843453" passes the skin color
 const kmat = (c) => (typeof c === "string" ? new THREE.MeshLambertMaterial({ map: ktex(c), flatShading: true }) : lambert(c));
 // Outfits. top/sleeve/pants are a color or a texture name; sleeves: "long", "short" or "none"; pants: "long", "shorts" or "skirt".
+// Step 79: what each outfit brings to school (one of these, every morning).
+const OUTFIT_PERKS = {
+  jock: ["football"], nerd: ["slime", "stinkBomb", "mentos"], punk: ["sprayPaint"], skater: ["kickMe"], band: ["trumpet", "bassDrum"],
+  goth: ["skeleton"], cheer: ["loveNote"], fabulous: ["glitterBomb"], pajama: ["oldSock"], goblin: ["slime"], burnout: ["stinkBomb"],
+  prep: ["hallPass"],   // theater kid: to be decided
+};
+const perkText = (outfit) => (OUTFIT_PERKS[outfit] ?? []).map((k) => `${ITEM_TYPES[k].icon} ${ITEM_TYPES[k].label.toLowerCase()}`).join(" or ");
 const OUTFITS = {
   punk:      { label: "Punk", top: 0x161616, sleeves: "long", pants: "ripped", legs: "long", shoes: 0x111111, extras: ["vest", "boots", "spikeBand", "lockCollar", "noseRing"], hood: 0x1c1c1c },
   jock:      { label: "Jock", top: "jersey", belly: 0x1f7a3a, sleeve: "jerseySleeve", sleeves: "short", pants: 0x8f939a, legs: "long", shoes: 0xf2f2f2, hood: 0x1f7a3a },
@@ -2309,7 +2326,11 @@ function morningSetup(arrive = true) {   // (arrive = false: the halls are alrea
   player.slipT = player.dazeT = player.stuckT = 0; player.mesh.rotation.z = 0; player.stamina = 1; player.staminaMax = 1; player.boostT = 0; player.winded = false;
   if (player.hoodT > 0) hoodDown(); player.hoodCD = 0;
   hopOff(true);
-  game.hotbar = Array(slotCount()).fill(null); renderHotbar();
+  game.hotbar = Array(slotCount()).fill(null);
+  game.perk = null;
+  const perks = OUTFIT_PERKS[character.look?.outfit];
+  if (perks && !tut) { game.perk = pick(perks); addItem(game.perk); if (game.perk === "loveNote") perkNoteDare(); }   // step 79
+  renderHotbar();
   rollSubs();             // first, so sub rooms get their extra desk loot
   resetSpotsForPeriod();
   for (const sp of SPOTS) if (sp.kind === "locker" && sp.busted) { sp.busted = false; sp.door.material.color.setHex(0x7d9a86); sp.door.rotation.y = sp.doorRot; }   // the custodian fixes the lockers
@@ -2491,6 +2512,7 @@ function startNextDay() {
     banner(`DAY ${game.day}<small>New day, same hoodie. New subs today.</small>`, 2.6);
     setTimeout(() => game.state === "playing" && pa("newDay", null, null, { d: game.day }), 1500);
   }
+  perkToast();
   clock.getDelta();
 }
 
@@ -2638,6 +2660,7 @@ function startRun(save) {
   else banner("PASSING PERIOD<small>Blend in. When the bell rings, don't be in class.</small>");
   setTimeout(() => game.state === "playing" && pa("start"), 1200);
   if (!save) setTimeout(() => game.state === "playing" && toast("Psst: there's a kid in the restroom handing out dares.", 3), 9000);
+  perkToast();
   renderDares();
   tryFullscreenLandscape();
   saveGame();
@@ -2766,6 +2789,7 @@ function renderLooks() {
   const slider = (k, left, right, mid = "") => `<div class="lookSlider"><span>${left}</span><input type="range" min="${k === "build" ? -1 : 0}" max="1" step="0.01" value="${L[k]}" data-k="${k}"><span>${right}</span>${mid ? `<em>${mid}</em>` : ""}</div>`;
   $("lookPane").innerHTML = `
     <h3>Outfit</h3><div class="chips">${Object.entries(OUTFITS).map(([k, O]) => chip("outfit", k, O.label, L.outfit === k)).join("")}</div>
+    <p class="keys perk">${perkText(L.outfit) ? `Brings to school every day: ${perkText(L.outfit)}` : "Brings nothing extra (yet)."}</p>
     <h3>Hair</h3><div class="chips">${Object.entries(HAIR_STYLES).map(([k, n]) => chip("hair", k, n, L.hair === k)).join("")}</div>
     <div class="chips swatches">${HAIR_COLORS.map((c, i) => chip("hairColor", i, "", L.hairColor === i, `background:${hex(c)}`)).join("")}</div>
     <h3>Skin</h3><div class="chips swatches">${SKIN_TONES.map((c, i) => chip("skin", i, "", L.skin === i, `background:${hex(c)}`)).join("")}</div>
@@ -3233,7 +3257,7 @@ function canSeePlayer(st, rangeMult, needCone) {
   if (st.postGrace > 0) return { seen: false, d };    // step 77: a guard who's only just been posted
   if (d > T.visionRange * staffMult("vision") * rangeMult) return { seen: false, d };
   if (needCone && Math.abs(angDiff(st.facing, Math.atan2(dx, dz))) > coneHalf(T)) return { seen: false, d };
-  return { seen: lineOfSight(st.x, st.z, player.x, player.z), d };
+  return { seen: lineOfSight(st.x, st.z, player.x, player.z) && !fogBlocks(st.x, st.z), d };
 }
 // suspicion builds faster up close, slower in a crowd and during passing periods
 function noticeRate(st, d, cover) {
@@ -3620,7 +3644,7 @@ function update(dt) {
   updateCrowd(dt);
   updateStaff(dt, crowdCoverCount());
   if (game.state === "playing") updateDismissal();
-  if (game.state === "playing") { updateKickMe(dt); updateObjects(dt); updateTrails(dt); kidsGrab(dt); updateHeat(dt); updateRisk(dt); updateFriends(dt); updateAirplanes(dt); updateAlarm(dt); }
+  if (game.state === "playing") { updateKickMe(dt); updateObjects(dt); updateTrails(dt); kidsGrab(dt); updateHeat(dt); updateRisk(dt); updateFriends(dt); updateAirplanes(dt); updatePeelDrops(dt); updateAlarm(dt); }
 }
 
 // =====================================================================================
@@ -3701,7 +3725,7 @@ function enterSpot(sp) {
   for (const st of staff) {
     if (!chaser(st)) continue;
     const d = Math.hypot(st.x - f.x, st.z - f.z);
-    if (!lineOfSight(st.x, st.z, f.x, f.z)) continue;
+    if (!lineOfSight(st.x, st.z, f.x, f.z) || fogBlocks(st.x, st.z)) continue;
     if ((st.state === "chase" || st.state === "search") && d < st.type.visionRange * CFG.detection.chaseSightRangeMult) {
       st.state = "bust"; st.bustSpot = sp; st.camping = false;
     } else if ((st.state === "patrol" || st.state === "return" || st.state === "tidy") && st.suspicion > 0.5 && d < st.type.visionRange) {
@@ -3949,7 +3973,7 @@ function burstOut() {
 function rummageLocker() {
   const sp = player.hidden;
   if (!sp || sp.kind !== "locker" || sp.rummaged || game.state !== "playing") return;
-  const key = pickWeighted(CFG.lockers.loot);
+  const key = pickWeighted(pickWeighted(Object.values(CFG.lockers.kinds).map(([share, items]) => [items, share])));   // the kind, then the item
   if (!takeItem(key)) return;   // inventory full: nothing happens
   sp.rummaged = true;
   player.hideT += CFG.lockers.rummageSec;
@@ -4194,6 +4218,10 @@ function makeItemMesh(key) {
     case "frisbee": m(new THREE.CylinderGeometry(0.2, 0.17, 0.04, 14), 0xff5a36); break;
     case "kickMe": m(new THREE.BoxGeometry(0.3, 0.02, 0.2), 0xffffff); break;
     case "mentos": case "slime": case "stinkBomb": flaskMesh(g, key); break;   // step 68
+    case "glitterBomb": {   // a little pink jar of glitter with a gold lid
+      m(new THREE.CylinderGeometry(0.08, 0.08, 0.2, 10), 0xff7ad1);
+      const n = m(new THREE.CylinderGeometry(0.085, 0.085, 0.05, 10), 0xffcf3f); n.position.y = 0.12; break;
+    }
     case "bananaPeel": {
       m(new THREE.BoxGeometry(0.16, 0.05, 0.16), 0xf2d43b);
       for (const a of [0, 2.1, 4.2]) { const p = m(new THREE.BoxGeometry(0.07, 0.03, 0.26), 0xe8c22a); p.rotation.y = a; p.position.set(Math.sin(a) * 0.12, 0, Math.cos(a) * 0.12); }
@@ -4319,7 +4347,7 @@ function spawnObject(key, state, x, y, z, extra = {}) {
   objects.push(o);
   return o;
 }
-function removeObject(o) { if (o.foam) { scene.remove(o.foam); o.foam.material.dispose(); o.foam = null; } if (o.trail) { o.trail.o = null; o.trail = null; } scene.remove(o.mesh); scene.remove(o.ring); if (o.cloud) { scene.remove(o.cloud); o.cloud.material.dispose(); } o.dead = true; }
+function removeObject(o) { if (o.foam) { scene.remove(o.foam); o.foam.material.dispose(); o.foam = null; } if (o.trail) { o.trail.o = null; o.trail = null; } scene.remove(o.mesh); scene.remove(o.ring); if (o.cloud) { scene.remove(o.cloud); o.cloud.material.dispose(); if (o.sparkle) o.sparkle.material.dispose(); } o.dead = true; }
 function clearObjects() { for (const o of objects) removeObject(o); objects.length = 0; }
 
 // Step 68: drawn flask icons for the science items (in buttons and item slots; text uses the emoji). Each has its own
@@ -4342,6 +4370,8 @@ function pickWeighted(pairs) {
   for (const [k, w] of pairs) if ((r -= w) <= 0) return k;
   return pairs[0][0];
 }
+// the locker table as one flat list (each item's overall chance), for things that want "any locker item"
+CFG.lockers.loot = Object.values(CFG.lockers.kinds).flatMap(([share, items]) => { const sum = items.reduce((a, [, w]) => a + w, 0); return items.map(([k, w]) => [k, (share * w) / sum]); });
 // What can turn up "found" (fire alarm spill, gum trades): the locker table without the junk.
 const goodLoot = () => CFG.lockers.loot.filter(([k]) => ITEM_TYPES[k].kind !== "junk" && !ITEM_TYPES[k].junk);
 // Things lying around stay until staff tidy them up. If the halls fill up anyway, the oldest get swept away.
@@ -4595,6 +4625,7 @@ function updateObjects(dt) {
     else if (o.state === "trap") (o.key === "slime" ? slimeCheck : trapCheck)(o);
     else if (o.state === "resting" && o.key === "whoopee") stepOnCushion(o);
     else if (o.state === "cloud") stinkCloud(o, dt);
+    else if (o.state === "fog") fogStep(o, dt);
     else if (o.state === "fuse") { o.fuseT -= dt; o.mesh.rotation.z = Math.sin(o.age * 40) * 0.08; if (o.mesh.userData.flask) bubbleFlask(o.mesh.userData.flask, o.age * 4); if (o.fuseT <= 0) { o.mesh.rotation.z = 0; startGeyser(o); } }
     else if (o.state === "geyser") geyserStep(o, dt);
     if (o.dead) continue;
@@ -4893,6 +4924,7 @@ function landObject(o) {
     case "whoopee": o.state = "resting"; o.armedAt = o.age + 0.4; break;   // waits for someone to step on it
     case "basketball": case "football": o.state = "rolling"; break;
     case "stinkBomb": popStinkBomb(o); break;
+    case "glitterBomb": popFog(o); break;
     default: o.state = "resting";
   }
   capLying();
@@ -5363,6 +5395,47 @@ function popStinkBomb(o) {
   playBlip([140, 90, 60], 0.14, "sawtooth", 0.09);
   havoc("stinkBomb", T.points, "Stink bomb!", { x: o.x, z: o.z, loud: true });
   makeNoise(o.x, o.z, T.noiseRadius, true, o);
+}
+// step 79: the glitter bomb. A big sparkly cloud; nobody sees into it or through it while it's thick.
+const GLITTER_COLORS = [0xff7ad1, 0xffcf3f, 0x7ad7ff, 0xb98bff, 0xffffff, 0x8ef0a0];
+const glitterGeo = (() => {
+  const n = 160, pos = new Float32Array(n * 3), col = new Float32Array(n * 3), c = new THREE.Color();
+  for (let i = 0; i < n; i++) {
+    const r = Math.cbrt(Math.random()) * 0.95, a = Math.random() * Math.PI * 2, u = Math.random() * 2 - 1, q = Math.sqrt(1 - u * u);
+    pos.set([Math.cos(a) * q * r, u * r, Math.sin(a) * q * r], i * 3);
+    c.setHex(GLITTER_COLORS[i % GLITTER_COLORS.length]); col.set([c.r, c.g, c.b], i * 3);
+  }
+  const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.BufferAttribute(pos, 3)); g.setAttribute("color", new THREE.BufferAttribute(col, 3));
+  return g;
+})();
+function popFog(o) {
+  const T = o.T;
+  o.state = "fog"; o.life = T.fogSec; o.mesh.visible = false;
+  o.cloud = new THREE.Mesh(cloudGeo, new THREE.MeshBasicMaterial({ color: 0xffe3f6, transparent: true, opacity: 0.72, depthWrite: false }));
+  o.cloud.position.set(o.x, 1.0, o.z); o.cloud.scale.set(0.5, 0.6, 0.5); scene.add(o.cloud);
+  o.sparkle = new THREE.Points(glitterGeo, new THREE.PointsMaterial({ size: 0.09, vertexColors: true, transparent: true, depthWrite: false }));
+  o.sparkle.scale.setScalar(1.05); o.cloud.add(o.sparkle);
+  playBlip([1568, 1976, 2349, 2637], 0.08, "sine", 0.05);   // ✨ tinkle
+  havoc("glitterBomb", T.points, "Glitter bomb!", { x: o.x, z: o.z });
+  makeNoise(o.x, o.z, T.noiseRadius, false, o);
+}
+function fogStep(o, dt) {
+  const T = o.T, grow = Math.min(1, o.age / 0.8), fade = Math.min(1, o.life / 1.5);
+  const r = T.fogRadius * grow; o.fogR = fade > 0.5 ? r : 0;   // thin at the very end: it stops blocking
+  o.cloud.scale.set(r, 1.3 + Math.sin(o.age * 1.5) * 0.08, r); o.cloud.rotation.y += dt * 0.3;
+  o.cloud.material.opacity = 0.72 * fade;
+  if (o.sparkle) { o.sparkle.rotation.y -= dt * 0.9; o.sparkle.material.opacity = fade; o.sparkle.material.size = 0.07 + 0.04 * Math.abs(Math.sin(o.age * 6)); }   // twinkle
+}
+// does fog hide the player from someone at (ax, az)? (you're inside it, they are, or it's in between)
+function fogBlocks(ax, az) {
+  for (const o of objects) {
+    if (o.dead || o.state !== "fog" || !o.fogR) continue;
+    const R = o.fogR, bx = player.x, bz = player.z;
+    if (Math.hypot(bx - o.x, bz - o.z) < R || Math.hypot(ax - o.x, az - o.z) < R) return true;
+    const dx = bx - ax, dz = bz - az, L2 = dx * dx + dz * dz || 1, t = clamp(((o.x - ax) * dx + (o.z - az) * dz) / L2, 0, 1);
+    if (Math.hypot(ax + dx * t - o.x, az + dz * t - o.z) < R) return true;
+  }
+  return false;
 }
 function stinkCloud(o, dt) {
   const T = o.T, k = o.life / T.cloudSec;
@@ -6123,6 +6196,13 @@ function popup(text, cls = "") {
 // =====================================================================================
 // Step 8: the principal, friends and passing-period mini-games, risk scoring
 // =====================================================================================
+// the cheerleader's love note comes with its own dare: get it to the gym during a later period
+function perkNoteDare() {
+  if (game.dares.some((m) => m.id === "loveNote") || game.dares.length >= CFG.dares.max) return;
+  game.dares.push({ id: "loveNote", n: 0, need: 1, got: [], p: { mine: true, has: true, period: Math.min(periodsToday(), game.period + 1 + Math.floor(Math.random() * 3)) } });
+  renderDares();
+}
+function perkToast() { if (game.perk) setTimeout(() => game.state === "playing" && toast(`Your ${OUTFITS[character.look.outfit].label.toLowerCase()} look came with: ${ITEM_TYPES[game.perk].icon} ${ITEM_TYPES[game.perk].label.toLowerCase()}`, 2.8), 2600); }
 // Step 77: guards posted for the rest of the run: outside a restroom you flooded, outside the office you raided.
 function postGuard(sp, line) {
   const i = SPOTS.indexOf(sp);
@@ -6263,6 +6343,20 @@ function updateAirplanes(dt) {
     if (!o.wild || o.state !== "flying" || player.hidden) continue;
     if (o.y < 2.3 && Math.hypot(o.x - player.x, o.z - player.z) < CFG.airplanes.catchRadius) catchPlane(o);
   }
+}
+// step 79: a kid near you drops a banana peel now and then during passing periods
+const PEEL_LINES = ["Done with this.", "*drops peel*", "Potassium, baby.", "Someone'll clean it up."];
+function updatePeelDrops(dt) {
+  if (game.phase !== "passing" || game.dismissal || tut) return;
+  const P = CFG.peelDrops;
+  game.peelT = (game.peelT ?? rand(...P.everySec)) - dt;
+  if (game.peelT > 0) return;
+  game.peelT = rand(...P.everySec);
+  if (objects.filter((o) => !o.dead && o.key === "bananaPeel" && o.state === "pickup").length >= P.maxLying) return;
+  const c = pick(crowd.filter((k) => isActive(k) && !k.friend && k.slipT <= 0 && floorOf(k.x) === floorOf(player.x) && (() => { const d = Math.hypot(k.x - player.x, k.z - player.z); return d > P.range[0] && d < P.range[1]; })()));
+  if (!c) return;
+  spawnObject("bananaPeel", "pickup", c.x, REST_Y.bananaPeel ?? 0.04, c.z);
+  kidSay(c, PEEL_LINES, 2.6);
 }
 function catchPlane(o) {
   if (!addItem("paperAirplane")) return;
@@ -6923,6 +7017,10 @@ if (debug) {   // test-only helpers (only with ?debug in the URL)
     posts() { return { posts: game.posts.map((i) => SPOTS[i].kind + (SPOTS[i].room ? " " + SPOTS[i].room : "")), guards: staff.filter((s) => s.key === "postedGuard").map((s) => [s.post?.kind, s.state, Math.round(s.x * 10) / 10, Math.round(s.z * 10) / 10]) }; },
     spots(kind) { return SPOTS.map((sp, i) => ({ i, kind: sp.kind, room: sp.room, type: sp.roomType, floor: HALLS[sp.h].floor })).filter((x) => x.kind === kind); },
     nextMorning() { morningSetup(); },
+    perk() { return { perk: game.perk ?? null, hotbar: game.hotbar.map((it) => it?.key ?? null), dares: game.dares.map((m) => DARES[m.id].text(m)) }; },
+    lockerOdds(n) { const c = {}; for (let i = 0; i < n; i++) { const k = pickWeighted(pickWeighted(Object.values(CFG.lockers.kinds).map(([sh, it]) => [it, sh]))); c[k] = (c[k] ?? 0) + 1; } return c; },
+    forcePeel() { game.peelT = 0; },
+    sees(k) { return canSeePlayer(staff[k], 1, true).seen; },
     staffKeys() { const m = {}; for (const s of staff) m[s.key] = (m[s.key] ?? 0) + 1; return m; },
     crowdModes() { const m = {}; for (const c of crowd) m[c.mode] = (m[c.mode] ?? 0) + 1; return m; },
     phaseLens() { return { passing: phaseLen("passing"), skipping: phaseLen("skipping") }; },
