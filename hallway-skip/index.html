@@ -282,6 +282,7 @@
   .tut #uses, .tut #mult, .tut #friends, .tut #kbdHelp, .tut:not(.tutDays) #strikes, .tut:not(.tutHeat) #meters, .tut:not(.tutDares) #dares, .tut:not(.tutDays) #phase { display: none !important; }
   #tutCard.low { top: auto; bottom: max(12px, env(safe-area-inset-bottom)); width: min(470px, 72vw); }
   #tutCard .soon { font-size: .85em; color: #8ef0a0; }
+  .tutStay #hpLeave, .tutStay #hidePanel .hint { display: none; }   /* step 78: no leaving the locker mid-scene */
   .overlay { z-index: 6; position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
     background: rgba(12, 14, 22, .72); padding: 16px; text-align: center; cursor: pointer; }
   .overlay[hidden] { display: none; }
@@ -436,7 +437,7 @@
 
 <div class="overlay" id="title">
   <div>
-    <span class="tag">prototype · build step 77</span>
+    <span class="tag">prototype · build step 78</span>
     <h1>Hall Goblin</h1>
     <p>Skip class. Don't get caught.</p>
     <div class="buttons">

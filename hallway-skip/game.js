@@ -3727,6 +3727,7 @@ function enterSpot(sp) {
 function exitSpot(booted, msg = "", title = "BOOTED!") {
   const sp = player.hidden;
   if (!sp) return;
+  if (tut?.stayHidden && !booted) { toast("Wait for the hall monitor to walk past.", 1.6); return; }   // step 78
   player.hidden = null; player.mesh.visible = true; player.pushT = 0;
   if (sp.kind === "classroom") { sp.stayT = (sp.stayT || 0) + player.hideT; if (booted) sp.used = true; }   // sneaking back in keeps the teacher's clock running
   const f = hallPos(sp.h, sp.t, sp.frontLat - sp.side * 0.1);
@@ -3927,6 +3928,7 @@ function grabRoll() {
 function burstOut() {
   const sp = player.hidden, B = CFG.lockers.burst;
   if (!sp || sp.kind !== "locker" || game.state !== "playing" || player.hideT >= hideLimit(sp)) return;
+  if (tut?.stayHidden) { toast("Wait for the hall monitor to walk past.", 1.6); return; }   // step 78
   sp.busted = true;
   sp.door.material.color.setHex(0x4f5d55); sp.door.rotation.y = sp.doorRot + 0.35;   // hanging open, dented
   exitSpot(false);
@@ -6423,15 +6425,14 @@ const TUT_STEPS = [
   },
   { id: "lost", // the lesson
     enter() {
-      tutCardShow(`<p class="big">😅 You lost them!</p><p>Avoid <b>hall monitors</b>, <b>security guards</b> and other <b>staff</b>, or you'll get caught skipping.</p>`,
+      tutCardShow(`<p class="big">😅 You lost them!</p><p>Avoid staff, or you'll get caught skipping.</p>`,
         { center: true, next: "Next", dim: 0.7, freeze: true });
     },
   },
   { id: "heat", // step 75: heat stars
     enter() {
       game.heat = CFG.heat.stars[0] + 4; game.stars = 1; document.body.classList.add("tutHeat");
-      tutCardShow(`<p class="big">⭐ You got some heat.</p><p>Staff saw you run, so you earned a star. Heat only goes up when staff <b>see</b> you make trouble.
-        More stars bring out more staff, and they see farther. Five stars and the whole school is hunting you. Hide or lie low and it cools off.</p>`,
+      tutCardShow(`<p class="big">⭐ Heat</p><p>Staff saw you, so you got a star. More stars, more staff. Hide to cool off.</p>`,
         { low: true, next: "Next", dim: 0.7, freeze: true, holes: [elHole("#stars", 8)] });
     },
   },
@@ -6465,7 +6466,7 @@ const TUT_STEPS = [
   },
   { id: "thrown", // the lesson
     enter() {
-      tutCardShow(`<p class="big">🎯 Nice throw.</p><p>Lots of things can be thrown. You'll find them all over the school, but don't get caught!</p>`,
+      tutCardShow(`<p class="big">🎯 Nice throw.</p><p>Lots of stuff can be thrown. Find it all over school.</p>`,
         { center: true, next: "Next", dim: 0.7, freeze: true });
     },
   },
@@ -6473,7 +6474,7 @@ const TUT_STEPS = [
     enter() {
       if (!game.dares.some((m) => m.id === "airplaneStaff")) game.dares.push({ id: "airplaneStaff", n: 0, need: 1, p: {}, got: [] });
       renderDares(); document.body.classList.add("tutDares");
-      tutCardShow(`<p class="big">📜 Dares</p><p>The kid in the restroom and friends in the crowd will dare you to do stuff, like this one. Pull it off for big points. You can hold three at a time.</p>`,
+      tutCardShow(`<p class="big">📜 Dares</p><p>Kids will dare you to do stuff. Pull it off for big points.</p>`,
         { low: true, next: "Next", dim: 0.7, freeze: true, holes: [elHole("#dares", 8)] });
     },
   },
@@ -6494,52 +6495,57 @@ const TUT_STEPS = [
   },
   { id: "hide", // hide!
     enter() {
-      tutCardShow(`<p class="big">🔔 Tardy!</p><p>The crowd's gone and a hall monitor is coming. Hide in the glowing locker: ${say("walk into it or tap it.", `walk into it or press ${key("E")}.`)}</p>`,
+      tutCardShow(`<p class="big">🔔 Tardy!</p><p>The halls are empty. Hide in the glowing locker: ${say("walk into it or tap it.", `walk into it or press ${key("E")}.`)}</p>`,
         { next: "Got it", dim: 0.6, freeze: true, block: false, holes: [HOLE.locker] });
     },
     tick() { return player.hidden || (tut.t > 0.3 && (keys.size > 0 || stick.id !== null)); },
   },
   { id: "locker", // get in there
-    enter() { tut.lockMove = false; tutCardShow(player.hidden ? "" : `<p>Into the locker!</p>`, { rings: [HOLE.locker] }); },
+    enter() {
+      tut.lockMove = false; tut.stayHidden = false; document.body.classList.remove("tutStay");
+      game.lockerUses = Math.max(game.lockerUses, 2);   // (whatever happened, you can always get back in)
+      for (const sp of SPOTS) if (sp.kind === "locker" && sp.busted) { sp.busted = false; sp.door.material.color.setHex(0x7d9a86); sp.door.rotation.y = sp.doorRot; }
+      tutCardShow(player.hidden ? "" : `<p>Into the locker!</p>`, { rings: [HOLE.locker] });
+    },
     tick() {
       if (tut.t > 12 && !tut.nudged) { tut.nudged = true; toast("Walk right into the glowing locker.", 2.4); }
       return !!player.hidden;
     },
   },
   { id: "walkPast", // it walks right past
-    enter() { tutHide(); tut.minD = Infinity; },
+    enter() { tutHide(); tut.minD = Infinity; tut.stayHidden = true; document.body.classList.add("tutStay"); },   // step 78: no leaving until it's gone by
     tick() {
       if (!player.hidden) { tutGo("locker"); return false; }
       const f = spotFront(player.hidden, {}), d = Math.hypot(tut.mon.x - f.x, tut.mon.z - f.z);
       tut.minD = Math.min(tut.minD, d);
-      return (tut.minD < 4 && d > tut.minD + 3) || tut.t > 9;
+      const done = (tut.minD < 4 && d > tut.minD + 3) || tut.t > 9;
+      if (done) { tut.stayHidden = false; document.body.classList.remove("tutStay"); }
+      return done;
     },
   },
   { id: "hidden", // the lesson
     enter() {
-      tutCardShow(`<p class="big">🤫 It walked right past.</p><p>Staff can't see you while you hide, but you can't stay forever. Stay out of class until the next bell to score.</p>`,
+      tutCardShow(`<p class="big">🤫 It walked right past.</p><p>Staff can't see you while you hide. But you can't stay forever.</p>`,
         { center: true, next: "Next", dim: 0.7, freeze: true });
     },
   },
   { id: "days", // step 75: periods, days and strikes
     enter() {
       document.body.classList.add("tutDays");
-      tutCardShow(`<p class="big">🏁 Survive the day</p><p>Make it through all six periods to finish a school day. Each day is harder than the last.
-        Get caught three times and your run's over. How many days can you last?</p><p class="soon">Coming soon: survive more days to unlock new outfits.</p>`,
+      tutCardShow(`<p class="big">🏁 Survive the day</p><p>Six periods a day. Three strikes and you're out.</p><p class="soon">Coming soon: unlock outfits.</p>`,
         { low: true, next: "Next", dim: 0.7, freeze: true, holes: [elHole("#phase", 6), elHole("#strikes", 6)] });
     },
   },
   { id: "alarm", // step 75: the fire alarm, a last resort
     enter() {
-      tutCardShow(`<p class="big">🔥 Last resort: the fire alarm</p><p>There are a few red fire alarms on the walls. Pull one and everyone's stunned, the halls flood with kids, and loot spills everywhere.
-        But you go straight to five stars on a <b>rebel run</b>: double points, and the next catch ends your run. Sudden death. Are you that crazy?</p>`,
+      tutCardShow(`<p class="big">🔥 Fire alarm</p><p>Last resort. ★★★★★, double points, one catch ends it all.</p>`,
         { center: true, next: "Next", dim: 0.8, freeze: true });
     },
   },
   { id: "end", // the end
     enter() {
       $("tutSkip").hidden = true;
-      tutCardShow(`<h2>That's the basics.</h2><p>Classrooms to raid, friends to trade with, a skeleton in the science lab... the rest is yours to find.</p>`,
+      tutCardShow(`<h2>That's the basics.</h2><p>Go find the rest.</p>`,
         { center: true, dim: 0.85, freeze: true,
           extra: `<button class="go" id="tutPlay" type="button">Play</button><button class="go ghost" id="tutRules" type="button">📖 Rules &amp; controls</button>` +
             (tut.thenPlay ? "" : `<button class="go ghost" id="tutTitle" type="button">Back to title</button>`) });
@@ -6631,7 +6637,7 @@ function startTutorial(thenPlay) {
 function endTutorial(play) {
   markTutSeen();
   tut = null;
-  document.body.classList.remove("tut", "tutHeat", "tutDares", "tutDays");
+  document.body.classList.remove("tut", "tutHeat", "tutDares", "tutDays", "tutStay");
   tutEl.hidden = true; tutCard.hidden = true;
   releaseControls(); cancelAim();
   if (play) { startRun(null); clock.getDelta(); return; }
@@ -6865,7 +6871,7 @@ if (debug) {   // test-only helpers (only with ?debug in the URL)
     forcePlane() { game.nextPlaneT = 0; },
     tut() { return tut && { i: tut.i, id: TUT_STEPS[tut.i].id, t: tut.t, frozen: tut.frozen, lockMove: tut.lockMove, blind: tut.blind, waitNext: tut.waitNext, looked: tut.looked, moved: tut.moved,
       mon: tut.mon && { state: tut.mon.state, d: Math.hypot(tut.mon.x - player.x, tut.mon.z - player.z) }, card: tutCard.hidden ? "" : tutCard.textContent.trim(), dim: +tutDim.style.opacity,
-      lk: tut.locker && { d: spotDist(tut.locker), why: spotBlocked(tut.locker), it: interactTarget()?.kind, hidden: !!player.hidden }, caughtN: tut.caughtN ?? 0 }; },
+      lk: tut.locker && { i: SPOTS.indexOf(tut.locker), d: spotDist(tut.locker), why: spotBlocked(tut.locker), it: interactTarget()?.kind, hidden: !!player.hidden }, caughtN: tut.caughtN ?? 0 }; },
     tutGo(i) { tutGo(i); }, tutNext() { tutAdvance(); }, tutLook(r) { if (tut) tut.looked += r; },
     barks() { return staff.map((s) => (performance.now() < s.barkUntil ? s.bubble.textContent : null)); },
     ads() { return { interstitialsToday: Ads.interstitialsToday, rewardedToday: { ...Ads.rewardedToday } }; },
